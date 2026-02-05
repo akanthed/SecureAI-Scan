@@ -1,0 +1,581 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SecureAI-Scan Report</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f7f5f2;
+        --card: #ffffff;
+        --text: #1f2937;
+        --muted: #6b7280;
+        --border: #e5e7eb;
+        --critical: #b91c1c;
+        --high: #d97706;
+        --medium: #ca8a04;
+        --low: #16a34a;
+        --accent: #0f172a;
+      }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Sora", "Inter", system-ui, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+      header {
+        padding: 32px 24px 12px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+        letter-spacing: -0.02em;
+      }
+      .summary {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        padding: 0 24px 24px;
+      }
+      .summary-card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+        box-shadow: 0 10px 20px rgba(15, 23, 42, 0.06);
+      }
+      .summary-card h2 {
+        margin: 0 0 4px;
+        font-size: 14px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+      .summary-card .value {
+        font-size: 22px;
+        font-weight: 600;
+      }
+      .table-wrap {
+        padding: 0 24px 24px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      th, td {
+        text-align: left;
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--border);
+        font-size: 13px;
+      }
+      th {
+        background: #f1f5f9;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 11px;
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      .severity {
+        font-weight: 600;
+      }
+      .critical { color: var(--critical); }
+      .high { color: var(--high); }
+      .medium { color: var(--medium); }
+      .low { color: var(--low); }
+      .finding {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
+        margin: 0 24px 16px;
+        box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
+      }
+      .finding h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+      .finding .meta {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        color: var(--muted);
+        font-size: 12px;
+        margin-bottom: 8px;
+      }
+      .finding .summary {
+        font-weight: 600;
+        margin: 8px 0;
+      }
+      .finding .description,
+      .finding .recommendation {
+        margin: 6px 0;
+        color: var(--text);
+      }
+      footer {
+        padding: 16px 24px 32px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>SecureAI-Scan Report</h1>
+      <p>Quick view of AI security findings in this repo.</p>
+    </header>
+
+    <section class="summary">
+      <div class="summary-card">
+        <h2>Total Findings</h2>
+        <div class="value">19</div>
+      </div>
+      <div class="summary-card">
+        <h2>Critical</h2>
+        <div class="value critical">5</div>
+      </div>
+      <div class="summary-card">
+        <h2>High</h2>
+        <div class="value high">4</div>
+      </div>
+      <div class="summary-card">
+        <h2>Medium</h2>
+        <div class="value medium">0</div>
+      </div>
+      <div class="summary-card">
+        <h2>Low</h2>
+        <div class="value low">10</div>
+      </div>
+    </section>
+
+    <section class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Severity</th>
+            <th>Confidence</th>
+            <th>File</th>
+            <th>Line</th>
+            <th>Summary</th>
+          </tr>
+        </thead>
+        <tbody>
+          
+        <tr>
+          <td class="id">LLM_OPENAI_CHAT_COMPLETIONS_CREATE</td>
+          <td class="severity low">🟢 LOW</td>
+          <td class="confidence">0.20</td>
+          <td class="file">examples\vulnerable.ts</td>
+          <td class="line">10</td>
+          <td class="summary">LLM SDK usage detected.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">LLM_OPENAI_CHAT_COMPLETIONS_CREATE</td>
+          <td class="severity low">🟢 LOW</td>
+          <td class="confidence">0.20</td>
+          <td class="file">examples\vulnerable.ts</td>
+          <td class="line">15</td>
+          <td class="summary">LLM SDK usage detected.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">LLM_OPENAI_CHAT_COMPLETIONS_CREATE</td>
+          <td class="severity low">🟢 LOW</td>
+          <td class="confidence">0.20</td>
+          <td class="file">test-fixtures\safe\hardcoded_key.ts</td>
+          <td class="line">7</td>
+          <td class="summary">LLM SDK usage detected.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">LLM_OPENAI_CHAT_COMPLETIONS_CREATE</td>
+          <td class="severity low">🟢 LOW</td>
+          <td class="confidence">0.20</td>
+          <td class="file">test-fixtures\safe\llm_before_auth.ts</td>
+          <td class="line">15</td>
+          <td class="summary">LLM SDK usage detected.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">LLM_OPENAI_CHAT_COMPLETIONS_CREATE</td>
+          <td class="severity low">🟢 LOW</td>
+          <td class="confidence">0.20</td>
+          <td class="file">test-fixtures\safe\pii_to_llm.ts</td>
+          <td class="line">19</td>
+          <td class="summary">LLM SDK usage detected.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">LLM_OPENAI_CHAT_COMPLETIONS_CREATE</td>
+          <td class="severity low">🟢 LOW</td>
+          <td class="confidence">0.20</td>
+          <td class="file">test-fixtures\safe\prompt_injection.ts</td>
+          <td class="line">14</td>
+          <td class="summary">LLM SDK usage detected.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">LLM_OPENAI_CHAT_COMPLETIONS_CREATE</td>
+          <td class="severity low">🟢 LOW</td>
+          <td class="confidence">0.20</td>
+          <td class="file">test-fixtures\vulnerable\hardcoded_key.ts</td>
+          <td class="line">7</td>
+          <td class="summary">LLM SDK usage detected.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">LLM_OPENAI_CHAT_COMPLETIONS_CREATE</td>
+          <td class="severity low">🟢 LOW</td>
+          <td class="confidence">0.20</td>
+          <td class="file">test-fixtures\vulnerable\llm_before_auth.ts</td>
+          <td class="line">8</td>
+          <td class="summary">LLM SDK usage detected.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">LLM_OPENAI_CHAT_COMPLETIONS_CREATE</td>
+          <td class="severity low">🟢 LOW</td>
+          <td class="confidence">0.20</td>
+          <td class="file">test-fixtures\vulnerable\pii_to_llm.ts</td>
+          <td class="line">10</td>
+          <td class="summary">LLM SDK usage detected.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">LLM_OPENAI_CHAT_COMPLETIONS_CREATE</td>
+          <td class="severity low">🟢 LOW</td>
+          <td class="confidence">0.20</td>
+          <td class="file">test-fixtures\vulnerable\prompt_injection.ts</td>
+          <td class="line">10</td>
+          <td class="summary">LLM SDK usage detected.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">AI002</td>
+          <td class="severity high">🟠 HIGH</td>
+          <td class="confidence">0.30</td>
+          <td class="file">examples\vulnerable.ts</td>
+          <td class="line">5</td>
+          <td class="summary">Prompt or response data is logged.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">AI003</td>
+          <td class="severity critical">🔴 CRITICAL</td>
+          <td class="confidence">0.40</td>
+          <td class="file">examples\vulnerable.ts</td>
+          <td class="line">10</td>
+          <td class="summary">LLM call occurs before auth checks.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">AI003</td>
+          <td class="severity critical">🔴 CRITICAL</td>
+          <td class="confidence">0.40</td>
+          <td class="file">examples\vulnerable.ts</td>
+          <td class="line">15</td>
+          <td class="summary">LLM call occurs before auth checks.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">AI003</td>
+          <td class="severity critical">🔴 CRITICAL</td>
+          <td class="confidence">0.40</td>
+          <td class="file">test-fixtures\vulnerable\llm_before_auth.ts</td>
+          <td class="line">8</td>
+          <td class="summary">LLM call occurs before auth checks.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">AI003</td>
+          <td class="severity critical">🔴 CRITICAL</td>
+          <td class="confidence">0.40</td>
+          <td class="file">test-fixtures\vulnerable\pii_to_llm.ts</td>
+          <td class="line">10</td>
+          <td class="summary">LLM call occurs before auth checks.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">AI003</td>
+          <td class="severity critical">🔴 CRITICAL</td>
+          <td class="confidence">0.40</td>
+          <td class="file">test-fixtures\vulnerable\prompt_injection.ts</td>
+          <td class="line">10</td>
+          <td class="summary">LLM call occurs before auth checks.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">AI004</td>
+          <td class="severity high">🟠 HIGH</td>
+          <td class="confidence">0.70</td>
+          <td class="file">examples\vulnerable.ts</td>
+          <td class="line">17</td>
+          <td class="summary">Large user context sent directly to LLM.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">AI004</td>
+          <td class="severity high">🟠 HIGH</td>
+          <td class="confidence">0.50</td>
+          <td class="file">test-fixtures\safe\pii_to_llm.ts</td>
+          <td class="line">21</td>
+          <td class="summary">Large user context sent directly to LLM.</td>
+        </tr>
+      
+        <tr>
+          <td class="id">AI004</td>
+          <td class="severity high">🟠 HIGH</td>
+          <td class="confidence">0.70</td>
+          <td class="file">test-fixtures\vulnerable\pii_to_llm.ts</td>
+          <td class="line">13</td>
+          <td class="summary">Large user context sent directly to LLM.</td>
+        </tr>
+      
+        </tbody>
+      </table>
+    </section>
+
+    
+        <section class="finding">
+          <h3>LLM_OPENAI_CHAT_COMPLETIONS_CREATE: OpenAI chat.completions.create usage</h3>
+          <div class="meta">
+            <span class="severity low">🟢 LOW</span>
+            <span class="file">examples\vulnerable.ts:10</span>
+            <span class="confidence">Confidence 0.20</span>
+          </div>
+          <p class="summary">LLM SDK usage detected.</p>
+          <p class="description">LLM SDK usage detected.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Review the call to ensure prompts, inputs, and outputs are securely handled.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>LLM_OPENAI_CHAT_COMPLETIONS_CREATE: OpenAI chat.completions.create usage</h3>
+          <div class="meta">
+            <span class="severity low">🟢 LOW</span>
+            <span class="file">examples\vulnerable.ts:15</span>
+            <span class="confidence">Confidence 0.20</span>
+          </div>
+          <p class="summary">LLM SDK usage detected.</p>
+          <p class="description">LLM SDK usage detected.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Review the call to ensure prompts, inputs, and outputs are securely handled.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>LLM_OPENAI_CHAT_COMPLETIONS_CREATE: OpenAI chat.completions.create usage</h3>
+          <div class="meta">
+            <span class="severity low">🟢 LOW</span>
+            <span class="file">test-fixtures\safe\hardcoded_key.ts:7</span>
+            <span class="confidence">Confidence 0.20</span>
+          </div>
+          <p class="summary">LLM SDK usage detected.</p>
+          <p class="description">LLM SDK usage detected.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Review the call to ensure prompts, inputs, and outputs are securely handled.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>LLM_OPENAI_CHAT_COMPLETIONS_CREATE: OpenAI chat.completions.create usage</h3>
+          <div class="meta">
+            <span class="severity low">🟢 LOW</span>
+            <span class="file">test-fixtures\safe\llm_before_auth.ts:15</span>
+            <span class="confidence">Confidence 0.20</span>
+          </div>
+          <p class="summary">LLM SDK usage detected.</p>
+          <p class="description">LLM SDK usage detected.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Review the call to ensure prompts, inputs, and outputs are securely handled.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>LLM_OPENAI_CHAT_COMPLETIONS_CREATE: OpenAI chat.completions.create usage</h3>
+          <div class="meta">
+            <span class="severity low">🟢 LOW</span>
+            <span class="file">test-fixtures\safe\pii_to_llm.ts:19</span>
+            <span class="confidence">Confidence 0.20</span>
+          </div>
+          <p class="summary">LLM SDK usage detected.</p>
+          <p class="description">LLM SDK usage detected.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Review the call to ensure prompts, inputs, and outputs are securely handled.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>LLM_OPENAI_CHAT_COMPLETIONS_CREATE: OpenAI chat.completions.create usage</h3>
+          <div class="meta">
+            <span class="severity low">🟢 LOW</span>
+            <span class="file">test-fixtures\safe\prompt_injection.ts:14</span>
+            <span class="confidence">Confidence 0.20</span>
+          </div>
+          <p class="summary">LLM SDK usage detected.</p>
+          <p class="description">LLM SDK usage detected.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Review the call to ensure prompts, inputs, and outputs are securely handled.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>LLM_OPENAI_CHAT_COMPLETIONS_CREATE: OpenAI chat.completions.create usage</h3>
+          <div class="meta">
+            <span class="severity low">🟢 LOW</span>
+            <span class="file">test-fixtures\vulnerable\hardcoded_key.ts:7</span>
+            <span class="confidence">Confidence 0.20</span>
+          </div>
+          <p class="summary">LLM SDK usage detected.</p>
+          <p class="description">LLM SDK usage detected.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Review the call to ensure prompts, inputs, and outputs are securely handled.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>LLM_OPENAI_CHAT_COMPLETIONS_CREATE: OpenAI chat.completions.create usage</h3>
+          <div class="meta">
+            <span class="severity low">🟢 LOW</span>
+            <span class="file">test-fixtures\vulnerable\llm_before_auth.ts:8</span>
+            <span class="confidence">Confidence 0.20</span>
+          </div>
+          <p class="summary">LLM SDK usage detected.</p>
+          <p class="description">LLM SDK usage detected.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Review the call to ensure prompts, inputs, and outputs are securely handled.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>LLM_OPENAI_CHAT_COMPLETIONS_CREATE: OpenAI chat.completions.create usage</h3>
+          <div class="meta">
+            <span class="severity low">🟢 LOW</span>
+            <span class="file">test-fixtures\vulnerable\pii_to_llm.ts:10</span>
+            <span class="confidence">Confidence 0.20</span>
+          </div>
+          <p class="summary">LLM SDK usage detected.</p>
+          <p class="description">LLM SDK usage detected.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Review the call to ensure prompts, inputs, and outputs are securely handled.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>LLM_OPENAI_CHAT_COMPLETIONS_CREATE: OpenAI chat.completions.create usage</h3>
+          <div class="meta">
+            <span class="severity low">🟢 LOW</span>
+            <span class="file">test-fixtures\vulnerable\prompt_injection.ts:10</span>
+            <span class="confidence">Confidence 0.20</span>
+          </div>
+          <p class="summary">LLM SDK usage detected.</p>
+          <p class="description">LLM SDK usage detected.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Review the call to ensure prompts, inputs, and outputs are securely handled.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>AI002: Sensitive prompt logging</h3>
+          <div class="meta">
+            <span class="severity high">🟠 HIGH</span>
+            <span class="file">examples\vulnerable.ts:5</span>
+            <span class="confidence">Confidence 0.30</span>
+          </div>
+          <p class="summary">Prompt or response data is logged.</p>
+          <p class="description">Prompt content or LLM responses are logged alongside potentially sensitive fields.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Avoid logging prompt/response data or redact sensitive fields like email, token, password, or apiKey.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>AI003: LLM call before authentication</h3>
+          <div class="meta">
+            <span class="severity critical">🔴 CRITICAL</span>
+            <span class="file">examples\vulnerable.ts:10</span>
+            <span class="confidence">Confidence 0.40</span>
+          </div>
+          <p class="summary">LLM call occurs before auth checks.</p>
+          <p class="description">LLM call occurs in a request handler before authentication checks.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Ensure authentication/authorization runs before invoking LLMs in request handlers.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>AI003: LLM call before authentication</h3>
+          <div class="meta">
+            <span class="severity critical">🔴 CRITICAL</span>
+            <span class="file">examples\vulnerable.ts:15</span>
+            <span class="confidence">Confidence 0.40</span>
+          </div>
+          <p class="summary">LLM call occurs before auth checks.</p>
+          <p class="description">LLM call occurs in a request handler before authentication checks.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Ensure authentication/authorization runs before invoking LLMs in request handlers.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>AI003: LLM call before authentication</h3>
+          <div class="meta">
+            <span class="severity critical">🔴 CRITICAL</span>
+            <span class="file">test-fixtures\vulnerable\llm_before_auth.ts:8</span>
+            <span class="confidence">Confidence 0.40</span>
+          </div>
+          <p class="summary">LLM call occurs before auth checks.</p>
+          <p class="description">LLM call occurs in a request handler before authentication checks.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Ensure authentication/authorization runs before invoking LLMs in request handlers.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>AI003: LLM call before authentication</h3>
+          <div class="meta">
+            <span class="severity critical">🔴 CRITICAL</span>
+            <span class="file">test-fixtures\vulnerable\pii_to_llm.ts:10</span>
+            <span class="confidence">Confidence 0.40</span>
+          </div>
+          <p class="summary">LLM call occurs before auth checks.</p>
+          <p class="description">LLM call occurs in a request handler before authentication checks.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Ensure authentication/authorization runs before invoking LLMs in request handlers.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>AI003: LLM call before authentication</h3>
+          <div class="meta">
+            <span class="severity critical">🔴 CRITICAL</span>
+            <span class="file">test-fixtures\vulnerable\prompt_injection.ts:10</span>
+            <span class="confidence">Confidence 0.40</span>
+          </div>
+          <p class="summary">LLM call occurs before auth checks.</p>
+          <p class="description">LLM call occurs in a request handler before authentication checks.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Ensure authentication/authorization runs before invoking LLMs in request handlers.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>AI004: Sensitive data sent to LLM</h3>
+          <div class="meta">
+            <span class="severity high">🟠 HIGH</span>
+            <span class="file">examples\vulnerable.ts:17</span>
+            <span class="confidence">Confidence 0.70</span>
+          </div>
+          <p class="summary">Large user context sent directly to LLM.</p>
+          <p class="description">Potential PII exposure risk: user/profile/session data is sent to an LLM without minimization.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Minimize or redact sensitive fields before sending to LLMs; send only necessary attributes.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>AI004: Sensitive data sent to LLM</h3>
+          <div class="meta">
+            <span class="severity high">🟠 HIGH</span>
+            <span class="file">test-fixtures\safe\pii_to_llm.ts:21</span>
+            <span class="confidence">Confidence 0.50</span>
+          </div>
+          <p class="summary">Large user context sent directly to LLM.</p>
+          <p class="description">Potential PII exposure risk: user/profile/session data is sent to an LLM without minimization.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Minimize or redact sensitive fields before sending to LLMs; send only necessary attributes.</p>
+        </section>
+      
+        <section class="finding">
+          <h3>AI004: Sensitive data sent to LLM</h3>
+          <div class="meta">
+            <span class="severity high">🟠 HIGH</span>
+            <span class="file">test-fixtures\vulnerable\pii_to_llm.ts:13</span>
+            <span class="confidence">Confidence 0.70</span>
+          </div>
+          <p class="summary">Large user context sent directly to LLM.</p>
+          <p class="description">Potential PII exposure risk: user/profile/session data is sent to an LLM without minimization.</p>
+          <p class="recommendation"><strong>Recommendation:</strong> Minimize or redact sensitive fields before sending to LLMs; send only necessary attributes.</p>
+        </section>
+      
+
+    <footer>
+      Generated by SecureAI-Scan.
+    </footer>
+  </body>
+</html>

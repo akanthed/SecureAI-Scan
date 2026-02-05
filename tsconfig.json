@@ -3,7 +3,6 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "preserveShebang": true,
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,

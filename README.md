@@ -32,6 +32,16 @@ Want only AI/LLM rules?
 secureai-scan scan . --only-ai
 ```
 
+## Output Controls
+Default behavior prints a summary and the top 5 findings by confidence.
+```bash
+secureai-scan scan . --limit 10
+secureai-scan scan . --severity high
+secureai-scan scan . --output report.md
+secureai-scan scan . --output report.json
+secureai-scan scan . --output report.html
+```
+
 ## Example Output
 ```md
 # SecureAI-Scan Report
