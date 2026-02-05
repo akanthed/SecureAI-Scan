@@ -1,5 +1,7 @@
 # SecureAI-Scan
 
+[![npm version](https://img.shields.io/npm/v/secureai-scan)](https://www.npmjs.com/package/secureai-scan) [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![TypeScript](https://img.shields.io/badge/TypeScript-ready-blue.svg)](https://www.typescriptlang.org/)
+
 **Catch dumb AI security mistakes before you ship.**
 
 SecureAI-Scan is a repo-native CLI that scans your codebase for common LLM security foot-guns like prompt injection, PII exposure, and unsafe LLM usage. It runs locally and in CI with zero config.
