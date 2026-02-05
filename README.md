@@ -33,7 +33,7 @@ secureai-scan scan . --only-ai
 ```
 
 ## Output Controls
-Default behavior prints a summary and the top 5 findings by confidence.
+Default behavior prints a summary and the top 3 issues to fix first.
 ```bash
 secureai-scan scan . --limit 10
 secureai-scan scan . --severity high

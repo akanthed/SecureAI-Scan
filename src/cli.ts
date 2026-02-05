@@ -1,24 +1,19 @@
 import { Command, InvalidArgumentError } from "commander";
 import { scanRepository, scanRepositoryDetailed } from "./scanner/scan.js";
-import { formatReport } from "./scanner/reporter.js";
-import type { Finding, Severity } from "./scanner/types.js";
+import {
+  buildReport,
+  formatReport,
+  formatTerminalReport,
+  type ReportModel,
+} from "./scanner/reporter.js";
+import type { Severity } from "./scanner/types.js";
 import { filterFindingsBySeverity } from "./scanner/filters.js";
 import { AVAILABLE_RULE_IDS } from "./scanner/rules/index.js";
 import { StaticExplainer } from "./scanner/explainer.js";
 import fs from "node:fs";
 import path from "node:path";
 
-const ALLOWED_FORMATS = ["json", "markdown"] as const;
 const ALLOWED_SEVERITIES = ["low", "medium", "high", "critical"] as const;
-function parseFormat(value: string): "json" | "markdown" {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "json" || normalized === "markdown") {
-    return normalized;
-  }
-  throw new InvalidArgumentError(
-    `Invalid --format "${value}". Expected one of: ${ALLOWED_FORMATS.join(", ")}.`,
-  );
-}
 
 function parseSeverity(value: string): Severity {
   const normalized = value.trim().toLowerCase();
@@ -52,6 +47,14 @@ function parseRules(value: string): string[] {
   return rules;
 }
 
+function parseLimit(value: string): number {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new InvalidArgumentError(`Invalid --limit "${value}". Expected a non-negative number.`);
+  }
+  return parsed;
+}
+
 export function runCli(argv: string[]): void {
   const program = new Command();
 
@@ -68,17 +71,15 @@ export function runCli(argv: string[]): void {
       "Minimum severity: low | medium | high | critical",
       parseSeverity,
     )
-    .option("-f, --format <format>", "Output format: json | markdown", parseFormat, "markdown")
     .option("-r, --rules <list>", "Comma-separated rule IDs", parseRules)
     .option("--only-ai", "Run only AI/LLM-related rules")
     .option("--limit <number>", "Limit number of findings shown", parseLimit)
-    .option("--output <file>", "Write full report to file (.json or .md)")
+    .option("--output <file>", "Write full report to file (.json, .md, or .html)")
     .option("--debug", "Show scanned files and rule/filter info")
     .action(
       (
         path: string,
         options: {
-          format: "json" | "markdown";
           severity?: Severity;
           rules?: string[];
           onlyAi?: boolean;
@@ -96,10 +97,19 @@ export function runCli(argv: string[]): void {
           : { findings: scanRepository(path, { rules: selectedRules }), scannedFiles: [] };
         const findings = scanResult.findings;
         const filtered = filterFindingsBySeverity(findings, options.severity);
+        const report = buildReport(filtered, {
+          tool: "SecureAI-Scan",
+          version: readPackageVersion(),
+          scannedAt: new Date().toISOString(),
+        });
+
         if (options.output) {
-          writeFullReport(filtered, options.output);
+          writeFullReport(report, options.output);
         }
-        renderTerminalOutput(filtered, options.limit);
+
+        const terminal = formatTerminalReport(report, options.limit ?? 3);
+        process.stdout.write(`${terminal}\n`);
+
         if (options.debug) {
           const files = scanResult.scannedFiles;
           process.stderr.write(
@@ -154,66 +164,6 @@ export function runCli(argv: string[]): void {
   program.parse(argv);
 }
 
-function printSummary(findings: { severity: Severity }[]): void {
-  const counts = {
-    critical: 0,
-    high: 0,
-    medium: 0,
-    low: 0,
-  };
-
-  for (const finding of findings) {
-    counts[finding.severity] += 1;
-  }
-
-  const total = findings.length;
-  const highCritical = counts.high + counts.critical;
-
-  const lines = [
-    "",
-    "Summary:",
-    `${formatSeverityLabel("critical")} ${counts.critical}`,
-    `${formatSeverityLabel("high")} ${counts.high}`,
-    `${formatSeverityLabel("medium")} ${counts.medium}`,
-    `${formatSeverityLabel("low")} ${counts.low}`,
-    `Total issues: ${total} (High/Critical: ${highCritical})`,
-  ];
-
-  process.stderr.write(lines.join("\n") + "\n");
-}
-
-function formatSeverityLabel(severity: Severity): string {
-  const icon = severityIcon(severity);
-  const text = severity.toUpperCase();
-  return colorize(severity, `${icon} ${text}`);
-}
-
-function severityIcon(severity: Severity): string {
-  switch (severity) {
-    case "critical":
-      return "🔴";
-    case "high":
-      return "🟠";
-    case "medium":
-      return "🟡";
-    case "low":
-      return "🟢";
-    default:
-      return "•";
-  }
-}
-
-function colorize(severity: Severity, text: string): string {
-  const reset = "\u001b[0m";
-  const colors: Record<Severity, string> = {
-    critical: "\u001b[31m",
-    high: "\u001b[33m",
-    medium: "\u001b[93m",
-    low: "\u001b[32m",
-  };
-  return `${colors[severity]}${text}${reset}`;
-}
-
 function resolveRuleSelection(
   rules: string[] | undefined,
   onlyAi: boolean,
@@ -234,59 +184,16 @@ function resolveRuleSelection(
   return rules;
 }
 
-function parseLimit(value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new InvalidArgumentError(`Invalid --limit "${value}". Expected a non-negative number.`);
-  }
-  return parsed;
-}
-
-function renderTerminalOutput(findings: Finding[], limit?: number): void {
-  const total = findings.length;
-  const displayLimit = limit ?? 5;
-  const sorted = [...findings].sort((a, b) => b.confidence - a.confidence);
-  const shown = displayLimit === 0 ? [] : sorted.slice(0, displayLimit);
-
-  process.stdout.write("# SecureAI-Scan Summary\n\n");
-  printSummary(findings);
-
-  if (total === 0) {
-    process.stdout.write("\nNo findings.\n");
-    return;
-  }
-
-  process.stdout.write("\nTop findings (by confidence):\n");
-  for (const finding of shown) {
-    const severityLabel = formatSeverityLabel(finding.severity);
-    process.stdout.write(
-      `- ${severityLabel} ${finding.rule_id} ${finding.file}:${finding.line} (${finding.confidence.toFixed(
-        2,
-      )}) ${finding.summary}\n`,
-    );
-  }
-
-  if (shown.length === 0) {
-    process.stdout.write("- (none shown)\n");
-  }
-
-  if (total > 20 && shown.length < total) {
-    process.stdout.write(
-      `\nShowing top ${shown.length} of ${total} findings. Use --output to export full report.\n`,
-    );
-  }
-}
-
-function writeFullReport(findings: Finding[], outputPath: string): void {
+function writeFullReport(report: ReportModel, outputPath: string): void {
   const resolved = path.resolve(outputPath);
   const lower = outputPath.toLowerCase();
   let content: string;
   if (lower.endsWith(".json")) {
-    content = JSON.stringify({ findings }, null, 2);
+    content = formatReport(report, "json");
   } else if (lower.endsWith(".md")) {
-    content = formatReport(findings, "markdown");
+    content = formatReport(report, "markdown");
   } else if (lower.endsWith(".html")) {
-    content = formatReport(findings, "html");
+    content = formatReport(report, "html");
   } else {
     throw new InvalidArgumentError(
       `Unsupported output format for "${outputPath}". Use .json, .md, or .html.`,
@@ -294,4 +201,15 @@ function writeFullReport(findings: Finding[], outputPath: string): void {
   }
   fs.writeFileSync(resolved, content, "utf-8");
   process.stdout.write(`\nFull report written to: ${resolved}\n`);
+}
+
+function readPackageVersion(): string {
+  try {
+    const pkgPath = path.resolve("package.json");
+    const raw = fs.readFileSync(pkgPath, "utf-8");
+    const parsed = JSON.parse(raw) as { version?: string };
+    return parsed.version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
 }
