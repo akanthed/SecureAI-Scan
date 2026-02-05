@@ -11,26 +11,25 @@ SecureAI-Scan is a repo-native CLI that scans your codebase for common LLM secur
 - PII or sensitive data sent to LLMs
 - Unsafe LLM usage (for example, LLM calls before auth)
 
-## Quick Install
+## Quick Start (Recommended)
 ```bash
-npm install
-npm run build
-npm link
+npx secureai-scan scan .
 ```
 
-## One-Command Usage
+No installation required. Works on all platforms, including Windows.
+
+## Global Install (Optional)
 ```bash
+npm install -g secureai-scan
 secureai-scan scan .
 ```
 
+Windows note: global installs may require PATH setup. `npx` is the easiest option.
+
+## One-Command Usage
 Want only AI/LLM rules?
 ```bash
 secureai-scan scan . --only-ai
-```
-
-No global link? Run locally:
-```bash
-node dist/index.js scan .
 ```
 
 ## Example Output

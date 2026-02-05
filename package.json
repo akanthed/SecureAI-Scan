@@ -1,12 +1,17 @@
 {
   "name": "secureai-scan",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Repo-native AI security scanning CLI for LLM-specific risks",
   "license": "MIT",
   "type": "module",
   "bin": {
     "secureai-scan": "dist/index.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
