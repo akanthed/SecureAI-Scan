@@ -51,12 +51,36 @@ npx secureai-scan scan . --baseline .secureai-baseline.json
 npx secureai-scan scan . --baseline .secureai-baseline.json --output report.md
 ```
 
+Baseline behavior:
+- First run creates the baseline file and prints:
+  `Baseline created. Future runs will show only new or regressed issues.`
+- Later runs compare against baseline and print:
+  `New issues since baseline: X`
+
 Target specific rules or get command help:
 ```bash
 npx secureai-scan scan . --rules AI001,AI003
 npx secureai-scan --help
 npx secureai-scan scan --help
 ```
+
+## Ignore Annotations
+Ignore a reviewed finding at the source line above it:
+```ts
+// secureai-ignore AI004: reviewed and accepted minimal context payload
+```
+
+Rules:
+- Format is `// secureai-ignore <RULE_ID>: <reason>`
+- Reason is required
+- Applies only to the next matching finding location
+- Ignored items are still shown under `Ignored Findings` in reports
+
+## CLI Guidance Tips
+The CLI shows short contextual tips when relevant, for example:
+- Suggesting `--baseline` on large result sets
+- Suggesting `--output report.html` for a shareable report
+- Suggesting baseline creation after repeated runs without baseline
 
 ## All CLI Commands
 ```bash
@@ -80,6 +104,12 @@ npx secureai-scan --help
 npx secureai-scan scan --help
 npx secureai-scan explain --help
 ```
+
+## CI Usage (Optional)
+A minimal GitHub Actions example is included at:
+`.github/workflows/secureai-scan.yml`
+
+It uses `npx`, supports baseline mode, and is non-blocking by default.
 
 ## Example Output
 ```md

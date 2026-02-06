@@ -66,7 +66,7 @@ export function runCli(argv: string[]): void {
     .version("0.1.0")
     .addHelpText(
       "after",
-      "\nCommon scan options:\n  secureai-scan scan <path> --output report.md --baseline .secureai-baseline.json\nIgnore annotation:\n  // secureai-ignore <RULE_ID>: <reason>\n",
+      "\nKey features:\n  --output <file>   Save a full HTML, Markdown, or JSON report.\n  --baseline <file> Show only new or regressed issues after the first run.\n  // secureai-ignore <RULE_ID>: <reason>   Ignore the next matching finding with a required reason.\n",
     );
 
   program
@@ -80,12 +80,12 @@ export function runCli(argv: string[]): void {
     .option("-r, --rules <list>", "Comma-separated rule IDs", parseRules)
     .option("--only-ai", "Run only AI/LLM-related rules")
     .option("--limit <number>", "Limit number of findings shown", parseLimit)
-    .option("--output <file>", "Write full report to file (.json, .md, or .html)")
-    .option("--baseline <file>", "Track only new or regressed issues against a baseline JSON file")
+    .option("--output <file>", "Save a full report as HTML, Markdown, or JSON")
+    .option("--baseline <file>", "Track only new or regressed issues using a baseline file")
     .option("--debug", "Show scanned files and rule/filter info")
     .addHelpText(
       "after",
-      "\nIgnore annotations:\n  // secureai-ignore <RULE_ID>: <reason>\nApplies to the next matching finding location and is listed in the report under Ignored Findings.\n",
+      "\nIgnore annotations:\n  // secureai-ignore <RULE_ID>: <reason>\nIgnores the next matching finding and records it under Ignored Findings.\n",
     )
     .action(
       (
@@ -104,6 +104,7 @@ export function runCli(argv: string[]): void {
           options.rules,
           options.onlyAi ?? false,
         );
+        const previousState = readScanState(targetPath);
         const scanResult = scanRepositoryDetailed(targetPath, { rules: selectedRules });
         const findings = scanResult.findings;
         const filtered = filterFindingsBySeverity(findings, options.severity);
@@ -138,8 +139,8 @@ export function runCli(argv: string[]): void {
         const terminal = formatTerminalReport(report, options.limit ?? 3);
         process.stdout.write(`${terminal}\n`);
 
-        maybePrintContextualHints(report, options.baseline, targetPath);
-        persistScanRun(targetPath);
+        maybePrintContextualHints(report, options.baseline, options.output, previousState);
+        persistScanRun(targetPath, Boolean(options.baseline), previousState);
 
         if (options.debug) {
           const files = scanResult.scannedFiles;
@@ -275,23 +276,46 @@ function severityValue(severity: Severity): number {
 function maybePrintContextualHints(
   report: ReportModel,
   baselinePath: string | undefined,
-  scanTarget: string,
+  outputPath: string | undefined,
+  previousState: ScanState | undefined,
 ): void {
-  if (!baselinePath && report.summary.total >= 8) {
-    process.stdout.write("\nTip: use --baseline to track only new issues\n");
+  if (report.summary.total > 10) {
+    process.stdout.write(
+      "\nTip: Large result sets can be noisy. Use --baseline to track only new issues.\n",
+    );
   }
 
-  if (!baselinePath && hasRecentRun(scanTarget)) {
-    process.stdout.write("Consider creating a baseline to reduce noise\n");
+  if (!outputPath) {
+    process.stdout.write("Tip: Generate a shareable report with --output report.html\n");
+  }
+
+  if (!baselinePath && previousState?.withoutBaselineRuns === 1) {
+    process.stdout.write(
+      "Tip: Create a baseline to focus on new issues:\nnpx secureai-scan scan . --baseline secureai-baseline.json\n",
+    );
   }
 }
 
-function persistScanRun(scanTarget: string): void {
+interface ScanState {
+  target: string;
+  lastRunAt: string;
+  withoutBaselineRuns: number;
+}
+
+function persistScanRun(
+  scanTarget: string,
+  baselineUsed: boolean,
+  previousState: ScanState | undefined,
+): void {
   const statePath = path.join(os.homedir(), ".secureai-scan", "state.json");
   const stateDir = path.dirname(statePath);
+  const resolvedTarget = path.resolve(scanTarget);
+  const sameTarget = previousState?.target === resolvedTarget;
+  const priorWithoutBaseline = sameTarget ? previousState?.withoutBaselineRuns ?? 0 : 0;
   const state = {
-    target: path.resolve(scanTarget),
+    target: resolvedTarget,
     lastRunAt: new Date().toISOString(),
+    withoutBaselineRuns: baselineUsed ? 0 : priorWithoutBaseline + 1,
   };
   try {
     fs.mkdirSync(stateDir, { recursive: true });
@@ -301,20 +325,19 @@ function persistScanRun(scanTarget: string): void {
   }
 }
 
-function hasRecentRun(scanTarget: string): boolean {
+function readScanState(scanTarget: string): ScanState | undefined {
   const statePath = path.join(os.homedir(), ".secureai-scan", "state.json");
   try {
     const raw = fs.readFileSync(statePath, "utf-8");
-    const state = JSON.parse(raw) as { target?: string; lastRunAt?: string };
-    if (!state.target || !state.lastRunAt) {
-      return false;
+    const state = JSON.parse(raw) as ScanState;
+    if (!state.target || !state.lastRunAt || typeof state.withoutBaselineRuns !== "number") {
+      return undefined;
     }
     if (path.resolve(scanTarget) !== path.resolve(state.target)) {
-      return false;
+      return undefined;
     }
-    const elapsedMs = Date.now() - new Date(state.lastRunAt).getTime();
-    return Number.isFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs <= 1000 * 60 * 60 * 24 * 7;
+    return state;
   } catch {
-    return false;
+    return undefined;
   }
 }

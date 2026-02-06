@@ -519,6 +519,14 @@ function formatMarkdown(report: ReportModel): string {
   }
   lines.push("");
 
+  lines.push("## Next Steps");
+  lines.push("");
+  lines.push("- Create a baseline to reduce noise over time.");
+  lines.push("- Fix Critical and High issues first.");
+  lines.push("- Add ignore annotations for findings you have reviewed.");
+  lines.push("- Consider running SecureAI-Scan in CI to catch regressions earlier.");
+  lines.push("");
+
   return lines.join("\n");
 }
 
@@ -839,6 +847,13 @@ function formatHtml(report: ReportModel): string {
         font-size: 10px;
         color: var(--muted);
       }
+      .next-steps {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .next-steps ul {
+        padding-left: 18px;
+      }
     </style>
   </head>
   <body>
@@ -902,6 +917,16 @@ function formatHtml(report: ReportModel): string {
       <section id="informational" class="report-section informational">
         <h2 class="section-title">5. Informational Observations</h2>
         <ul>${info || "<li class=\"muted\">None.</li>"}</ul>
+      </section>
+
+      <section class="report-section next-steps">
+        <h2 class="section-title">Next Steps</h2>
+        <ul>
+          <li>Create a baseline to reduce noise over time.</li>
+          <li>Fix Critical and High issues first.</li>
+          <li>Add ignore annotations for findings you have reviewed.</li>
+          <li>Consider running SecureAI-Scan in CI to catch regressions earlier.</li>
+        </ul>
       </section>
     </div>
   </body>
