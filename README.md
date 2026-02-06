@@ -23,7 +23,7 @@ No installation required. Works on all platforms, including Windows.
 ## Global Install (Optional)
 ```bash
 npm install -g secureai-scan
-secureai-scan scan .
+npx secureai-scan scan .
 ```
 
 Windows note: global installs may require PATH setup. `npx` is the easiest option.
@@ -31,17 +31,54 @@ Windows note: global installs may require PATH setup. `npx` is the easiest optio
 ## One-Command Usage
 Want only AI/LLM rules?
 ```bash
-secureai-scan scan . --only-ai
+npx secureai-scan scan . --only-ai
 ```
 
 ## Output Controls
 Default behavior prints a summary and the top 3 issues to fix first.
 ```bash
-secureai-scan scan . --limit 10
-secureai-scan scan . --severity high
-secureai-scan scan . --output report.md
-secureai-scan scan . --output report.json
-secureai-scan scan . --output report.html
+npx secureai-scan scan . --limit 10
+npx secureai-scan scan . --severity high
+npx secureai-scan scan . --output report.md
+npx secureai-scan scan . --output report.json
+npx secureai-scan scan . --output report.html
+```
+
+## Workflow Commands
+Use baseline mode to reduce repeat noise across runs.
+```bash
+npx secureai-scan scan . --baseline .secureai-baseline.json
+npx secureai-scan scan . --baseline .secureai-baseline.json --output report.md
+```
+
+Target specific rules or get command help:
+```bash
+npx secureai-scan scan . --rules AI001,AI003
+npx secureai-scan --help
+npx secureai-scan scan --help
+```
+
+## All CLI Commands
+```bash
+# Scan
+npx secureai-scan scan .
+npx secureai-scan scan . --only-ai
+npx secureai-scan scan . --rules AI001,AI003
+npx secureai-scan scan . --severity high
+npx secureai-scan scan . --limit 10
+npx secureai-scan scan . --baseline .secureai-baseline.json
+npx secureai-scan scan . --output report.md
+npx secureai-scan scan . --output report.json
+npx secureai-scan scan . --output report.html
+npx secureai-scan scan . --debug
+
+# Rule explanation
+npx secureai-scan explain AI001
+
+# Help
+npx secureai-scan --help
+npx secureai-scan scan --help
+npx secureai-scan explain --help
 ```
 
 ## Example Output

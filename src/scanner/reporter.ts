@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { Finding, Severity } from "./types.js";
 
 export interface ReportMeta {
@@ -14,6 +16,24 @@ export interface ReportSummary {
 export interface ReportOccurrence {
   file: string;
   line: number;
+  snippet?: ReportSnippetLine[];
+}
+
+export interface ReportSnippetLine {
+  lineNumber: number;
+  text: string;
+  highlight: boolean;
+}
+
+export interface ReportIgnoredFinding {
+  ruleId: string;
+  title: string;
+  severity: Severity;
+  file: string;
+  line: number;
+  reason: string;
+  annotationLine: number;
+  snippet?: ReportSnippetLine[];
 }
 
 export interface ReportGroupedFinding {
@@ -33,6 +53,7 @@ export interface ReportModel {
   prioritizedFindings: ReportGroupedFinding[];
   allFindings: ReportGroupedFinding[];
   informational: ReportGroupedFinding[];
+  ignoredFindings: ReportIgnoredFinding[];
 }
 
 type RiskPosture = "Low" | "Medium" | "High";
@@ -42,13 +63,24 @@ interface RiskCategoryGroup {
   findings: ReportGroupedFinding[];
 }
 
-export function buildReport(findings: Finding[], meta: ReportMeta): ReportModel {
+export interface BuildReportOptions {
+  rootPath?: string;
+  ignoredFindings?: Array<{ finding: Finding; reason: string; annotationLine: number }>;
+}
+
+export function buildReport(
+  findings: Finding[],
+  meta: ReportMeta,
+  options?: BuildReportOptions,
+): ReportModel {
   const informational = findings.filter((finding) => isInformational(finding));
   const issues = findings.filter((finding) => !isInformational(finding));
+  const snippetContext = createSnippetContext(options?.rootPath);
 
-  const groupedIssues = groupByRule(issues);
-  const groupedInfo = groupByRule(informational);
+  const groupedIssues = groupByRule(issues, snippetContext);
+  const groupedInfo = groupByRule(informational, snippetContext);
   const summary = buildSummary(issues);
+  const ignoredFindings = buildIgnoredFindings(options?.ignoredFindings ?? [], snippetContext);
 
   const prioritized = pickTopGroups(groupedIssues, 3);
 
@@ -58,6 +90,7 @@ export function buildReport(findings: Finding[], meta: ReportMeta): ReportModel 
     prioritizedFindings: prioritized,
     allFindings: groupedIssues,
     informational: groupedInfo,
+    ignoredFindings,
   };
 }
 
@@ -77,12 +110,22 @@ export function formatReport(
 
 export function formatTerminalReport(report: ReportModel, limit = 3): string {
   const lines: string[] = [];
-  lines.push("SecureAI-Scan");
-  lines.push("");
-  lines.push(`Scanned at: ${report.meta.scannedAt}`);
+  const posture = overallRiskPosture(report.summary);
+
+  lines.push("SecureAI-Scan Report");
+  lines.push("====================");
+  lines.push(`Scanned at    : ${report.meta.scannedAt}`);
+  lines.push(`Risk posture  : ${posture}`);
+  lines.push(`Total issues  : ${report.summary.total}`);
   lines.push(
-    `Total issues: ${report.summary.total} (Critical: ${report.summary.bySeverity.critical}, High: ${report.summary.bySeverity.high}, Medium: ${report.summary.bySeverity.medium}, Low: ${report.summary.bySeverity.low})`,
+    `Severity      : Critical ${report.summary.bySeverity.critical} | High ${report.summary.bySeverity.high} | Medium ${report.summary.bySeverity.medium} | Low ${report.summary.bySeverity.low}`,
   );
+  if (report.ignoredFindings.length > 0) {
+    lines.push(`Ignored       : ${report.ignoredFindings.length}`);
+  }
+  if (report.informational.length > 0) {
+    lines.push(`Informational : ${report.informational.length}`);
+  }
   lines.push("");
 
   if (report.summary.total === 0) {
@@ -90,20 +133,27 @@ export function formatTerminalReport(report: ReportModel, limit = 3): string {
     return lines.join("\n");
   }
 
-  lines.push("What you should fix first:");
-  const top = report.prioritizedFindings.slice(0, limit);
-  for (const group of top) {
+  lines.push("Priority Security Risks");
+  lines.push("-----------------------");
+  const top = report.prioritizedFindings.slice(0, Math.max(0, limit));
+  for (let index = 0; index < top.length; index += 1) {
+    const group = top[index];
     lines.push(
-      `- ${severityLabel(group.severity)} ${group.ruleId} ${group.title} (Confidence: ${confidenceLabel(
-        group.confidenceMax,
-      )} ${group.confidenceMax.toFixed(2)}) ${group.reason} Impact: ${impactForRule(
-        group.ruleId,
-      )}`,
+      `${index + 1}. ${severityLabel(group.severity)} ${group.ruleId} - ${group.title}`,
     );
+    lines.push(
+      `   Confidence: ${confidenceLabel(group.confidenceMax)} (${group.confidenceMax.toFixed(2)})`,
+    );
+    lines.push(`   Impact    : ${impactForRule(group.ruleId)}`);
+    lines.push(`   Why risky : ${group.reason}`);
   }
   lines.push("");
 
-  if (report.summary.total > 20 && top.length < report.summary.total) {
+  if (report.summary.total > 20) {
+    lines.push("Tip: use --baseline to track only new issues.");
+  }
+
+  if (top.length < report.summary.total) {
     lines.push(
       `Showing top ${top.length} of ${report.summary.total} findings. Use --output to export full report.`,
     );
@@ -137,7 +187,19 @@ function buildSummary(findings: Finding[]): ReportSummary {
   };
 }
 
-function groupByRule(findings: Finding[]): ReportGroupedFinding[] {
+interface SnippetContext {
+  rootPath?: string;
+  linesByFile: Map<string, string[]>;
+}
+
+function createSnippetContext(rootPath?: string): SnippetContext {
+  return {
+    rootPath: rootPath ? path.resolve(rootPath) : undefined,
+    linesByFile: new Map<string, string[]>(),
+  };
+}
+
+function groupByRule(findings: Finding[], snippetContext: SnippetContext): ReportGroupedFinding[] {
   const grouped = new Map<string, Finding[]>();
   for (const finding of findings) {
     const list = grouped.get(finding.rule_id) ?? [];
@@ -159,11 +221,31 @@ function groupByRule(findings: Finding[]): ReportGroupedFinding[] {
       confidenceMax,
       reason: first.description || first.summary,
       recommendation: first.recommendation,
-      occurrences: group.map((f) => ({ file: f.file, line: f.line })),
+      occurrences: group.map((f) => ({
+        file: f.file,
+        line: f.line,
+        snippet: readSnippet(snippetContext, f.file, f.line),
+      })),
     });
   }
 
   return result;
+}
+
+function buildIgnoredFindings(
+  ignored: Array<{ finding: Finding; reason: string; annotationLine: number }>,
+  snippetContext: SnippetContext,
+): ReportIgnoredFinding[] {
+  return ignored.map((entry) => ({
+    ruleId: entry.finding.rule_id,
+    title: entry.finding.title,
+    severity: entry.finding.severity,
+    file: entry.finding.file,
+    line: entry.finding.line,
+    reason: entry.reason,
+    annotationLine: entry.annotationLine,
+    snippet: readSnippet(snippetContext, entry.finding.file, entry.finding.line),
+  }));
 }
 
 function pickTopGroups(groups: ReportGroupedFinding[], count: number): ReportGroupedFinding[] {
@@ -337,7 +419,8 @@ function formatMarkdown(report: ReportModel): string {
   lines.push("1. [Executive Summary](#1-executive-summary)");
   lines.push("2. [Priority Security Risks](#2-priority-security-risks)");
   lines.push("3. [Detailed Findings](#3-detailed-findings)");
-  lines.push("4. [Informational Observations](#4-informational-observations)");
+  lines.push("4. [Ignored Findings](#4-ignored-findings)");
+  lines.push("5. [Informational Observations](#5-informational-observations)");
   lines.push("");
 
   lines.push("## 2. Priority Security Risks");
@@ -383,6 +466,10 @@ function formatMarkdown(report: ReportModel): string {
           )})*`,
         );
         lines.push(`Why this is risky: ${group.reason}`);
+        lines.push("Why this was flagged:");
+        for (const reason of whyFlaggedForRule(group.ruleId)) {
+          lines.push(`- ${reason}`);
+        }
         if (group.ruleId === "AI004") {
           lines.push(
             "Note: Some findings are flagged conservatively to encourage data minimization.",
@@ -390,12 +477,37 @@ function formatMarkdown(report: ReportModel): string {
         }
         lines.push(`How to fix: ${group.recommendation}`);
         lines.push(`**Occurrences:** ${occurrences}`);
+        for (const occ of group.occurrences) {
+          lines.push(`- ${occ.file}:${occ.line}`);
+          const snippet = renderMarkdownSnippet(occ.snippet);
+          for (const snippetLine of snippet) {
+            lines.push(snippetLine);
+          }
+        }
         lines.push("");
       }
     }
   }
 
-  lines.push("## 4. Informational Observations");
+  lines.push("## 4. Ignored Findings");
+  lines.push("");
+  if (report.ignoredFindings.length === 0) {
+    lines.push("None.");
+  } else {
+    for (const ignored of report.ignoredFindings) {
+      lines.push(
+        `- ${severityLabelPlain(ignored.severity)} ${ignored.ruleId} ${ignored.file}:${ignored.line}`,
+      );
+      lines.push(`  Ignore reason: ${ignored.reason} (annotation line ${ignored.annotationLine})`);
+      const snippet = renderMarkdownSnippet(ignored.snippet);
+      for (const snippetLine of snippet) {
+        lines.push(snippetLine);
+      }
+    }
+  }
+  lines.push("");
+
+  lines.push("## 5. Informational Observations");
   lines.push("");
   if (report.informational.length === 0) {
     lines.push("None.");
@@ -416,7 +528,8 @@ function formatHtml(report: ReportModel): string {
     `<li><a href="#summary">1. Executive Summary</a></li>`,
     `<li><a href="#fix-first">2. Priority Security Risks</a></li>`,
     `<li><a href="#critical-high">3. Detailed Findings</a></li>`,
-    `<li><a href="#informational">4. Informational Observations</a></li>`,
+    `<li><a href="#ignored">4. Ignored Findings</a></li>`,
+    `<li><a href="#informational">5. Informational Observations</a></li>`,
   ].join("");
 
   const prioritized = report.prioritizedFindings
@@ -456,6 +569,19 @@ function formatHtml(report: ReportModel): string {
       return `<li>${escapeHtml(
         f.title,
       )} <span class="info-tag">Not a vulnerability</span><br/><span class="muted">${files}</span></li>`;
+    })
+    .join("");
+
+  const ignored = report.ignoredFindings
+    .map((finding) => {
+      return `<li>
+        <strong>${severityLabelPlain(finding.severity)} ${escapeHtml(finding.ruleId)}</strong>
+        ${escapeHtml(finding.file)}:${finding.line}<br/>
+        <span class="muted">Ignore reason: ${escapeHtml(finding.reason)} (annotation line ${
+          finding.annotationLine
+        })</span>
+        ${renderHtmlSnippet(finding.snippet)}
+      </li>`;
     })
     .join("");
 
@@ -629,6 +755,12 @@ function formatHtml(report: ReportModel): string {
       .finding-body {
         margin-top: 10px;
       }
+      .why-flagged {
+        margin: 6px 0 0;
+        padding-left: 18px;
+        color: var(--muted);
+        font-size: 13px;
+      }
       .note {
         margin-top: 8px;
         color: var(--muted);
@@ -653,6 +785,39 @@ function formatHtml(report: ReportModel): string {
         margin-top: 10px;
         font-size: 12px;
         color: var(--muted);
+      }
+      .occurrences ul {
+        margin: 6px 0 0;
+        padding-left: 18px;
+      }
+      .snippet {
+        margin: 8px 0 0;
+        background: #f8fafc;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px;
+        overflow-x: auto;
+      }
+      .code-line {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+        display: grid;
+        grid-template-columns: 42px 1fr;
+        column-gap: 8px;
+        padding: 1px 0;
+      }
+      .code-line .num {
+        color: var(--muted);
+        text-align: right;
+      }
+      .code-line.is-hit {
+        background: #eef2ff;
+      }
+      .ignored-list {
+        padding-left: 18px;
+      }
+      .ignored-list li {
+        margin-bottom: 10px;
       }
       .category-block h3 {
         margin: 18px 0 8px;
@@ -729,8 +894,13 @@ function formatHtml(report: ReportModel): string {
         ${detailed || "<p class=\"muted\">No issues found.</p>"}
       </section>
 
+      <section id="ignored" class="report-section informational">
+        <h2 class="section-title">4. Ignored Findings</h2>
+        <ul class="ignored-list">${ignored || "<li class=\"muted\">None.</li>"}</ul>
+      </section>
+
       <section id="informational" class="report-section informational">
-        <h2 class="section-title">4. Informational Observations</h2>
+        <h2 class="section-title">5. Informational Observations</h2>
         <ul>${info || "<li class=\"muted\">None.</li>"}</ul>
       </section>
     </div>
@@ -740,8 +910,15 @@ function formatHtml(report: ReportModel): string {
 
 function renderGroup(group: ReportGroupedFinding): string {
   const occurrences = group.occurrences
-    .map((o) => `${escapeHtml(o.file)}:${o.line}`)
-    .join(", ");
+    .map((o) => {
+      const location = `${escapeHtml(o.file)}:${o.line}`;
+      const snippet = renderHtmlSnippet(o.snippet);
+      return `<li>${location}${snippet}</li>`;
+    })
+    .join("");
+  const whyFlagged = whyFlaggedForRule(group.ruleId)
+    .map((reason) => `<li>${escapeHtml(reason)}</li>`)
+    .join("");
   const note =
     group.ruleId === "AI004"
       ? `<div class="note">Note: Some findings are flagged conservatively to encourage data minimization.</div>`
@@ -761,14 +938,128 @@ function renderGroup(group: ReportGroupedFinding): string {
         group.confidenceMax,
       )})</span></div>
       <div class="finding-body">${escapeHtml(group.reason)}</div>
+      <div class="finding-meta"><strong>Why this was flagged</strong></div>
+      <ul class="why-flagged">${whyFlagged}</ul>
       ${note}
       <div class="callout">
         <div class="callout-title">How to fix</div>
         <div>${escapeHtml(group.recommendation)}</div>
       </div>
-      <div class="occurrences"><strong>Occurrences:</strong> ${occurrences}</div>
+      <div class="occurrences"><strong>Occurrences:</strong><ul>${occurrences}</ul></div>
     </div>
   `;
+}
+
+function whyFlaggedForRule(ruleId: string): string[] {
+  switch (ruleId) {
+    case "AI001":
+      return [
+        "User input is blended into prompt construction.",
+        "Prompt text is dynamically assembled at runtime.",
+        "Input safety controls are not visible at this location.",
+      ];
+    case "AI002":
+      return [
+        "Prompt or model output is sent to logging sinks.",
+        "Logged data can include sensitive request content.",
+        "Redaction or minimization is not evident near the log call.",
+      ];
+    case "AI003":
+      return [
+        "An LLM call appears in a request handler path.",
+        "Authentication checks are not observed before the call.",
+        "Unauthenticated execution could trigger model actions.",
+      ];
+    case "AI004":
+      return [
+        "High-context objects are passed directly to the model.",
+        "Payload content likely includes user or session attributes.",
+        "Field-level minimization is not evident at the call site.",
+      ];
+    default:
+      return [
+        "Static rule pattern matched this code path.",
+        "Input validation or containment controls were not confirmed.",
+      ];
+  }
+}
+
+function readSnippet(
+  context: SnippetContext,
+  filePath: string,
+  issueLine: number,
+): ReportSnippetLine[] | undefined {
+  const lines = readFileLines(context, filePath);
+  if (!lines || issueLine <= 0 || issueLine > lines.length) {
+    return undefined;
+  }
+
+  const start = Math.max(1, issueLine - 2);
+  const end = Math.min(lines.length, issueLine + 2);
+  const snippet: ReportSnippetLine[] = [];
+
+  for (let lineNumber = start; lineNumber <= end; lineNumber += 1) {
+    snippet.push({
+      lineNumber,
+      text: lines[lineNumber - 1],
+      highlight: lineNumber === issueLine,
+    });
+  }
+
+  return snippet;
+}
+
+function readFileLines(context: SnippetContext, findingPath: string): string[] | undefined {
+  const filePath = resolveFindingPath(context.rootPath, findingPath);
+  const key = filePath.toLowerCase();
+  if (context.linesByFile.has(key)) {
+    return context.linesByFile.get(key);
+  }
+
+  try {
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const lines = raw.split(/\r?\n/);
+    context.linesByFile.set(key, lines);
+    return lines;
+  } catch {
+    context.linesByFile.set(key, []);
+    return undefined;
+  }
+}
+
+function resolveFindingPath(rootPath: string | undefined, findingPath: string): string {
+  if (path.isAbsolute(findingPath)) {
+    return findingPath;
+  }
+  return rootPath ? path.resolve(rootPath, findingPath) : path.resolve(findingPath);
+}
+
+function renderMarkdownSnippet(snippet?: ReportSnippetLine[]): string[] {
+  if (!snippet || snippet.length === 0) {
+    return [];
+  }
+  const lines = ["```ts"];
+  for (const line of snippet) {
+    const marker = line.highlight ? ">>" : "  ";
+    lines.push(`${marker} ${line.lineNumber.toString().padStart(4, " ")} | ${line.text}`);
+  }
+  lines.push("```");
+  return lines;
+}
+
+function renderHtmlSnippet(snippet?: ReportSnippetLine[]): string {
+  if (!snippet || snippet.length === 0) {
+    return "";
+  }
+  const lines = snippet
+    .map((line) => {
+      const cls = line.highlight ? "code-line is-hit" : "code-line";
+      return `<div class="${cls}"><span class="num">${line.lineNumber}</span><span class="txt">${escapeHtml(
+        line.text,
+      )}</span></div>`;
+    })
+    .join("");
+  return `<pre class="snippet">${lines}</pre>`;
 }
 
 function escapeHtml(value: string): string {

@@ -1,5 +1,5 @@
 import { Command, InvalidArgumentError } from "commander";
-import { scanRepository, scanRepositoryDetailed } from "./scanner/scan.js";
+import { scanRepositoryDetailed, type IgnoredFinding } from "./scanner/scan.js";
 import {
   buildReport,
   formatReport,
@@ -10,8 +10,10 @@ import type { Severity } from "./scanner/types.js";
 import { filterFindingsBySeverity } from "./scanner/filters.js";
 import { AVAILABLE_RULE_IDS } from "./scanner/rules/index.js";
 import { StaticExplainer } from "./scanner/explainer.js";
+import { applyBaseline } from "./scanner/baseline.js";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 const ALLOWED_SEVERITIES = ["low", "medium", "high", "critical"] as const;
 
@@ -61,7 +63,11 @@ export function runCli(argv: string[]): void {
   program
     .name("secureai-scan")
     .description("Repo-native AI security scanning CLI for LLM-specific risks")
-    .version("0.1.0");
+    .version("0.1.0")
+    .addHelpText(
+      "after",
+      "\nCommon scan options:\n  secureai-scan scan <path> --output report.md --baseline .secureai-baseline.json\nIgnore annotation:\n  // secureai-ignore <RULE_ID>: <reason>\n",
+    );
 
   program
     .command("scan")
@@ -75,16 +81,22 @@ export function runCli(argv: string[]): void {
     .option("--only-ai", "Run only AI/LLM-related rules")
     .option("--limit <number>", "Limit number of findings shown", parseLimit)
     .option("--output <file>", "Write full report to file (.json, .md, or .html)")
+    .option("--baseline <file>", "Track only new or regressed issues against a baseline JSON file")
     .option("--debug", "Show scanned files and rule/filter info")
+    .addHelpText(
+      "after",
+      "\nIgnore annotations:\n  // secureai-ignore <RULE_ID>: <reason>\nApplies to the next matching finding location and is listed in the report under Ignored Findings.\n",
+    )
     .action(
       (
-        path: string,
+        targetPath: string,
         options: {
           severity?: Severity;
           rules?: string[];
           onlyAi?: boolean;
           limit?: number;
           output?: string;
+          baseline?: string;
           debug?: boolean;
         },
       ) => {
@@ -92,15 +104,31 @@ export function runCli(argv: string[]): void {
           options.rules,
           options.onlyAi ?? false,
         );
-        const scanResult = options.debug
-          ? scanRepositoryDetailed(path, { rules: selectedRules })
-          : { findings: scanRepository(path, { rules: selectedRules }), scannedFiles: [] };
+        const scanResult = scanRepositoryDetailed(targetPath, { rules: selectedRules });
         const findings = scanResult.findings;
         const filtered = filterFindingsBySeverity(findings, options.severity);
-        const report = buildReport(filtered, {
+        const filteredIgnored = filterIgnoredBySeverity(scanResult.ignoredFindings, options.severity);
+
+        let outputFindings = filtered;
+        if (options.baseline) {
+          const baseline = applyBaseline(options.baseline, filtered);
+          if (baseline.created) {
+            process.stdout.write(
+              "Baseline created. Future runs will show only new or regressed issues.\n\n",
+            );
+          } else {
+            outputFindings = baseline.findings;
+            process.stdout.write(`New issues since baseline: ${baseline.newOrRegressedCount}\n\n`);
+          }
+        }
+
+        const report = buildReport(outputFindings, {
           tool: "SecureAI-Scan",
           version: readPackageVersion(),
           scannedAt: new Date().toISOString(),
+        }, {
+          rootPath: targetPath,
+          ignoredFindings: filteredIgnored,
         });
 
         if (options.output) {
@@ -109,6 +137,9 @@ export function runCli(argv: string[]): void {
 
         const terminal = formatTerminalReport(report, options.limit ?? 3);
         process.stdout.write(`${terminal}\n`);
+
+        maybePrintContextualHints(report, options.baseline, targetPath);
+        persistScanRun(targetPath);
 
         if (options.debug) {
           const files = scanResult.scannedFiles;
@@ -211,5 +242,79 @@ function readPackageVersion(): string {
     return parsed.version ?? "0.0.0";
   } catch {
     return "0.0.0";
+  }
+}
+
+function filterIgnoredBySeverity(
+  ignoredFindings: IgnoredFinding[],
+  severity: Severity | undefined,
+): IgnoredFinding[] {
+  if (!severity) {
+    return ignoredFindings;
+  }
+
+  const threshold = severityValue(severity);
+  return ignoredFindings.filter((entry) => severityValue(entry.finding.severity) >= threshold);
+}
+
+function severityValue(severity: Severity): number {
+  switch (severity) {
+    case "critical":
+      return 4;
+    case "high":
+      return 3;
+    case "medium":
+      return 2;
+    case "low":
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+function maybePrintContextualHints(
+  report: ReportModel,
+  baselinePath: string | undefined,
+  scanTarget: string,
+): void {
+  if (!baselinePath && report.summary.total >= 8) {
+    process.stdout.write("\nTip: use --baseline to track only new issues\n");
+  }
+
+  if (!baselinePath && hasRecentRun(scanTarget)) {
+    process.stdout.write("Consider creating a baseline to reduce noise\n");
+  }
+}
+
+function persistScanRun(scanTarget: string): void {
+  const statePath = path.join(os.homedir(), ".secureai-scan", "state.json");
+  const stateDir = path.dirname(statePath);
+  const state = {
+    target: path.resolve(scanTarget),
+    lastRunAt: new Date().toISOString(),
+  };
+  try {
+    fs.mkdirSync(stateDir, { recursive: true });
+    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
+  } catch {
+    // Non-fatal helper state.
+  }
+}
+
+function hasRecentRun(scanTarget: string): boolean {
+  const statePath = path.join(os.homedir(), ".secureai-scan", "state.json");
+  try {
+    const raw = fs.readFileSync(statePath, "utf-8");
+    const state = JSON.parse(raw) as { target?: string; lastRunAt?: string };
+    if (!state.target || !state.lastRunAt) {
+      return false;
+    }
+    if (path.resolve(scanTarget) !== path.resolve(state.target)) {
+      return false;
+    }
+    const elapsedMs = Date.now() - new Date(state.lastRunAt).getTime();
+    return Number.isFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs <= 1000 * 60 * 60 * 24 * 7;
+  } catch {
+    return false;
   }
 }

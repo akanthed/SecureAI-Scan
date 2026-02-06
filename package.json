@@ -2,7 +2,32 @@
   "name": "secureai-scan",
   "version": "0.1.2",
   "description": "Repo-native AI security scanning CLI for LLM-specific risks",
+  "author": "Akshay Kanthed",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/akanthed/SecureAI-Scan.git"
+  },
+  "homepage": "https://github.com/akanthed/SecureAI-Scan#readme",
+  "bugs": {
+    "url": "https://github.com/akanthed/SecureAI-Scan/issues"
+  },
+  "keywords": [
+    "security",
+    "ai",
+    "llm",
+    "scanner",
+    "cli",
+    "typescript",
+    "prompt-injection",
+    "appsec"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "secureai-scan": "dist/index.js"

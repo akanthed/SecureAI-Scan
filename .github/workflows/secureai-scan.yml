@@ -1,0 +1,20 @@
+name: SecureAI-Scan
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Run SecureAI-Scan (non-blocking)
+        run: |
+          npx secureai-scan scan . \
+            --baseline .secureai-baseline.json \
+            --output report.md || true
