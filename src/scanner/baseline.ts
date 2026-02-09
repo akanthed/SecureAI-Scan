@@ -20,6 +20,8 @@ export interface BaselineResult {
   created: boolean;
   findings: Finding[];
   newOrRegressedCount: number;
+  baselineCount: number;
+  currentCount: number;
 }
 
 export function applyBaseline(filePath: string, findings: Finding[]): BaselineResult {
@@ -30,6 +32,8 @@ export function applyBaseline(filePath: string, findings: Finding[]): BaselineRe
       created: true,
       findings,
       newOrRegressedCount: findings.length,
+      baselineCount: findings.length,
+      currentCount: findings.length,
     };
   }
 
@@ -55,6 +59,8 @@ export function applyBaseline(filePath: string, findings: Finding[]): BaselineRe
     created: false,
     findings: diff,
     newOrRegressedCount: diff.length,
+    baselineCount: baseline.findings.length,
+    currentCount: findings.length,
   };
 }
 

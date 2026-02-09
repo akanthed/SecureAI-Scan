@@ -2,4 +2,4 @@
 
 import { runCli } from "./cli.js";
 
-runCli(process.argv);
+await runCli(process.argv);

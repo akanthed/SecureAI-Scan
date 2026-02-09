@@ -38,7 +38,11 @@ export function scanRepositoryDetailed(
   }
 
   const deduped = dedupeFindings(findings);
-  const { activeFindings, ignoredFindings } = applyIgnoreAnnotations(sourceFiles, deduped);
+  const { activeFindings, ignoredFindings } = applyIgnoreAnnotations(
+    sourceFiles,
+    deduped,
+    context.rootPath,
+  );
 
   return {
     findings: activeFindings,
@@ -89,8 +93,9 @@ interface IgnoreDirective {
 function applyIgnoreAnnotations(
   sourceFiles: SourceFile[],
   findings: Finding[],
+  rootPath: string,
 ): { activeFindings: Finding[]; ignoredFindings: IgnoredFinding[] } {
-  const directivesByFile = parseIgnoreDirectives(sourceFiles);
+  const directivesByFile = parseIgnoreDirectives(sourceFiles, rootPath);
   const activeFindings: Finding[] = [];
   const ignoredFindings: IgnoredFinding[] = [];
 
@@ -128,7 +133,10 @@ function applyIgnoreAnnotations(
   return { activeFindings, ignoredFindings };
 }
 
-function parseIgnoreDirectives(sourceFiles: SourceFile[]): Map<string, IgnoreDirective[]> {
+function parseIgnoreDirectives(
+  sourceFiles: SourceFile[],
+  rootPath: string,
+): Map<string, IgnoreDirective[]> {
   const byFile = new Map<string, IgnoreDirective[]>();
   const pattern = /^\s*\/\/\s*secureai-ignore\s+([A-Za-z0-9_]+)\s*:\s*(.+)\s*$/;
 
@@ -155,7 +163,8 @@ function parseIgnoreDirectives(sourceFiles: SourceFile[]): Map<string, IgnoreDir
     }
 
     if (directives.length > 0) {
-      byFile.set(normalizeFileKey(sourceFile.getFilePath()), directives);
+      const relative = path.relative(rootPath, sourceFile.getFilePath());
+      byFile.set(normalizeFileKey(relative), directives);
     }
   }
 

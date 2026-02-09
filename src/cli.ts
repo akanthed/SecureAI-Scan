@@ -11,6 +11,8 @@ import { filterFindingsBySeverity } from "./scanner/filters.js";
 import { AVAILABLE_RULE_IDS } from "./scanner/rules/index.js";
 import { StaticExplainer } from "./scanner/explainer.js";
 import { applyBaseline } from "./scanner/baseline.js";
+import { evaluatePromptRisk } from "./scanner/prompt-risk.js";
+import { scanDependencyFilesForRisks } from "./scanner/dependency-guard.js";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -57,7 +59,7 @@ function parseLimit(value: string): number {
   return parsed;
 }
 
-export function runCli(argv: string[]): void {
+export async function runCli(argv: string[]): Promise<void> {
   const program = new Command();
 
   program
@@ -66,7 +68,7 @@ export function runCli(argv: string[]): void {
     .version("0.1.0")
     .addHelpText(
       "after",
-      "\nKey features:\n  --output <file>   Save a full HTML, Markdown, or JSON report.\n  --baseline <file> Show only new or regressed issues after the first run.\n  // secureai-ignore <RULE_ID>: <reason>   Ignore the next matching finding with a required reason.\n",
+      "\nKey features:\n  --output <file>   Save a full HTML, Markdown, or JSON report.\n  --baseline <file> Show only new or changed issues after the first run.\n  prompt <text>     Evaluate prompt text for common prompt-risk patterns.\n  // secureai-ignore <RULE_ID>: <reason>   Ignore the next matching finding with a required reason.\n",
     );
 
   program
@@ -81,14 +83,18 @@ export function runCli(argv: string[]): void {
     .option("--only-ai", "Run only AI/LLM-related rules")
     .option("--limit <number>", "Limit number of findings shown", parseLimit)
     .option("--output <file>", "Save a full report as HTML, Markdown, or JSON")
-    .option("--baseline <file>", "Track only new or regressed issues using a baseline file")
+    .option("--baseline <file>", "Track only new or changed issues using a baseline file")
+    .option(
+      "--check-dependencies",
+      "Check package.json and requirements.txt for missing or suspicious package names",
+    )
     .option("--debug", "Show scanned files and rule/filter info")
     .addHelpText(
       "after",
       "\nIgnore annotations:\n  // secureai-ignore <RULE_ID>: <reason>\nIgnores the next matching finding and records it under Ignored Findings.\n",
     )
     .action(
-      (
+      async (
         targetPath: string,
         options: {
           severity?: Severity;
@@ -97,6 +103,7 @@ export function runCli(argv: string[]): void {
           limit?: number;
           output?: string;
           baseline?: string;
+          checkDependencies?: boolean;
           debug?: boolean;
         },
       ) => {
@@ -106,7 +113,13 @@ export function runCli(argv: string[]): void {
         );
         const previousState = readScanState(targetPath);
         const scanResult = scanRepositoryDetailed(targetPath, { rules: selectedRules });
-        const findings = scanResult.findings;
+        const findings = [...scanResult.findings];
+        if (options.checkDependencies) {
+          const dependencyFindings = await scanDependencyFilesForRisks({
+            rootPath: targetPath,
+          });
+          findings.push(...dependencyFindings);
+        }
         const filtered = filterFindingsBySeverity(findings, options.severity);
         const filteredIgnored = filterIgnoredBySeverity(scanResult.ignoredFindings, options.severity);
 
@@ -115,11 +128,13 @@ export function runCli(argv: string[]): void {
           const baseline = applyBaseline(options.baseline, filtered);
           if (baseline.created) {
             process.stdout.write(
-              "Baseline created. Future runs will show only new or regressed issues.\n\n",
+              "Baseline created. Future runs will show only new or changed issues.\n\n",
             );
           } else {
             outputFindings = baseline.findings;
-            process.stdout.write(`New issues since baseline: ${baseline.newOrRegressedCount}\n\n`);
+            process.stdout.write(
+              `New issues since baseline: ${baseline.newOrRegressedCount} (baseline: ${baseline.baselineCount}, current: ${baseline.currentCount})\n\n`,
+            );
           }
         }
 
@@ -193,7 +208,27 @@ export function runCli(argv: string[]): void {
       process.stdout.write("```\n");
     });
 
-  program.parse(argv);
+  program
+    .command("prompt")
+    .argument("<promptText...>", "Raw prompt text to evaluate")
+    .description("Evaluate prompt text for common instruction and injection risk patterns")
+    .action((promptText: string[]) => {
+      const input = promptText.join(" ").trim();
+      const result = evaluatePromptRisk(input);
+      process.stdout.write("Prompt Risk Evaluator\n");
+      process.stdout.write("---------------------\n");
+      process.stdout.write(`Risk score: ${result.level}\n`);
+      process.stdout.write("Reasons:\n");
+      for (const reason of result.reasons) {
+        process.stdout.write(`- ${reason}\n`);
+      }
+      process.stdout.write("Suggestions:\n");
+      for (const suggestion of result.suggestions) {
+        process.stdout.write(`- ${suggestion}\n`);
+      }
+    });
+
+  await program.parseAsync(argv);
 }
 
 function resolveRuleSelection(
@@ -280,9 +315,7 @@ function maybePrintContextualHints(
   previousState: ScanState | undefined,
 ): void {
   if (report.summary.total > 10) {
-    process.stdout.write(
-      "\nTip: Large result sets can be noisy. Use --baseline to track only new issues.\n",
-    );
+    process.stdout.write("\nTip: use --baseline to focus on new issues.\n");
   }
 
   if (!outputPath) {
@@ -291,7 +324,7 @@ function maybePrintContextualHints(
 
   if (!baselinePath && previousState?.withoutBaselineRuns === 1) {
     process.stdout.write(
-      "Tip: Create a baseline to focus on new issues:\nnpx secureai-scan scan . --baseline secureai-baseline.json\n",
+      "Tip: you can create a baseline with --baseline <file>.\n",
     );
   }
 }

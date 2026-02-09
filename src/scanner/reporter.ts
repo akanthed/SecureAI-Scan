@@ -149,10 +149,6 @@ export function formatTerminalReport(report: ReportModel, limit = 3): string {
   }
   lines.push("");
 
-  if (report.summary.total > 20) {
-    lines.push("Tip: use --baseline to track only new issues.");
-  }
-
   if (top.length < report.summary.total) {
     lines.push(
       `Showing top ${top.length} of ${report.summary.total} findings. Use --output to export full report.`,
@@ -418,9 +414,10 @@ function formatMarkdown(report: ReportModel): string {
   lines.push("");
   lines.push("1. [Executive Summary](#1-executive-summary)");
   lines.push("2. [Priority Security Risks](#2-priority-security-risks)");
-  lines.push("3. [Detailed Findings](#3-detailed-findings)");
-  lines.push("4. [Ignored Findings](#4-ignored-findings)");
-  lines.push("5. [Informational Observations](#5-informational-observations)");
+  lines.push("3. [Immediate Fix Plan](#immediate-fix-plan)");
+  lines.push("4. [Detailed Findings](#3-detailed-findings)");
+  lines.push("5. [Ignored Findings](#4-ignored-findings)");
+  lines.push("6. [Informational Observations](#5-informational-observations)");
   lines.push("");
 
   lines.push("## 2. Priority Security Risks");
@@ -434,6 +431,7 @@ function formatMarkdown(report: ReportModel): string {
       );
       lines.push(`Category: ${riskCategoryForRule(finding.ruleId)}`);
       lines.push(`Impact: ${impactForRule(finding.ruleId)}`);
+      lines.push(`How to fix: ${finding.recommendation}`);
       lines.push(
         `Confidence: ${confidenceLabel(finding.confidenceMax)} *(${formatConfidenceRange(
           finding.confidenceMin,
@@ -443,6 +441,19 @@ function formatMarkdown(report: ReportModel): string {
       lines.push("");
     }
   }
+
+  lines.push("## Immediate Fix Plan");
+  lines.push("");
+  if (report.prioritizedFindings.length === 0) {
+    lines.push("No immediate actions required.");
+  } else {
+    for (const finding of report.prioritizedFindings) {
+      lines.push(
+        `- ${severityLabelPlain(finding.severity)} ${finding.ruleId}: ${finding.recommendation}`,
+      );
+    }
+  }
+  lines.push("");
 
   lines.push("## 3. Detailed Findings");
   lines.push("");
@@ -535,9 +546,10 @@ function formatHtml(report: ReportModel): string {
   const toc = [
     `<li><a href="#summary">1. Executive Summary</a></li>`,
     `<li><a href="#fix-first">2. Priority Security Risks</a></li>`,
-    `<li><a href="#critical-high">3. Detailed Findings</a></li>`,
-    `<li><a href="#ignored">4. Ignored Findings</a></li>`,
-    `<li><a href="#informational">5. Informational Observations</a></li>`,
+    `<li><a href="#fix-plan">3. Immediate Fix Plan</a></li>`,
+    `<li><a href="#critical-high">4. Detailed Findings</a></li>`,
+    `<li><a href="#ignored">5. Ignored Findings</a></li>`,
+    `<li><a href="#informational">6. Informational Observations</a></li>`,
   ].join("");
 
   const prioritized = report.prioritizedFindings
@@ -550,6 +562,7 @@ function formatHtml(report: ReportModel): string {
           </div>
           <div class="finding-meta">Category: ${escapeHtml(riskCategoryForRule(f.ruleId))}</div>
           <div class="finding-impact">Impact: ${escapeHtml(impactForRule(f.ruleId))}</div>
+          <div class="finding-fix"><strong>Fix:</strong> ${escapeHtml(f.recommendation)}</div>
           <div class="confidence">Confidence: ${confidenceLabel(
             f.confidenceMax,
           )} <span class="confidence-value">(${formatConfidenceRange(
@@ -557,6 +570,16 @@ function formatHtml(report: ReportModel): string {
             f.confidenceMax,
           )})</span></div>
         </div>`,
+    )
+    .join("");
+
+  const quickActions = report.prioritizedFindings
+    .slice(0, 3)
+    .map(
+      (finding) =>
+        `<li><span class="severity-tag small ${finding.severity}">${severityLabelPlain(
+          finding.severity,
+        )}</span> ${escapeHtml(finding.ruleId)}: ${escapeHtml(finding.recommendation)}</li>`,
     )
     .join("");
 
@@ -601,11 +624,12 @@ function formatHtml(report: ReportModel): string {
     <title>SecureAI-Scan Report</title>
     <style>
       :root {
-        --bg: #ffffff;
+        --bg: #f8fafc;
         --card: #ffffff;
         --text: #0f172a;
         --muted: #475569;
         --border: #e2e8f0;
+        --shadow: 0 8px 26px rgba(15, 23, 42, 0.06);
         --critical: #b91c1c;
         --high: #c2410c;
         --medium: #a16207;
@@ -613,7 +637,7 @@ function formatHtml(report: ReportModel): string {
       }
       body {
         margin: 0;
-        font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+        font-family: "Segoe UI", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
         background: var(--bg);
         color: var(--text);
         font-size: 15px;
@@ -622,17 +646,32 @@ function formatHtml(report: ReportModel): string {
       header {
         background: var(--card);
         border-bottom: 1px solid var(--border);
-        padding: 22px 24px 12px;
+        padding: 24px 24px 16px;
+        box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
       }
       .container {
         padding: 20px 24px 48px;
-        max-width: 960px;
+        max-width: 1040px;
         margin: 0 auto;
       }
       .page-title {
-        font-size: 20px;
+        font-size: 24px;
         font-weight: 700;
         letter-spacing: 0.01em;
+      }
+      .header-meta {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .header-chip {
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 4px 10px;
+        color: var(--muted);
+        font-size: 12px;
+        background: #f8fafc;
       }
       .report-section {
         background: var(--card);
@@ -640,6 +679,7 @@ function formatHtml(report: ReportModel): string {
         border-radius: 12px;
         padding: 18px;
         margin-top: 18px;
+        box-shadow: var(--shadow);
       }
       .section-title {
         margin: 0 0 12px;
@@ -675,6 +715,7 @@ function formatHtml(report: ReportModel): string {
         border: 1px solid var(--border);
         border-radius: 10px;
         padding: 12px;
+        background: #ffffff;
       }
       .summary-label {
         font-size: 11px;
@@ -700,10 +741,12 @@ function formatHtml(report: ReportModel): string {
       .priority-card,
       .finding-card {
         border: 1px solid var(--border);
-        border-left: 4px solid var(--border);
-        border-radius: 10px;
-        padding: 14px;
+        border-left: 6px solid var(--border);
+        border-radius: 12px;
+        padding: 16px;
         margin-top: 12px;
+        background: #ffffff;
+        box-shadow: 0 3px 12px rgba(15, 23, 42, 0.04);
       }
       .priority-card.critical,
       .finding-card.critical {
@@ -751,6 +794,14 @@ function formatHtml(report: ReportModel): string {
         color: var(--muted);
         font-size: 13px;
       }
+      .finding-fix {
+        margin-top: 8px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: #f8fafc;
+        font-size: 13px;
+      }
       .confidence {
         margin-top: 6px;
         color: var(--muted);
@@ -775,10 +826,10 @@ function formatHtml(report: ReportModel): string {
         font-size: 13px;
       }
       .callout {
-        margin-top: 12px;
+        margin-top: 0;
         border: 1px solid var(--border);
         border-radius: 8px;
-        padding: 10px 12px;
+        padding: 12px;
         background: #f8fafc;
       }
       .callout-title {
@@ -831,6 +882,28 @@ function formatHtml(report: ReportModel): string {
         margin: 18px 0 8px;
         font-size: 16px;
       }
+      .finding-main {
+        margin-top: 10px;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 12px;
+        align-items: start;
+      }
+      .finding-problem {
+        min-width: 0;
+      }
+      .quick-actions ul {
+        margin: 8px 0 0;
+        padding-left: 18px;
+      }
+      .quick-actions li {
+        margin-bottom: 8px;
+      }
+      .severity-tag.small {
+        font-size: 10px;
+        padding: 1px 6px;
+        margin-right: 6px;
+      }
       .informational {
         color: var(--muted);
         font-size: 13px;
@@ -854,12 +927,23 @@ function formatHtml(report: ReportModel): string {
       .next-steps ul {
         padding-left: 18px;
       }
+      @media (max-width: 860px) {
+        .finding-main {
+          grid-template-columns: 1fr;
+        }
+      }
     </style>
   </head>
   <body>
     <header>
       <div class="page-title">SecureAI-Scan Report</div>
       <div class="muted">Scanned at ${report.meta.scannedAt}</div>
+      <div class="header-meta">
+        <span class="header-chip">Risk posture: ${posture}</span>
+        <span class="header-chip">Total findings: ${report.summary.total}</span>
+        <span class="header-chip">Critical: ${report.summary.bySeverity.critical}</span>
+        <span class="header-chip">High: ${report.summary.bySeverity.high}</span>
+      </div>
     </header>
     <div class="container">
       <section id="summary" class="report-section">
@@ -904,18 +988,23 @@ function formatHtml(report: ReportModel): string {
         <div class="priority-list">${prioritized || "<div class=\"muted\">No issues found.</div>"}</div>
       </section>
 
+      <section id="fix-plan" class="report-section quick-actions">
+        <h2 class="section-title">3. Immediate Fix Plan</h2>
+        <ul>${quickActions || "<li class=\"muted\">No immediate actions.</li>"}</ul>
+      </section>
+
       <section id="critical-high" class="report-section">
-        <h2 class="section-title">3. Detailed Findings</h2>
+        <h2 class="section-title">4. Detailed Findings</h2>
         ${detailed || "<p class=\"muted\">No issues found.</p>"}
       </section>
 
       <section id="ignored" class="report-section informational">
-        <h2 class="section-title">4. Ignored Findings</h2>
+        <h2 class="section-title">5. Ignored Findings</h2>
         <ul class="ignored-list">${ignored || "<li class=\"muted\">None.</li>"}</ul>
       </section>
 
       <section id="informational" class="report-section informational">
-        <h2 class="section-title">5. Informational Observations</h2>
+        <h2 class="section-title">6. Informational Observations</h2>
         <ul>${info || "<li class=\"muted\">None.</li>"}</ul>
       </section>
 
@@ -962,13 +1051,17 @@ function renderGroup(group: ReportGroupedFinding): string {
         group.confidenceMin,
         group.confidenceMax,
       )})</span></div>
-      <div class="finding-body">${escapeHtml(group.reason)}</div>
-      <div class="finding-meta"><strong>Why this was flagged</strong></div>
-      <ul class="why-flagged">${whyFlagged}</ul>
-      ${note}
-      <div class="callout">
-        <div class="callout-title">How to fix</div>
-        <div>${escapeHtml(group.recommendation)}</div>
+      <div class="finding-main">
+        <div class="finding-problem">
+          <div class="finding-body">${escapeHtml(group.reason)}</div>
+          <div class="finding-meta"><strong>Why this was flagged</strong></div>
+          <ul class="why-flagged">${whyFlagged}</ul>
+          ${note}
+        </div>
+        <div class="callout">
+          <div class="callout-title">How to fix</div>
+          <div>${escapeHtml(group.recommendation)}</div>
+        </div>
       </div>
       <div class="occurrences"><strong>Occurrences:</strong><ul>${occurrences}</ul></div>
     </div>
