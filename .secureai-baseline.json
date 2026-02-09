@@ -1,0 +1,97 @@
+{
+  "schema": "secureai-baseline/v1",
+  "createdAt": "2026-02-09T12:23:12.121Z",
+  "findings": [
+    {
+      "rule_id": "AI003",
+      "file": "vulnerable\\llm_before_auth.ts",
+      "line": 8,
+      "severity": "critical",
+      "confidence": 0.4
+    },
+    {
+      "rule_id": "AI003",
+      "file": "vulnerable\\pii_to_llm.ts",
+      "line": 10,
+      "severity": "critical",
+      "confidence": 0.4
+    },
+    {
+      "rule_id": "AI003",
+      "file": "vulnerable\\prompt_injection.ts",
+      "line": 10,
+      "severity": "critical",
+      "confidence": 0.4
+    },
+    {
+      "rule_id": "AI004",
+      "file": "safe\\pii_to_llm.ts",
+      "line": 21,
+      "severity": "high",
+      "confidence": 0.5
+    },
+    {
+      "rule_id": "AI004",
+      "file": "vulnerable\\pii_to_llm.ts",
+      "line": 13,
+      "severity": "high",
+      "confidence": 0.7
+    },
+    {
+      "rule_id": "LLM_OPENAI_CHAT_COMPLETIONS_CREATE",
+      "file": "safe\\hardcoded_key.ts",
+      "line": 7,
+      "severity": "low",
+      "confidence": 0.2
+    },
+    {
+      "rule_id": "LLM_OPENAI_CHAT_COMPLETIONS_CREATE",
+      "file": "safe\\llm_before_auth.ts",
+      "line": 15,
+      "severity": "low",
+      "confidence": 0.2
+    },
+    {
+      "rule_id": "LLM_OPENAI_CHAT_COMPLETIONS_CREATE",
+      "file": "safe\\pii_to_llm.ts",
+      "line": 19,
+      "severity": "low",
+      "confidence": 0.2
+    },
+    {
+      "rule_id": "LLM_OPENAI_CHAT_COMPLETIONS_CREATE",
+      "file": "safe\\prompt_injection.ts",
+      "line": 14,
+      "severity": "low",
+      "confidence": 0.2
+    },
+    {
+      "rule_id": "LLM_OPENAI_CHAT_COMPLETIONS_CREATE",
+      "file": "vulnerable\\hardcoded_key.ts",
+      "line": 7,
+      "severity": "low",
+      "confidence": 0.2
+    },
+    {
+      "rule_id": "LLM_OPENAI_CHAT_COMPLETIONS_CREATE",
+      "file": "vulnerable\\llm_before_auth.ts",
+      "line": 8,
+      "severity": "low",
+      "confidence": 0.2
+    },
+    {
+      "rule_id": "LLM_OPENAI_CHAT_COMPLETIONS_CREATE",
+      "file": "vulnerable\\pii_to_llm.ts",
+      "line": 10,
+      "severity": "low",
+      "confidence": 0.2
+    },
+    {
+      "rule_id": "LLM_OPENAI_CHAT_COMPLETIONS_CREATE",
+      "file": "vulnerable\\prompt_injection.ts",
+      "line": 10,
+      "severity": "low",
+      "confidence": 0.2
+    }
+  ]
+}

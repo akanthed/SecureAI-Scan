@@ -4,6 +4,7 @@ import {
   buildReport,
   formatReport,
   formatTerminalReport,
+  type ReportBaselineDiff,
   type ReportModel,
 } from "./scanner/reporter.js";
 import type { Severity } from "./scanner/types.js";
@@ -124,8 +125,17 @@ export async function runCli(argv: string[]): Promise<void> {
         const filteredIgnored = filterIgnoredBySeverity(scanResult.ignoredFindings, options.severity);
 
         let outputFindings = filtered;
+        let baselineDiff: ReportBaselineDiff | undefined;
         if (options.baseline) {
           const baseline = applyBaseline(options.baseline, filtered);
+          baselineDiff = {
+            created: baseline.created,
+            baselinePath: options.baseline,
+            baselineCount: baseline.baselineCount,
+            currentCount: baseline.currentCount,
+            newOrRegressedCount: baseline.newOrRegressedCount,
+            unchangedCount: Math.max(0, baseline.currentCount - baseline.newOrRegressedCount),
+          };
           if (baseline.created) {
             process.stdout.write(
               "Baseline created. Future runs will show only new or changed issues.\n\n",
@@ -145,6 +155,7 @@ export async function runCli(argv: string[]): Promise<void> {
         }, {
           rootPath: targetPath,
           ignoredFindings: filteredIgnored,
+          baselineDiff,
         });
 
         if (options.output) {

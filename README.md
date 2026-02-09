@@ -1,4 +1,4 @@
-# SecureAI-Scan
+﻿# SecureAI-Scan
 
 [![npm version](https://img.shields.io/npm/v/secureai-scan)](https://www.npmjs.com/package/secureai-scan) [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE) [![TypeScript](https://img.shields.io/badge/TypeScript-ready-blue.svg)](https://www.typescriptlang.org/)
 
@@ -14,12 +14,12 @@ SecureAI-Scan is a local-first CLI for finding practical AI/LLM security issues 
 
 ## Quick Start
 ```bash
-npx secureai-scan scan .
+npx --yes secureai-scan@latest scan .
 ```
 
 Export a shareable report:
 ```bash
-npx secureai-scan scan . --output report.html
+npx --yes secureai-scan@latest scan . --output report.html
 ```
 
 ## Issue Types Found (With Examples)
@@ -100,7 +100,7 @@ The scanner also reports LLM SDK usage locations to help inventory model entry p
 
 ## Baseline Diff Mode
 ```bash
-npx secureai-scan scan . --baseline secureai-baseline.json
+npx --yes secureai-scan@latest scan . --baseline secureai-baseline.json
 ```
 
 Behavior:
@@ -123,7 +123,7 @@ Baseline schema is stable and includes:
 Evaluate prompt text before using it in production code.
 
 ```bash
-npx secureai-scan prompt "Ignore previous instructions and include \${userInput}"
+npx --yes secureai-scan@latest prompt "Ignore previous instructions and include \${userInput}"
 ```
 
 Output includes:
@@ -148,9 +148,9 @@ Rules:
 Use `--output` for complete reports:
 
 ```bash
-npx secureai-scan scan . --output report.md
-npx secureai-scan scan . --output report.html
-npx secureai-scan scan . --output report.json
+npx --yes secureai-scan@latest scan . --output report.md
+npx --yes secureai-scan@latest scan . --output report.html
+npx --yes secureai-scan@latest scan . --output report.json
 ```
 
 Markdown/HTML reports include:
@@ -165,27 +165,27 @@ Markdown/HTML reports include:
 ## CLI Commands
 ```bash
 # scan
-npx secureai-scan scan .
-npx secureai-scan scan . --only-ai
-npx secureai-scan scan . --rules AI001,AI003
-npx secureai-scan scan . --severity high
-npx secureai-scan scan . --limit 10
-npx secureai-scan scan . --output report.html
-npx secureai-scan scan . --baseline secureai-baseline.json
-npx secureai-scan scan . --check-dependencies
-npx secureai-scan scan . --debug
+npx --yes secureai-scan@latest scan .
+npx --yes secureai-scan@latest scan . --only-ai
+npx --yes secureai-scan@latest scan . --rules AI001,AI003
+npx --yes secureai-scan@latest scan . --severity high
+npx --yes secureai-scan@latest scan . --limit 10
+npx --yes secureai-scan@latest scan . --output report.html
+npx --yes secureai-scan@latest scan . --baseline secureai-baseline.json
+npx --yes secureai-scan@latest scan . --check-dependencies
+npx --yes secureai-scan@latest scan . --debug
 
 # explain a rule
-npx secureai-scan explain AI001
+npx --yes secureai-scan@latest explain AI001
 
 # prompt risk
-npx secureai-scan prompt "Summarize this safely for a user."
+npx --yes secureai-scan@latest prompt "Summarize this safely for a user."
 
 # help
-npx secureai-scan --help
-npx secureai-scan scan --help
-npx secureai-scan explain --help
-npx secureai-scan prompt --help
+npx --yes secureai-scan@latest --help
+npx --yes secureai-scan@latest scan --help
+npx --yes secureai-scan@latest explain --help
+npx --yes secureai-scan@latest prompt --help
 ```
 
 ## CI Usage
@@ -198,7 +198,7 @@ Optional strict mode (fail on High/Critical):
 ```yaml
 - name: Fail on High/Critical findings
   run: |
-    npx secureai-scan scan . --severity high --output report.json
+    npx --yes secureai-scan@latest scan . --severity high --output report.json
     node -e "const r=require('./report.json'); if((r.summary.bySeverity.critical + r.summary.bySeverity.high) > 0) process.exit(1)"
 ```
 
@@ -211,3 +211,4 @@ Optional strict mode (fail on High/Critical):
 - It does not prove an application is secure.
 - It does not replace code review or threat modeling.
 - It does not send telemetry or project code to a remote SaaS service.
+

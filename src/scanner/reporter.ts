@@ -1,4 +1,4 @@
-import fs from "node:fs";
+﻿import fs from "node:fs";
 import path from "node:path";
 import type { Finding, Severity } from "./types.js";
 
@@ -47,9 +47,19 @@ export interface ReportGroupedFinding {
   occurrences: ReportOccurrence[];
 }
 
+export interface ReportBaselineDiff {
+  created: boolean;
+  baselinePath: string;
+  baselineCount: number;
+  currentCount: number;
+  newOrRegressedCount: number;
+  unchangedCount: number;
+}
+
 export interface ReportModel {
   meta: ReportMeta;
   summary: ReportSummary;
+  baselineDiff?: ReportBaselineDiff;
   prioritizedFindings: ReportGroupedFinding[];
   allFindings: ReportGroupedFinding[];
   informational: ReportGroupedFinding[];
@@ -66,6 +76,7 @@ interface RiskCategoryGroup {
 export interface BuildReportOptions {
   rootPath?: string;
   ignoredFindings?: Array<{ finding: Finding; reason: string; annotationLine: number }>;
+  baselineDiff?: ReportBaselineDiff;
 }
 
 export function buildReport(
@@ -87,6 +98,7 @@ export function buildReport(
   return {
     meta,
     summary,
+    baselineDiff: options?.baselineDiff,
     prioritizedFindings: prioritized,
     allFindings: groupedIssues,
     informational: groupedInfo,
@@ -159,8 +171,14 @@ export function formatTerminalReport(report: ReportModel, limit = 3): string {
     lines.push("");
     lines.push("Informational:");
     for (const info of report.informational) {
-      const files = info.occurrences.map((o) => `${o.file}:${o.line}`).join(", ");
-      lines.push(`- ℹ️ ${info.title} (Not a vulnerability) — ${files}`);
+      const preview = summarizeOccurrences(info.occurrences, 5);
+      lines.push(`- INFO ${info.title} (Not a vulnerability)`);
+      for (const location of preview.shown) {
+        lines.push(`  ${location}`);
+      }
+      if (preview.remaining > 0) {
+        lines.push(`  ...and ${preview.remaining} more`);
+      }
     }
   }
 
@@ -277,13 +295,13 @@ function severityRank(severity: Severity): number {
 function severityLabel(severity: Severity): string {
   switch (severity) {
     case "critical":
-      return "🔴 CRITICAL";
+      return "CRITICAL";
     case "high":
-      return "🟠 HIGH";
+      return "HIGH";
     case "medium":
-      return "🟡 MEDIUM";
+      return "MEDIUM";
     case "low":
-      return "🟢 LOW";
+      return "LOW";
     default:
       return severity;
   }
@@ -396,28 +414,53 @@ function groupByRiskCategory(findings: ReportGroupedFinding[]): RiskCategoryGrou
 
 function formatMarkdown(report: ReportModel): string {
   const lines: string[] = [];
+  const posture = overallRiskPosture(report.summary);
+  const decision = releaseDecision(report.summary);
+  const mustFixCount = report.summary.bySeverity.critical + report.summary.bySeverity.high;
+  const topActions = buildTopActions(report.prioritizedFindings, 3);
+
   lines.push("# SecureAI-Scan Report");
   lines.push("");
   lines.push("## 1. Executive Summary");
   lines.push("");
   lines.push(`**Scanned at:** ${report.meta.scannedAt}`);
-  lines.push(`**Overall Risk Posture:** ${overallRiskPosture(report.summary)}`);
+  lines.push(`**Overall Risk Posture:** ${posture}`);
   lines.push(`**Total Findings:** ${report.summary.total}`);
   lines.push(
     `**Findings by Severity:** Critical ${report.summary.bySeverity.critical} / High ${report.summary.bySeverity.high} / Medium ${report.summary.bySeverity.medium} / Low ${report.summary.bySeverity.low}`,
   );
+  if (report.baselineDiff) {
+    if (report.baselineDiff.created) {
+      lines.push(`**Baseline:** Created in this run (captured ${report.baselineDiff.currentCount} findings)`);
+    } else {
+      lines.push(
+        `**Baseline Diff:** New or regressed ${report.baselineDiff.newOrRegressedCount} / Unchanged ${report.baselineDiff.unchangedCount} (baseline ${report.baselineDiff.baselineCount}, current ${report.baselineDiff.currentCount})`,
+      );
+    }
+  }
   lines.push("");
   lines.push(riskNarrative(report));
+  lines.push("");
+  lines.push("### Release Decision");
+  lines.push("");
+  lines.push(`- Status: **${decision.status}**`);
+  lines.push(`- Must-fix before release: **${mustFixCount}**`);
+  if (topActions.length > 0) {
+    lines.push("Top actions:");
+    for (const action of topActions) {
+      lines.push(`- ${action}`);
+    }
+  }
   lines.push("");
 
   lines.push("## Table of Contents");
   lines.push("");
   lines.push("1. [Executive Summary](#1-executive-summary)");
   lines.push("2. [Priority Security Risks](#2-priority-security-risks)");
-  lines.push("3. [Immediate Fix Plan](#immediate-fix-plan)");
-  lines.push("4. [Detailed Findings](#3-detailed-findings)");
-  lines.push("5. [Ignored Findings](#4-ignored-findings)");
-  lines.push("6. [Informational Observations](#5-informational-observations)");
+  lines.push("3. [Immediate Fix Plan](#3-immediate-fix-plan)");
+  lines.push("4. [Detailed Findings](#4-detailed-findings)");
+  lines.push("5. [Ignored Findings](#5-ignored-findings)");
+  lines.push("6. [Informational Observations](#6-informational-observations)");
   lines.push("");
 
   lines.push("## 2. Priority Security Risks");
@@ -427,11 +470,10 @@ function formatMarkdown(report: ReportModel): string {
   } else {
     for (const finding of report.prioritizedFindings) {
       lines.push(
-        `**${severityLabelPlain(finding.severity)} ${finding.ruleId} — ${finding.title}**`,
+        `**${severityLabelPlain(finding.severity)} ${finding.ruleId} - ${finding.title}**`,
       );
-      lines.push(`Category: ${riskCategoryForRule(finding.ruleId)}`);
       lines.push(`Impact: ${impactForRule(finding.ruleId)}`);
-      lines.push(`How to fix: ${finding.recommendation}`);
+      lines.push(`How to fix now: ${shortFixForRule(finding.ruleId, finding.recommendation)}`);
       lines.push(
         `Confidence: ${confidenceLabel(finding.confidenceMax)} *(${formatConfidenceRange(
           finding.confidenceMin,
@@ -442,20 +484,18 @@ function formatMarkdown(report: ReportModel): string {
     }
   }
 
-  lines.push("## Immediate Fix Plan");
+  lines.push("## 3. Immediate Fix Plan");
   lines.push("");
-  if (report.prioritizedFindings.length === 0) {
+  if (topActions.length === 0) {
     lines.push("No immediate actions required.");
   } else {
-    for (const finding of report.prioritizedFindings) {
-      lines.push(
-        `- ${severityLabelPlain(finding.severity)} ${finding.ruleId}: ${finding.recommendation}`,
-      );
+    for (const action of topActions) {
+      lines.push(`- ${action}`);
     }
   }
   lines.push("");
 
-  lines.push("## 3. Detailed Findings");
+  lines.push("## 4. Detailed Findings");
   lines.push("");
   if (report.allFindings.length === 0) {
     lines.push("No issues found.");
@@ -466,10 +506,12 @@ function formatMarkdown(report: ReportModel): string {
       lines.push(`### ${category.category}`);
       lines.push("");
       for (const group of category.findings) {
-        const occurrences = group.occurrences.map((o) => `${o.file}:${o.line}`).join(", ");
+        const evidence = splitEvidenceOccurrences(group.occurrences, 2);
+        const exploit = exploitPathForRule(group.ruleId);
         lines.push(
-          `**${severityLabelPlain(group.severity)} ${group.ruleId} — ${group.title}**`,
+          `**${severityLabelPlain(group.severity)} ${group.ruleId} - ${group.title}**`,
         );
+        lines.push(`Impact: ${impactForRule(group.ruleId)}`);
         lines.push(
           `Confidence: ${confidenceLabel(group.confidenceMax)} *(${formatConfidenceRange(
             group.confidenceMin,
@@ -486,13 +528,28 @@ function formatMarkdown(report: ReportModel): string {
             "Note: Some findings are flagged conservatively to encourage data minimization.",
           );
         }
+        lines.push("Exploit path:");
+        lines.push(`- Trigger: ${exploit.trigger}`);
+        lines.push(`- Exposure: ${exploit.exposure}`);
+        lines.push(`- Impact: ${exploit.impact}`);
+        lines.push(`- Mitigation: ${exploit.mitigation}`);
         lines.push(`How to fix: ${group.recommendation}`);
-        lines.push(`**Occurrences:** ${occurrences}`);
-        for (const occ of group.occurrences) {
-          lines.push(`- ${occ.file}:${occ.line}`);
-          const snippet = renderMarkdownSnippet(occ.snippet);
-          for (const snippetLine of snippet) {
-            lines.push(snippetLine);
+        lines.push("**Evidence:**");
+        if (evidence.primary.length === 0) {
+          lines.push("- None.");
+        } else {
+          for (const occ of evidence.primary) {
+            lines.push(`- ${occ.file}:${occ.line}`);
+            const snippet = renderMarkdownSnippet(occ.snippet);
+            for (const snippetLine of snippet) {
+              lines.push(snippetLine);
+            }
+          }
+        }
+        if (evidence.overflow.length > 0) {
+          lines.push(`Additional occurrences (${evidence.overflow.length}):`);
+          for (const occ of evidence.overflow) {
+            lines.push(`- ${occ.file}:${occ.line}`);
           }
         }
         lines.push("");
@@ -500,7 +557,7 @@ function formatMarkdown(report: ReportModel): string {
     }
   }
 
-  lines.push("## 4. Ignored Findings");
+  lines.push("## 5. Ignored Findings");
   lines.push("");
   if (report.ignoredFindings.length === 0) {
     lines.push("None.");
@@ -518,14 +575,23 @@ function formatMarkdown(report: ReportModel): string {
   }
   lines.push("");
 
-  lines.push("## 5. Informational Observations");
+  lines.push("## 6. Informational Observations");
   lines.push("");
   if (report.informational.length === 0) {
     lines.push("None.");
   } else {
     for (const info of report.informational) {
-      const files = info.occurrences.map((o) => `${o.file}:${o.line}`).join(", ");
-      lines.push(`- ${info.title} (Not a vulnerability) — ${files}`);
+      const preview = summarizeOccurrences(info.occurrences, 6);
+      lines.push(`### ${info.title} (Not a vulnerability)`);
+      lines.push("");
+      lines.push(`Occurrences: ${info.occurrences.length}`);
+      for (const location of preview.shown) {
+        lines.push(`- ${location}`);
+      }
+      if (preview.remaining > 0) {
+        lines.push(`- ...and ${preview.remaining} more`);
+      }
+      lines.push("");
     }
   }
   lines.push("");
@@ -535,7 +601,7 @@ function formatMarkdown(report: ReportModel): string {
   lines.push("- Create a baseline to reduce noise over time.");
   lines.push("- Fix Critical and High issues first.");
   lines.push("- Add ignore annotations for findings you have reviewed.");
-  lines.push("- Consider running SecureAI-Scan in CI to catch regressions earlier.");
+  lines.push("- Run SecureAI-Scan in CI to catch regressions earlier.");
   lines.push("");
 
   return lines.join("\n");
@@ -543,6 +609,11 @@ function formatMarkdown(report: ReportModel): string {
 
 function formatHtml(report: ReportModel): string {
   const posture = overallRiskPosture(report.summary);
+  const decision = releaseDecision(report.summary);
+  const mustFixCount = report.summary.bySeverity.critical + report.summary.bySeverity.high;
+  const topActions = buildTopActions(report.prioritizedFindings, 3);
+  const riskMix = buildRiskMixConic(report.summary);
+  const riskPercents = riskPercentages(report.summary);
   const toc = [
     `<li><a href="#summary">1. Executive Summary</a></li>`,
     `<li><a href="#fix-first">2. Priority Security Risks</a></li>`,
@@ -552,18 +623,30 @@ function formatHtml(report: ReportModel): string {
     `<li><a href="#informational">6. Informational Observations</a></li>`,
   ].join("");
 
+  const baselineDigest = report.baselineDiff
+    ? report.baselineDiff.created
+      ? `<div class="decision-row"><span>Baseline</span><strong>Created in this run</strong></div>
+       <div class="decision-row muted"><span>Captured findings</span><strong>${report.baselineDiff.currentCount}</strong></div>`
+      : `<div class="decision-row"><span>Baseline Diff</span><strong>New/regressed ${report.baselineDiff.newOrRegressedCount} | Unchanged ${report.baselineDiff.unchangedCount}</strong></div>
+       <div class="decision-row muted"><span>Comparison</span><strong>Baseline ${report.baselineDiff.baselineCount} | Current ${report.baselineDiff.currentCount}</strong></div>`
+    : `<div class="decision-row muted"><span>Baseline Diff</span><strong>Not active</strong></div>`;
+
+  const decisionActions = topActions.map((action) => `<li>${escapeHtml(action)}</li>`).join("");
+
   const prioritized = report.prioritizedFindings
     .map(
       (f) =>
         `<div class="priority-card ${f.severity}">
           <div class="finding-header">
             <span class="severity-tag ${f.severity}">${severityLabelPlain(f.severity)}</span>
-            <span class="finding-title">${escapeHtml(f.ruleId)} — ${escapeHtml(f.title)}</span>
+            <span class="finding-title">${escapeHtml(f.ruleId)} - ${escapeHtml(f.title)}</span>
           </div>
           <div class="finding-meta">Category: ${escapeHtml(riskCategoryForRule(f.ruleId))}</div>
           <div class="finding-impact">Impact: ${escapeHtml(impactForRule(f.ruleId))}</div>
-          <div class="finding-fix"><strong>Fix:</strong> ${escapeHtml(f.recommendation)}</div>
-          <div class="confidence">Confidence: ${confidenceLabel(
+          <div class="finding-fix"><strong>How to fix now:</strong> ${escapeHtml(
+            shortFixForRule(f.ruleId, f.recommendation),
+          )}</div>
+          <div class="confidence"><span class="confidence-pill">Confidence</span> ${confidenceLabel(
             f.confidenceMax,
           )} <span class="confidence-value">(${formatConfidenceRange(
             f.confidenceMin,
@@ -579,7 +662,7 @@ function formatHtml(report: ReportModel): string {
       (finding) =>
         `<li><span class="severity-tag small ${finding.severity}">${severityLabelPlain(
           finding.severity,
-        )}</span> ${escapeHtml(finding.ruleId)}: ${escapeHtml(finding.recommendation)}</li>`,
+        )}</span> ${escapeHtml(finding.ruleId)}: ${escapeHtml(shortFixForRule(finding.ruleId, finding.recommendation))}</li>`,
     )
     .join("");
 
@@ -596,10 +679,19 @@ function formatHtml(report: ReportModel): string {
 
   const info = report.informational
     .map((f) => {
-      const files = f.occurrences.map((o) => `${escapeHtml(o.file)}:${o.line}`).join(", ");
-      return `<li>${escapeHtml(
-        f.title,
-      )} <span class="info-tag">Not a vulnerability</span><br/><span class="muted">${files}</span></li>`;
+      const preview = summarizeOccurrences(f.occurrences, 6);
+      const locations = preview.shown
+        .map((location) => `<li>${escapeHtml(location)}</li>`)
+        .join("");
+      const remaining =
+        preview.remaining > 0
+          ? `<li class="muted">...and ${preview.remaining} more</li>`
+          : "";
+      return `<li>
+        ${escapeHtml(f.title)} <span class="info-tag">Not a vulnerability</span>
+        <div class="muted">Occurrences: ${f.occurrences.length}</div>
+        <ul class="info-locations">${locations}${remaining}</ul>
+      </li>`;
     })
     .join("");
 
@@ -624,40 +716,66 @@ function formatHtml(report: ReportModel): string {
     <title>SecureAI-Scan Report</title>
     <style>
       :root {
-        --bg: #f8fafc;
+        --bg: #edf2f7;
         --card: #ffffff;
         --text: #0f172a;
         --muted: #475569;
-        --border: #e2e8f0;
-        --shadow: 0 8px 26px rgba(15, 23, 42, 0.06);
-        --critical: #b91c1c;
-        --high: #c2410c;
-        --medium: #a16207;
-        --low: #15803d;
+        --border: #d7e1ee;
+        --border-strong: #c5d2e3;
+        --shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+        --accent-1: #0ea5e9;
+        --accent-2: #22c55e;
+        --critical: #c1272d;
+        --high: #d46f06;
+        --medium: #9a6a00;
+        --low: #1f8a4d;
       }
       body {
         margin: 0;
-        font-family: "Segoe UI", "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+        font-family: "Segoe UI", "Helvetica Neue", Arial, system-ui, -apple-system, sans-serif;
         background: var(--bg);
         color: var(--text);
-        font-size: 15px;
-        line-height: 1.5;
+        font-size: 16px;
+        line-height: 1.6;
+        position: relative;
+      }
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background-image:
+          radial-gradient(circle at 20% 18%, rgba(14, 165, 233, 0.08), transparent 26%),
+          radial-gradient(circle at 84% 14%, rgba(34, 197, 94, 0.08), transparent 24%);
+        pointer-events: none;
+        z-index: -1;
       }
       header {
         background: var(--card);
         border-bottom: 1px solid var(--border);
-        padding: 24px 24px 16px;
+        padding: 20px 24px 12px;
         box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+        position: static;
+      }
+      header::after {
+        content: "";
+        display: block;
+        margin-top: 12px;
+        height: 3px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, var(--critical), var(--high), var(--accent-1), var(--accent-2));
+        background-size: 220% 220%;
+        animation: moveGradient 7s linear infinite;
       }
       .container {
-        padding: 20px 24px 48px;
-        max-width: 1040px;
+        width: min(1320px, calc(100vw - 32px));
+        padding: 16px 0 48px;
         margin: 0 auto;
       }
       .page-title {
-        font-size: 24px;
-        font-weight: 700;
-        letter-spacing: 0.01em;
+        font-size: 30px;
+        font-weight: 760;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
       }
       .header-meta {
         margin-top: 8px;
@@ -668,10 +786,15 @@ function formatHtml(report: ReportModel): string {
       .header-chip {
         border: 1px solid var(--border);
         border-radius: 999px;
-        padding: 4px 10px;
+        padding: 5px 11px;
         color: var(--muted);
         font-size: 12px;
         background: #f8fafc;
+        transition: transform 220ms ease, box-shadow 220ms ease;
+      }
+      .header-chip:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
       }
       .report-section {
         background: var(--card);
@@ -680,36 +803,74 @@ function formatHtml(report: ReportModel): string {
         padding: 18px;
         margin-top: 18px;
         box-shadow: var(--shadow);
+        animation: riseIn 420ms ease both;
+      }
+      .report-section:nth-of-type(2) { animation-delay: 45ms; }
+      .report-section:nth-of-type(3) { animation-delay: 90ms; }
+      .report-section:nth-of-type(4) { animation-delay: 135ms; }
+      .report-section:nth-of-type(5) { animation-delay: 180ms; }
+      .report-section:nth-of-type(6) { animation-delay: 225ms; }
+      .report-section:nth-of-type(7) { animation-delay: 270ms; }
+      @media (prefers-reduced-motion: reduce) {
+        .report-section {
+          animation: none;
+        }
+      }
+      @keyframes riseIn {
+        from { opacity: 0; transform: translateY(9px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes moveGradient {
+        0% { background-position: 0% 50%; }
+        100% { background-position: 220% 50%; }
       }
       .section-title {
         margin: 0 0 12px;
-        font-size: 20px;
+        font-size: 28px;
         font-weight: 700;
+        line-height: 1.15;
+        letter-spacing: -0.02em;
+      }
+      .section-title.small {
+        font-size: 22px;
       }
       .meta-line {
         color: var(--muted);
-        font-size: 13px;
+        font-size: 14px;
       }
       .toc-list {
         margin: 0;
-        padding-left: 18px;
-      }
-      .toc-list li {
-        margin: 6px 0;
+        padding-left: 0;
+        list-style: none;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 6px;
       }
       .toc-list a {
+        display: block;
         color: var(--text);
         text-decoration: none;
-        border-bottom: 1px solid var(--border);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 6px 9px;
+        font-size: 14px;
+        background: #ffffff;
       }
       .toc-list a:hover {
-        border-bottom-color: var(--text);
+        border-color: var(--border-strong);
+        background: #f0f7ff;
       }
       .summary-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
         gap: 12px;
         margin-top: 12px;
+      }
+      .summary-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 300px;
+        gap: 14px;
+        align-items: stretch;
       }
       .summary-item {
         border: 1px solid var(--border);
@@ -724,15 +885,149 @@ function formatHtml(report: ReportModel): string {
         color: var(--muted);
       }
       .summary-value {
-        font-size: 18px;
-        font-weight: 700;
-        margin-top: 6px;
+        font-size: 32px;
+        font-weight: 740;
+        line-height: 1;
+        margin-top: 8px;
+      }
+      .risk-panel {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #ffffff;
+        padding: 12px;
+        display: grid;
+        grid-template-columns: 120px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+      }
+      .risk-donut {
+        width: 112px;
+        height: 112px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.05);
+        animation: spinIn 820ms cubic-bezier(.2,.8,.2,1);
+      }
+      .risk-donut-hole {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: #ffffff;
+        border: 1px solid var(--border);
+        display: grid;
+        place-items: center;
+        text-align: center;
+        font-size: 11px;
+        color: var(--muted);
+        line-height: 1.2;
+      }
+      .risk-donut-hole strong {
+        display: block;
+        color: var(--text);
+        font-size: 13px;
+        margin-top: 2px;
+      }
+      .risk-legend {
+        margin: 0;
+        padding-left: 0;
+        list-style: none;
+      }
+      .risk-legend li {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 12px;
+        margin-bottom: 7px;
+      }
+      .risk-legend .left {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .risk-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+      }
+      .risk-dot.critical { background: var(--critical); }
+      .risk-dot.high { background: var(--high); }
+      .risk-dot.medium { background: var(--medium); }
+      .risk-dot.low { background: var(--low); }
+      @keyframes spinIn {
+        from { transform: rotate(-110deg) scale(0.9); opacity: 0; }
+        to { transform: rotate(0deg) scale(1); opacity: 1; }
       }
       .risk.high { color: var(--critical); }
       .risk.medium { color: var(--medium); }
       .risk.low { color: var(--low); }
       .muted {
         color: var(--muted);
+      }
+      .toc-section {
+        background: #f7fafc;
+        border-color: var(--border-strong);
+        position: static;
+      }
+      .decision-panel {
+        margin-top: 14px;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px;
+        background: #f8fbff;
+      }
+      .decision-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .decision-status,
+      .decision-details {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: #ffffff;
+      }
+      .decision-status-label {
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .decision-status-value {
+        margin-top: 6px;
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .decision-status-value.block {
+        color: var(--critical);
+      }
+      .decision-status-value.caution {
+        color: var(--high);
+      }
+      .decision-status-value.ready {
+        color: var(--low);
+      }
+      .decision-row {
+        font-size: 13px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .decision-row + .decision-row {
+        margin-top: 6px;
+      }
+      .decision-row strong {
+        color: var(--text);
+      }
+      .decision-actions {
+        margin: 10px 0 0;
+        padding-left: 18px;
+      }
+      .decision-actions li {
+        margin-bottom: 4px;
       }
       .priority-list {
         display: grid;
@@ -747,6 +1042,12 @@ function formatHtml(report: ReportModel): string {
         margin-top: 12px;
         background: #ffffff;
         box-shadow: 0 3px 12px rgba(15, 23, 42, 0.04);
+        transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+      }
+      .priority-card:hover,
+      .finding-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 24px rgba(15, 23, 42, 0.09);
       }
       .priority-card.critical,
       .finding-card.critical {
@@ -771,7 +1072,9 @@ function formatHtml(report: ReportModel): string {
         font-weight: 600;
       }
       .finding-title {
-        font-size: 16px;
+        font-size: 23px;
+        line-height: 1.3;
+        font-weight: 700;
       }
       .severity-tag {
         font-size: 11px;
@@ -788,24 +1091,46 @@ function formatHtml(report: ReportModel): string {
       .severity-tag.high { color: var(--high); border-color: rgba(194, 65, 12, 0.35); }
       .severity-tag.medium { color: var(--medium); border-color: rgba(161, 98, 7, 0.35); }
       .severity-tag.low { color: var(--low); border-color: rgba(21, 128, 61, 0.35); }
+      .severity-tag.critical {
+        animation: heartbeat 2600ms ease-in-out infinite;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .severity-tag.critical {
+          animation: none;
+        }
+      }
+      @keyframes heartbeat {
+        0%, 100% { transform: scale(1); }
+        10% { transform: scale(1.03); }
+        20% { transform: scale(1); }
+      }
       .finding-meta,
       .finding-impact {
-        margin-top: 6px;
+        margin-top: 8px;
         color: var(--muted);
-        font-size: 13px;
+        font-size: 14px;
       }
       .finding-fix {
-        margin-top: 8px;
-        padding: 8px 10px;
+        margin-top: 10px;
+        padding: 9px 11px;
         border: 1px solid var(--border);
         border-radius: 8px;
-        background: #f8fafc;
-        font-size: 13px;
+        background: #f8fbff;
+        font-size: 14px;
       }
       .confidence {
-        margin-top: 6px;
+        margin-top: 10px;
         color: var(--muted);
-        font-size: 12px;
+        font-size: 14px;
+      }
+      .confidence-pill {
+        font-size: 11px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 1px 7px;
+        margin-right: 8px;
       }
       .confidence-value {
         opacity: 0.7;
@@ -814,16 +1139,18 @@ function formatHtml(report: ReportModel): string {
       .finding-body {
         margin-top: 10px;
       }
-      .why-flagged {
+      .why-flagged,
+      .exploit-path,
+      .compact-occurrences {
         margin: 6px 0 0;
         padding-left: 18px;
         color: var(--muted);
-        font-size: 13px;
+        font-size: 14px;
       }
       .note {
         margin-top: 8px;
         color: var(--muted);
-        font-size: 13px;
+        font-size: 14px;
       }
       .callout {
         margin-top: 0;
@@ -842,7 +1169,7 @@ function formatHtml(report: ReportModel): string {
       }
       .occurrences {
         margin-top: 10px;
-        font-size: 12px;
+        font-size: 14px;
         color: var(--muted);
       }
       .occurrences ul {
@@ -879,8 +1206,8 @@ function formatHtml(report: ReportModel): string {
         margin-bottom: 10px;
       }
       .category-block h3 {
-        margin: 18px 0 8px;
-        font-size: 16px;
+        margin: 18px 0 10px;
+        font-size: 24px;
       }
       .finding-main {
         margin-top: 10px;
@@ -906,10 +1233,17 @@ function formatHtml(report: ReportModel): string {
       }
       .informational {
         color: var(--muted);
-        font-size: 13px;
+        font-size: 14px;
       }
       .informational ul {
         padding-left: 18px;
+      }
+      .info-locations {
+        margin-top: 6px;
+        padding-left: 18px;
+      }
+      .info-locations li {
+        margin-bottom: 4px;
       }
       .info-tag {
         display: inline-block;
@@ -922,14 +1256,55 @@ function formatHtml(report: ReportModel): string {
       }
       .next-steps {
         color: var(--muted);
-        font-size: 13px;
+        font-size: 14px;
       }
       .next-steps ul {
         padding-left: 18px;
       }
-      @media (max-width: 860px) {
+      @media (max-width: 940px) {
+        .container {
+          width: calc(100vw - 20px);
+          padding-top: 12px;
+        }
+        .summary-layout {
+          grid-template-columns: 1fr;
+        }
+        .decision-grid {
+          grid-template-columns: 1fr;
+        }
         .finding-main {
           grid-template-columns: 1fr;
+        }
+        .risk-panel {
+          grid-template-columns: 1fr;
+          justify-items: center;
+        }
+        .finding-title {
+          font-size: 19px;
+        }
+        .section-title {
+          font-size: 24px;
+        }
+      }
+      @media print {
+        body {
+          background: #ffffff;
+          font-size: 12pt;
+        }
+        header {
+          position: static;
+          box-shadow: none;
+        }
+        .toc-section {
+          position: static;
+        }
+        .report-section {
+          break-inside: avoid;
+          box-shadow: none;
+          border-color: #d1d5db;
+        }
+        .snippet {
+          white-space: pre-wrap;
         }
       }
     </style>
@@ -937,7 +1312,7 @@ function formatHtml(report: ReportModel): string {
   <body>
     <header>
       <div class="page-title">SecureAI-Scan Report</div>
-      <div class="muted">Scanned at ${report.meta.scannedAt}</div>
+      <div class="meta-line">Scanned at ${report.meta.scannedAt}</div>
       <div class="header-meta">
         <span class="header-chip">Risk posture: ${posture}</span>
         <span class="header-chip">Total findings: ${report.summary.total}</span>
@@ -949,37 +1324,79 @@ function formatHtml(report: ReportModel): string {
       <section id="summary" class="report-section">
         <h2 class="section-title">1. Executive Summary</h2>
         <div class="meta-line">Scanned at ${report.meta.scannedAt}</div>
-        <div class="summary-grid">
-          <div class="summary-item">
-            <div class="summary-label">Overall Risk Posture</div>
-            <div class="summary-value risk ${posture.toLowerCase()}">${posture}</div>
+        <div class="summary-layout">
+          <div class="summary-grid">
+            <div class="summary-item">
+              <div class="summary-label">Overall Risk Posture</div>
+              <div class="summary-value risk ${posture.toLowerCase()}">${posture}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">Total Findings</div>
+              <div class="summary-value">${report.summary.total}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">Critical</div>
+              <div class="summary-value">${report.summary.bySeverity.critical}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">High</div>
+              <div class="summary-value">${report.summary.bySeverity.high}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">Medium</div>
+              <div class="summary-value">${report.summary.bySeverity.medium}</div>
+            </div>
+            <div class="summary-item">
+              <div class="summary-label">Low</div>
+              <div class="summary-value">${report.summary.bySeverity.low}</div>
+            </div>
           </div>
-          <div class="summary-item">
-            <div class="summary-label">Total Findings</div>
-            <div class="summary-value">${report.summary.total}</div>
-          </div>
-          <div class="summary-item">
-            <div class="summary-label">Critical</div>
-            <div class="summary-value">${report.summary.bySeverity.critical}</div>
-          </div>
-          <div class="summary-item">
-            <div class="summary-label">High</div>
-            <div class="summary-value">${report.summary.bySeverity.high}</div>
-          </div>
-          <div class="summary-item">
-            <div class="summary-label">Medium</div>
-            <div class="summary-value">${report.summary.bySeverity.medium}</div>
-          </div>
-          <div class="summary-item">
-            <div class="summary-label">Low</div>
-            <div class="summary-value">${report.summary.bySeverity.low}</div>
-          </div>
+          <aside class="risk-panel">
+            <div class="risk-donut" style="background: conic-gradient(${riskMix});">
+              <div class="risk-donut-hole">
+                Risk
+                <strong>${posture}</strong>
+              </div>
+            </div>
+            <ul class="risk-legend">
+              <li>
+                <span class="left"><span class="risk-dot critical"></span>Critical</span>
+                <span>${report.summary.bySeverity.critical} (${riskPercents.critical}%)</span>
+              </li>
+              <li>
+                <span class="left"><span class="risk-dot high"></span>High</span>
+                <span>${report.summary.bySeverity.high} (${riskPercents.high}%)</span>
+              </li>
+              <li>
+                <span class="left"><span class="risk-dot medium"></span>Medium</span>
+                <span>${report.summary.bySeverity.medium} (${riskPercents.medium}%)</span>
+              </li>
+              <li>
+                <span class="left"><span class="risk-dot low"></span>Low</span>
+                <span>${report.summary.bySeverity.low} (${riskPercents.low}%)</span>
+              </li>
+            </ul>
+          </aside>
         </div>
         <p class="finding-body">${escapeHtml(riskNarrative(report))}</p>
+        <div class="decision-panel">
+          <h3 class="section-title small">Release Decision</h3>
+          <div class="decision-grid">
+            <div class="decision-status">
+              <div class="decision-status-label">Status</div>
+              <div class="decision-status-value ${decision.cssClass}">${decision.status}</div>
+            </div>
+            <div class="decision-details">
+              <div class="decision-row"><span>Must-fix before release</span><strong>${mustFixCount}</strong></div>
+              ${baselineDigest}
+            </div>
+          </div>
+          <ul class="decision-actions">${decisionActions || "<li class=\"muted\">No urgent actions.</li>"}</ul>
+        </div>
       </section>
 
-      <section class="report-section">
-        <h2 class="section-title">Table of Contents</h2>
+      <section class="report-section toc-section">
+        <h2 class="section-title small">Table of Contents</h2>
         <ol class="toc-list">${toc}</ol>
       </section>
 
@@ -1014,7 +1431,7 @@ function formatHtml(report: ReportModel): string {
           <li>Create a baseline to reduce noise over time.</li>
           <li>Fix Critical and High issues first.</li>
           <li>Add ignore annotations for findings you have reviewed.</li>
-          <li>Consider running SecureAI-Scan in CI to catch regressions earlier.</li>
+          <li>Run SecureAI-Scan in CI to catch regressions earlier.</li>
         </ul>
       </section>
     </div>
@@ -1023,16 +1440,21 @@ function formatHtml(report: ReportModel): string {
 }
 
 function renderGroup(group: ReportGroupedFinding): string {
-  const occurrences = group.occurrences
-    .map((o) => {
-      const location = `${escapeHtml(o.file)}:${o.line}`;
-      const snippet = renderHtmlSnippet(o.snippet);
+  const evidence = splitEvidenceOccurrences(group.occurrences, 2);
+  const primaryOccurrences = evidence.primary
+    .map((occurrence) => {
+      const location = `${escapeHtml(occurrence.file)}:${occurrence.line}`;
+      const snippet = renderHtmlSnippet(occurrence.snippet);
       return `<li>${location}${snippet}</li>`;
     })
+    .join("");
+  const overflowOccurrences = evidence.overflow
+    .map((occurrence) => `<li>${escapeHtml(occurrence.file)}:${occurrence.line}</li>`)
     .join("");
   const whyFlagged = whyFlaggedForRule(group.ruleId)
     .map((reason) => `<li>${escapeHtml(reason)}</li>`)
     .join("");
+  const exploitPath = exploitPathForRule(group.ruleId);
   const note =
     group.ruleId === "AI004"
       ? `<div class="note">Note: Some findings are flagged conservatively to encourage data minimization.</div>`
@@ -1043,9 +1465,9 @@ function renderGroup(group: ReportGroupedFinding): string {
         <span class="severity-tag ${group.severity}">${severityLabelPlain(
           group.severity,
         )}</span>
-        <span class="finding-title">${escapeHtml(group.ruleId)} — ${escapeHtml(group.title)}</span>
+        <span class="finding-title">${escapeHtml(group.ruleId)} - ${escapeHtml(group.title)}</span>
       </div>
-      <div class="confidence">Confidence: ${confidenceLabel(
+      <div class="confidence"><span class="confidence-pill">Confidence</span> ${confidenceLabel(
         group.confidenceMax,
       )} <span class="confidence-value">(${formatConfidenceRange(
         group.confidenceMin,
@@ -1056,6 +1478,13 @@ function renderGroup(group: ReportGroupedFinding): string {
           <div class="finding-body">${escapeHtml(group.reason)}</div>
           <div class="finding-meta"><strong>Why this was flagged</strong></div>
           <ul class="why-flagged">${whyFlagged}</ul>
+          <div class="finding-meta"><strong>Exploit path</strong></div>
+          <ul class="exploit-path">
+            <li><strong>Trigger:</strong> ${escapeHtml(exploitPath.trigger)}</li>
+            <li><strong>Exposure:</strong> ${escapeHtml(exploitPath.exposure)}</li>
+            <li><strong>Impact:</strong> ${escapeHtml(exploitPath.impact)}</li>
+            <li><strong>Mitigation:</strong> ${escapeHtml(exploitPath.mitigation)}</li>
+          </ul>
           ${note}
         </div>
         <div class="callout">
@@ -1063,11 +1492,15 @@ function renderGroup(group: ReportGroupedFinding): string {
           <div>${escapeHtml(group.recommendation)}</div>
         </div>
       </div>
-      <div class="occurrences"><strong>Occurrences:</strong><ul>${occurrences}</ul></div>
+      <div class="occurrences"><strong>Evidence (with snippets):</strong><ul>${primaryOccurrences || "<li>None.</li>"}</ul></div>
+      ${
+        overflowOccurrences
+          ? `<div class="occurrences"><strong>Additional occurrences (${evidence.overflow.length}):</strong><ul class="compact-occurrences">${overflowOccurrences}</ul></div>`
+          : ""
+      }
     </div>
   `;
 }
-
 function whyFlaggedForRule(ruleId: string): string[] {
   switch (ruleId) {
     case "AI001":
@@ -1213,3 +1646,144 @@ function impactForRule(ruleId: string): string {
       return "Security risk may be triggered in production usage.";
   }
 }
+
+interface ReleaseDecision {
+  status: string;
+  cssClass: "block" | "caution" | "ready";
+}
+
+function releaseDecision(summary: ReportSummary): ReleaseDecision {
+  if (summary.bySeverity.critical > 0 || summary.bySeverity.high > 0) {
+    return { status: "Block Release", cssClass: "block" };
+  }
+  if (summary.bySeverity.medium > 0) {
+    return { status: "Proceed with Caution", cssClass: "caution" };
+  }
+  return { status: "Ready for Release", cssClass: "ready" };
+}
+
+function shortFixForRule(ruleId: string, fallback: string): string {
+  switch (ruleId) {
+    case "AI001":
+      return "Separate untrusted input from system/developer instructions.";
+    case "AI002":
+      return "Stop logging raw prompts/responses and redact sensitive fields.";
+    case "AI003":
+      return "Enforce authentication and authorization before any LLM call.";
+    case "AI004":
+      return "Minimize and redact user/session fields before model calls.";
+    default:
+      return fallback;
+  }
+}
+
+function buildTopActions(findings: ReportGroupedFinding[], count: number): string[] {
+  return findings
+    .slice(0, count)
+    .map(
+      (finding) =>
+        `${severityLabelPlain(finding.severity)} ${finding.ruleId}: ${shortFixForRule(finding.ruleId, finding.recommendation)}`,
+    );
+}
+
+interface ExploitPath {
+  trigger: string;
+  exposure: string;
+  impact: string;
+  mitigation: string;
+}
+
+function exploitPathForRule(ruleId: string): ExploitPath {
+  switch (ruleId) {
+    case "AI001":
+      return {
+        trigger: "Untrusted text is concatenated directly into a prompt template.",
+        exposure: "System instruction boundaries can be overridden.",
+        impact: "Model behavior can be manipulated outside intended policy.",
+        mitigation: "Isolate user input in data fields and sanitize before inclusion.",
+      };
+    case "AI002":
+      return {
+        trigger: "Prompt or model output is written to logs.",
+        exposure: "Secrets and PII can land in log stores.",
+        impact: "Sensitive data can be retained or accessed by unintended roles.",
+        mitigation: "Remove raw prompt logging or apply strict redaction filters.",
+      };
+    case "AI003":
+      return {
+        trigger: "LLM call runs before authentication checks complete.",
+        exposure: "Unauthorized callers can invoke model behavior.",
+        impact: "Protected workflows may be triggered without valid identity.",
+        mitigation: "Gate request handlers with auth checks before model execution.",
+      };
+    case "AI004":
+      return {
+        trigger: "High-context objects are sent directly to LLM APIs.",
+        exposure: "User/session attributes may be transmitted externally.",
+        impact: "Potential privacy and compliance exposure of sensitive fields.",
+        mitigation: "Send least-privilege payloads with explicit allowlisted fields.",
+      };
+    default:
+      return {
+        trigger: "Rule pattern matched source code behavior.",
+        exposure: "Security boundary could be bypassed at runtime.",
+        impact: "Unexpected model-side behavior or data exposure may occur.",
+        mitigation: "Apply least-privilege access, validation, and data minimization.",
+      };
+  }
+}
+
+function splitEvidenceOccurrences(
+  occurrences: ReportOccurrence[],
+  withSnippetLimit: number,
+): { primary: ReportOccurrence[]; overflow: ReportOccurrence[] } {
+  return {
+    primary: occurrences.slice(0, withSnippetLimit),
+    overflow: occurrences.slice(withSnippetLimit),
+  };
+}
+
+function riskPercentages(summary: ReportSummary): Record<Severity, number> {
+  if (summary.total <= 0) {
+    return { critical: 0, high: 0, medium: 0, low: 0 };
+  }
+  const scale = 100 / summary.total;
+  return {
+    critical: Math.round(summary.bySeverity.critical * scale),
+    high: Math.round(summary.bySeverity.high * scale),
+    medium: Math.round(summary.bySeverity.medium * scale),
+    low: Math.round(summary.bySeverity.low * scale),
+  };
+}
+
+function buildRiskMixConic(summary: ReportSummary): string {
+  if (summary.total <= 0) {
+    return "var(--low) 0% 100%";
+  }
+
+  const critical = (summary.bySeverity.critical / summary.total) * 100;
+  const high = (summary.bySeverity.high / summary.total) * 100;
+  const medium = (summary.bySeverity.medium / summary.total) * 100;
+  const criticalEnd = critical;
+  const highEnd = criticalEnd + high;
+  const mediumEnd = highEnd + medium;
+
+  return [
+    `var(--critical) 0% ${criticalEnd.toFixed(2)}%`,
+    `var(--high) ${criticalEnd.toFixed(2)}% ${highEnd.toFixed(2)}%`,
+    `var(--medium) ${highEnd.toFixed(2)}% ${mediumEnd.toFixed(2)}%`,
+    `var(--low) ${mediumEnd.toFixed(2)}% 100%`,
+  ].join(", ");
+}
+
+function summarizeOccurrences(
+  occurrences: ReportOccurrence[],
+  limit: number,
+): { shown: string[]; remaining: number } {
+  const shown = occurrences.slice(0, limit).map((occurrence) => `${occurrence.file}:${occurrence.line}`);
+  return {
+    shown,
+    remaining: Math.max(0, occurrences.length - shown.length),
+  };
+}
+

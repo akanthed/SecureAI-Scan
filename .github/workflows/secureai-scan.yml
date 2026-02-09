@@ -16,9 +16,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: "npm"
       - name: Run SecureAI-Scan (non-blocking)
         run: |
-          npx secureai-scan scan . \
+          npx --yes secureai-scan@latest scan . \
             --baseline secureai-baseline.json \
             --output report.md || true
       - name: Upload report artifact
@@ -30,5 +31,5 @@ jobs:
       # Optional strict mode: fail CI when High/Critical findings are present.
       # - name: Fail on High/Critical findings
       #   run: |
-      #     npx secureai-scan scan . --severity high --output report.json
+      #     npx --yes secureai-scan@latest scan . --severity high --output report.json
       #     node -e "const fs=require('node:fs'); const r=JSON.parse(fs.readFileSync('report.json','utf-8')); if ((r.summary.bySeverity.critical + r.summary.bySeverity.high) > 0) process.exit(1)"
