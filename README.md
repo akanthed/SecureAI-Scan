@@ -77,6 +77,76 @@ What to do:
 - Send only minimal fields.
 - Redact/tokenize sensitive values.
 
+### AI005: Unsafe LLM output handling (Critical)
+The scanner flags model output passed into dangerous sinks such as dynamic code execution, shell commands, SQL-like query calls, JSON parsing, or HTML assignment.
+
+```ts
+// vulnerable
+const result = await openai.chat.completions.create({ messages });
+eval(result.choices[0].message.content);
+```
+
+What to do:
+- Validate model output against a strict schema.
+- Keep model output away from execution, shell, SQL, and HTML sinks.
+
+### AI006: Excessive LLM agency (Critical)
+The scanner flags LLM calls configured with high-impact tools such as file deletion, shell execution, email sending, purchases, deployment, or arbitrary network requests without an obvious approval gate.
+
+```ts
+// vulnerable
+await openai.chat.completions.create({
+  messages,
+  tools: [{ name: "delete_file", description: "delete files from disk" }],
+});
+```
+
+What to do:
+- Scope tools to least privilege.
+- Require explicit authorization for high-impact actions.
+
+### AI007: RAG context in privileged prompt (High)
+The scanner flags retrieved documents or context mixed directly into system/developer prompts.
+
+```ts
+// vulnerable
+await openai.chat.completions.create({
+  messages: [{ role: "system", content: `Use this context: ${retrievedDocs}` }],
+});
+```
+
+What to do:
+- Treat retrieved content as untrusted data.
+- Put retrieved content in user/data messages with clear delimiters.
+
+### AI008: Sensitive data in system prompt (High)
+The scanner flags system/developer prompts that appear to include secrets or sensitive internal implementation details.
+
+```ts
+// vulnerable
+await openai.chat.completions.create({
+  messages: [{ role: "system", content: "Use internal API key sk-test..." }],
+});
+```
+
+What to do:
+- Keep secrets in server-side configuration.
+- Do not place credentials or privileged internals in prompts.
+
+### AI009: Unbounded user input sent to LLM (Medium)
+The scanner flags request input passed to model calls without visible input truncation or model output token limits.
+
+```ts
+// vulnerable
+await openai.chat.completions.create({
+  messages: [{ role: "user", content: req.body.question }],
+});
+```
+
+What to do:
+- Enforce request body and prompt length limits.
+- Set output token limits such as `max_tokens` or provider equivalents.
+
 ### LLM_DEP001: Package not found in registry (Low, optional)
 Enabled with `--check-dependencies`. Flags package names that are missing in npm or PyPI.
 

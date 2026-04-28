@@ -1,6 +1,6 @@
 {
   "name": "secureai-scan",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Repo-native AI security scanning CLI for LLM-specific risks",
   "author": "Akshay Kanthed",
   "license": "MIT",
@@ -23,7 +23,7 @@
     "appsec"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "publishConfig": {
     "access": "public"
@@ -40,16 +40,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "test": "npm run build && node --test test/**/*.test.js"
+    "dev": "npm run build && node dist/index.js",
+    "test": "npm run build && node test/run-tests.js"
   },
   "dependencies": {
-    "commander": "^12.0.0",
-    "ts-morph": "^22.0.0",
-    "typescript": "^5.4.0"
+    "commander": "^14.0.3",
+    "ts-morph": "^28.0.0"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
-    "ts-node": "^10.9.2"
+    "@types/node": "^22.19.17",
+    "typescript": "^6.0.3"
   }
 }

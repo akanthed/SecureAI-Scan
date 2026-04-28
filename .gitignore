@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.npm-cache/
 coverage/
 .env
 .DS_Store
