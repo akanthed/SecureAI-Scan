@@ -1,6 +1,6 @@
 {
   "name": "secureai-scan",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Repo-native AI security scanning CLI for LLM-specific risks",
   "author": "Akshay Kanthed",
   "license": "MIT",
