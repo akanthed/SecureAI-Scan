@@ -123,67 +123,198 @@ export function formatReport(
 export function formatTerminalReport(report: ReportModel, limit = 3): string {
   const lines: string[] = [];
   const posture = overallRiskPosture(report.summary);
+  const grade = terminalRiskGrade(report.allFindings);
+  const { critical, high, medium, low } = report.summary.bySeverity;
+  const scannedAt = new Date(report.meta.scannedAt).toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+  const divider = tc.dim("─".repeat(62));
 
-  lines.push("SecureAI-Scan Report");
-  lines.push("====================");
-  lines.push(`Scanned at    : ${report.meta.scannedAt}`);
-  lines.push(`Risk posture  : ${posture}`);
-  lines.push(`Total issues  : ${report.summary.total}`);
+  // ── Header ─────────────────────────────────────────────────────
+  lines.push("");
   lines.push(
-    `Severity      : Critical ${report.summary.bySeverity.critical} | High ${report.summary.bySeverity.high} | Medium ${report.summary.bySeverity.medium} | Low ${report.summary.bySeverity.low}`,
+    `  ${tc.bold(tc.white("SecureAI-Scan"))}  ${tc.dim("v" + report.meta.version)}  ${tc.dim("·")}  ${tc.dim(scannedAt)}`,
   );
+  lines.push(`  ${divider}`);
+  lines.push("");
+
+  // ── Summary ────────────────────────────────────────────────────
+  const gradeStr = tc.gradeColor(grade, ` ${grade} `);
+  const postureStr =
+    posture === "High"
+      ? tc.bold(tc.red(posture.toUpperCase()))
+      : posture === "Medium"
+        ? tc.bold(tc.yellow(posture.toUpperCase()))
+        : tc.bold(tc.green(posture.toUpperCase()));
+
+  lines.push(
+    `  ${tc.bold("Security Grade")}  ${gradeStr}    ${tc.bold("Risk")}  ${postureStr}`,
+  );
+  lines.push("");
+  lines.push(
+    `  ${tc.severityDot("critical")} ${tc.bold(String(critical))} Critical   ` +
+    `${tc.severityDot("high")} ${tc.bold(String(high))} High   ` +
+    `${tc.severityDot("medium")} ${tc.bold(String(medium))} Medium   ` +
+    `${tc.severityDot("low")} ${tc.bold(String(low))} Low`,
+  );
+
   if (report.ignoredFindings.length > 0) {
-    lines.push(`Ignored       : ${report.ignoredFindings.length}`);
-  }
-  if (report.informational.length > 0) {
-    lines.push(`Informational : ${report.informational.length}`);
+    lines.push(`  ${tc.dim(`${report.ignoredFindings.length} suppressed with secureai-ignore`)}`);
   }
   lines.push("");
 
+  // ── No issues ──────────────────────────────────────────────────
   if (report.summary.total === 0) {
-    lines.push("No issues found.");
+    lines.push(`  ${tc.bold(tc.green("✓"))}  ${tc.green("No security issues found. Looking clean!")}`);
+    lines.push("");
+    lines.push(`  ${tc.dim("Run with --check-dependencies to also scan package.json and requirements.txt.")}`);
+    lines.push("");
     return lines.join("\n");
   }
 
-  lines.push("Priority Security Risks");
-  lines.push("-----------------------");
+  // ── Finding cards ──────────────────────────────────────────────
+  lines.push(`  ${divider}`);
+  lines.push(
+    `  ${tc.bold("TOP FINDINGS")}  ${tc.dim(`(${report.summary.total} total · showing ${Math.min(limit, report.prioritizedFindings.length)})`)}`,
+  );
+  lines.push(`  ${divider}`);
+
   const top = report.prioritizedFindings.slice(0, Math.max(0, limit));
-  for (let index = 0; index < top.length; index += 1) {
-    const group = top[index];
-    lines.push(
-      `${index + 1}. ${severityLabel(group.severity)} ${group.ruleId} - ${group.title}`,
-    );
-    lines.push(
-      `   Confidence: ${confidenceLabel(group.confidenceMax)} (${group.confidenceMax.toFixed(2)})`,
-    );
-    lines.push(`   Impact    : ${impactForRule(group.ruleId)}`);
-    lines.push(`   Why risky : ${group.reason}`);
+
+  for (const group of top) {
+    const bar = tc.severityBar(group.severity);
+    const sevLabel = group.severity.toUpperCase();
+    const sevColored = tc.severityText(group.severity, sevLabel);
+
+    const firstOcc = group.occurrences[0];
+    const location = firstOcc ? `${firstOcc.file}:${firstOcc.line}` : "unknown";
+    const extraOcc =
+      group.occurrences.length > 1
+        ? tc.dim(`  +${group.occurrences.length - 1} more location(s)`)
+        : "";
+    const reason = group.reason.length > 68 ? group.reason.slice(0, 65) + "…" : group.reason;
+    const fix = shortFixForRule(group.ruleId, group.recommendation);
+    const fixTrunc = fix.length > 66 ? fix.slice(0, 63) + "…" : fix;
+    const confBar = tc.confidenceBar(group.confidenceMax);
+
+    lines.push("");
+    lines.push(`  ${bar} ${sevColored}  ${tc.bold(group.ruleId)}  ${tc.bold(group.title)}`);
+    lines.push(`    ${tc.dim("↳")} ${tc.cyan(location)}${extraOcc}`);
+    lines.push(`    ${tc.dim("↳")} ${tc.dim(reason)}`);
+    lines.push(`    ${tc.dim("→")} ${fixTrunc}`);
+    lines.push(`    ${tc.dim("◆")} ${tc.dim("Confidence")}  ${tc.dim(confBar)}`);
   }
+
+  lines.push("");
+  lines.push(`  ${divider}`);
+
+  if (report.summary.total > top.length) {
+    lines.push(
+      `  ${tc.dim(`${report.summary.total - top.length} more finding(s) not shown.`)}  ` +
+      `${tc.dim("Run with")} --output report.html ${tc.dim("for the full report.")}`,
+    );
+    lines.push("");
+  }
+
+  // ── Informational ──────────────────────────────────────────────
+  if (report.informational.length > 0) {
+    lines.push(`  ${tc.dim("INFO")}  ${tc.dim(report.informational[0].title)}  ${tc.dim(`(${report.informational[0].occurrences.length} location(s))`)}`);
+    lines.push("");
+    lines.push(`  ${divider}`);
+  }
+
+  // ── Next steps ─────────────────────────────────────────────────
+  lines.push(`  ${tc.bold("NEXT STEPS")}`);
+  lines.push(`  ${divider}`);
   lines.push("");
 
-  if (top.length < report.summary.total) {
+  const topRuleId = top[0]?.ruleId;
+  if (topRuleId) {
     lines.push(
-      `Showing top ${top.length} of ${report.summary.total} findings. Use --output to export full report.`,
+      `  ${tc.cyan("›")}  secureai-scan ${tc.bold("explain")} ${topRuleId}` +
+      `  ${tc.dim("   see the exact fix for the top finding")}`,
     );
   }
-
-  if (report.informational.length > 0) {
-    lines.push("");
-    lines.push("Informational:");
-    for (const info of report.informational) {
-      const preview = summarizeOccurrences(info.occurrences, 5);
-      lines.push(`- INFO ${info.title} (Not a vulnerability)`);
-      for (const location of preview.shown) {
-        lines.push(`  ${location}`);
-      }
-      if (preview.remaining > 0) {
-        lines.push(`  ...and ${preview.remaining} more`);
-      }
-    }
-  }
+  lines.push(
+    `  ${tc.cyan("›")}  secureai-scan ${tc.bold("threat-model")} .` +
+    `  ${tc.dim("   generate THREAT_MODEL.md for security review")}`,
+  );
+  lines.push(
+    `  ${tc.cyan("›")}  secureai-scan ${tc.bold("init")}` +
+    `  ${tc.dim("              set up policy file + CI workflow")}`,
+  );
+  lines.push("");
 
   return lines.join("\n");
 }
+
+// ── Terminal color helpers (ANSI, stripped when not a TTY) ────────────────
+
+const USE_COLOR = Boolean(process.stdout.isTTY);
+
+function ansi(code: string, text: string): string {
+  return USE_COLOR ? `\x1b[${code}m${text}\x1b[0m` : text;
+}
+
+const tc = {
+  bold:   (t: string) => ansi("1", t),
+  dim:    (t: string) => ansi("2", t),
+  red:    (t: string) => ansi("91", t),
+  orange: (t: string) => ansi("38;5;208", t),
+  yellow: (t: string) => ansi("33", t),
+  green:  (t: string) => ansi("92", t),
+  cyan:   (t: string) => ansi("36", t),
+  white:  (t: string) => ansi("97", t),
+
+  severityText(severity: Severity, text: string): string {
+    switch (severity) {
+      case "critical": return tc.bold(tc.red(text));
+      case "high":     return tc.bold(tc.orange(text));
+      case "medium":   return tc.bold(tc.yellow(text));
+      case "low":      return tc.bold(tc.cyan(text));
+      default:         return text;
+    }
+  },
+
+  severityDot(severity: Severity): string {
+    return tc.severityText(severity, "●");
+  },
+
+  // Left-edge vertical bar colored by severity
+  severityBar(severity: Severity): string {
+    return tc.severityText(severity, "▌");
+  },
+
+  // █████░░░░░  75%
+  confidenceBar(value: number): string {
+    const filled = Math.round(value * 10);
+    return "█".repeat(filled) + "░".repeat(10 - filled) + `  ${Math.round(value * 100)}%`;
+  },
+
+  // Letter grade with matching color
+  gradeColor(grade: string, text: string): string {
+    if (grade === "A")              return tc.bold(tc.green(text));
+    if (grade === "B+" || grade === "B") return tc.bold(tc.cyan(text));
+    if (grade === "C")              return tc.bold(tc.yellow(text));
+    if (grade === "D")              return tc.bold(tc.orange(text));
+    return tc.bold(tc.red(text));   // F
+  },
+};
+
+function terminalRiskGrade(findings: ReportGroupedFinding[]): string {
+  const crit = findings.filter((f) => f.severity === "critical").length;
+  const hi   = findings.filter((f) => f.severity === "high").length;
+  const med  = findings.filter((f) => f.severity === "medium").length;
+  if (crit > 0)  return "F";
+  if (hi >= 3)   return "D";
+  if (hi >= 1)   return "C";
+  if (med >= 3)  return "B";
+  if (findings.length > 0) return "B+";
+  return "A";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function buildSummary(findings: Finding[]): ReportSummary {
   const bySeverity: Record<Severity, number> = {
