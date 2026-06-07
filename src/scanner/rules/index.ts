@@ -9,8 +9,21 @@ import { ruleExcessiveAgency } from "./excessive-agency.js";
 import { ruleRagContextInjection } from "./rag-context-injection.js";
 import { ruleSystemPromptLeakage } from "./system-prompt-leakage.js";
 import { ruleUnboundedLlmInput } from "./unbounded-llm-input.js";
+// New AI rules
+import { ruleIndirectPromptInjection } from "./indirect-prompt-injection.js";
+import { ruleMultiagentTrustBoundary } from "./multiagent-trust-boundary.js";
+import { ruleUnvalidatedStructuredOutput } from "./unvalidated-structured-output.js";
+// MCP rules
+import { ruleMcpToolDescInjection } from "./mcp-tool-desc-injection.js";
+import { ruleMcpDynamicServerUrl } from "./mcp-dynamic-server-url.js";
+import { ruleMcpUnvalidatedToolResult } from "./mcp-unvalidated-tool-result.js";
+// Vector/RAG rules
+import { ruleVecSearchNoAccessControl } from "./vec-search-no-access-control.js";
+import { ruleVecUnboundedSearch } from "./vec-unbounded-search.js";
+import { ruleVecUserIngestion } from "./vec-user-ingestion.js";
 
 export const RULES: Rule[] = [
+  // Core AI/LLM rules (AI001–AI009)
   rulePromptInjectionConcat,
   ruleLlmUsageDetect,
   ruleSensitivePromptLogging,
@@ -21,6 +34,18 @@ export const RULES: Rule[] = [
   ruleRagContextInjection,
   ruleSystemPromptLeakage,
   ruleUnboundedLlmInput,
+  // Extended AI rules (AI010–AI012)
+  ruleIndirectPromptInjection,
+  ruleMultiagentTrustBoundary,
+  ruleUnvalidatedStructuredOutput,
+  // MCP rules (MCP001–MCP003)
+  ruleMcpToolDescInjection,
+  ruleMcpDynamicServerUrl,
+  ruleMcpUnvalidatedToolResult,
+  // Vector/RAG rules (VEC001–VEC003)
+  ruleVecSearchNoAccessControl,
+  ruleVecUnboundedSearch,
+  ruleVecUserIngestion,
 ];
 
 export const AVAILABLE_RULE_IDS = RULES.map((rule) => rule.id);

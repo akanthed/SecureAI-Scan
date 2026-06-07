@@ -1,0 +1,10 @@
+{
+  "$comment": "SecureAI-Scan policy file — commit this to your repo. See: secureai-scan explain <RULE_ID>",
+  "minSeverity": "medium",
+  "minConfidence": 0.45,
+  "failOnSeverity": "high",
+  "skipPaths": [],
+  "blockedRules": [],
+  "onlyRules": [],
+  "requireOutputValidation": true
+}
