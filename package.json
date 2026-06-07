@@ -1,6 +1,6 @@
 {
   "name": "secureai-scan",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Find AI/LLM security vulnerabilities in your code — prompt injection, MCP tool poisoning, RAG data poisoning, agent trust violations. 19 rules. Local-first.",
   "author": "Akshay Kanthed",
   "license": "MIT",
