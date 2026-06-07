@@ -19,6 +19,7 @@
     "scanner",
     "cli",
     "typescript",
+    "python",
     "prompt-injection",
     "appsec",
     "mcp",
@@ -43,6 +44,7 @@
   },
   "files": [
     "dist",
+    "mcp-server",
     "README.md",
     "LICENSE"
   ],

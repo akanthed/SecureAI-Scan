@@ -14,6 +14,8 @@ PUBLISHING.md
 CHANGELOG.md
 THREAT_MODEL.md
 SECURITY.md
+VISIBILITY.md
+GPT_PROMPT.md
 tsconfig.json
 .secureai-policy.json
 .secureai-baseline.json

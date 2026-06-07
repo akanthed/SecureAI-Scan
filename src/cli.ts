@@ -79,8 +79,8 @@ export async function runCli(argv: string[]): Promise<void> {
 
   program
     .name("secureai-scan")
-    .description("Repo-native AI security scanner — finds LLM, MCP, and RAG vulnerabilities")
-    .version("0.2.0")
+    .description("Repo-native AI security scanner — finds LLM, MCP, and RAG vulnerabilities in TypeScript, JavaScript, and Python")
+    .version("0.2.1")
     .addHelpText(
       "after",
       [
@@ -164,7 +164,11 @@ export async function runCli(argv: string[]): Promise<void> {
         );
 
         const previousState = readScanState(targetPath);
-        const scanResult = scanRepositoryDetailed(targetPath, { rules: selectedRules });
+        const scanResult = scanRepositoryDetailed(targetPath, {
+          rules: selectedRules,
+          skipPaths: activePolicy.skipPaths,
+          blockedRules: activePolicy.blockedRules,
+        });
         const findings: Finding[] = [...scanResult.findings];
 
         if (options.checkDependencies) {
@@ -253,14 +257,16 @@ export async function runCli(argv: string[]): Promise<void> {
         }
 
         if (options.debug) {
-          const files = scanResult.scannedFiles;
+          const tsFiles = scanResult.scannedFiles;
+          const pyFiles = scanResult.pythonFiles ?? [];
           process.stderr.write(
-            `\n[debug] Scanned: ${files.length} files | Rules: ${selectedRules?.join(", ") ?? "all"} | minConfidence: ${minConfidence}\n`,
+            `\n[debug] Scanned: ${tsFiles.length} TS/JS file(s), ${pyFiles.length} Python file(s) | Rules: ${selectedRules?.join(", ") ?? "all"} | minConfidence: ${minConfidence}\n`,
           );
-          const preview = files.slice(0, 20);
+          const allFiles = [...tsFiles, ...pyFiles];
+          const preview = allFiles.slice(0, 20);
           for (const f of preview) process.stderr.write(`  ${f}\n`);
-          if (files.length > preview.length)
-            process.stderr.write(`  ...and ${files.length - preview.length} more\n`);
+          if (allFiles.length > preview.length)
+            process.stderr.write(`  ...and ${allFiles.length - preview.length} more\n`);
         }
       },
     );

@@ -88,6 +88,20 @@ function writeBaseline(filePath: string, findings: Finding[]): void {
   fs.writeFileSync(filePath, JSON.stringify(baseline, null, 2), "utf-8");
 }
 
+const VALID_SEVERITIES: Severity[] = ["low", "medium", "high", "critical"];
+
+function isValidBaselineEntry(entry: unknown): entry is BaselineEntry {
+  if (typeof entry !== "object" || entry === null) return false;
+  const e = entry as Record<string, unknown>;
+  return (
+    typeof e.rule_id === "string" &&
+    typeof e.file === "string" &&
+    typeof e.line === "number" &&
+    VALID_SEVERITIES.includes(e.severity as Severity) &&
+    typeof e.confidence === "number"
+  );
+}
+
 function readBaseline(filePath: string): BaselineFile {
   const raw = fs.readFileSync(filePath, "utf-8");
   const parsed = JSON.parse(raw) as Partial<BaselineFile>;
@@ -98,8 +112,8 @@ function readBaseline(filePath: string): BaselineFile {
   }
   return {
     schema: parsed.schema,
-    createdAt: parsed.createdAt ?? "",
-    findings: parsed.findings,
+    createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : "",
+    findings: parsed.findings.filter(isValidBaselineEntry),
   };
 }
 

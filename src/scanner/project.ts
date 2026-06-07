@@ -9,18 +9,22 @@ const DEFAULT_EXCLUDES = [
   "**/.next/**",
 ];
 
-export function createScanProject(rootPath: string): Project {
+export function createScanProject(rootPath: string, skipPaths?: string[]): Project {
   const project = new Project({
     skipAddingFilesFromTsConfig: true,
   });
 
   const normalizedRoot = path.resolve(rootPath);
+  const policyExcludes = (skipPaths ?? []).map(
+    (p) => `!${path.resolve(normalizedRoot, p)}`,
+  );
   project.addSourceFilesAtPaths([
     path.join(normalizedRoot, "**/*.ts"),
     path.join(normalizedRoot, "**/*.tsx"),
     path.join(normalizedRoot, "**/*.js"),
     path.join(normalizedRoot, "**/*.jsx"),
     ...DEFAULT_EXCLUDES.map((pattern) => `!${path.join(normalizedRoot, pattern)}`),
+    ...policyExcludes,
   ]);
 
   return project;

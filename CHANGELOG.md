@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.1 — 2026-06-07
+
+### Added
+- **Python support** — 11 of the 19 rules now scan `.py` files (AI001–AI007, AI010, VEC001, VEC003, MCP001). Covers LangChain, OpenAI SDK, Anthropic SDK, Flask, FastAPI, Chroma, Pinecone, Weaviate, and more
+- **MCP server** (`mcp-server/index.js`) — exposes SecureAI-Scan as native Claude tools via the Model Context Protocol. Three tools: `scan_repository`, `explain_rule`, `evaluate_prompt`. Works with Claude Desktop and any MCP-compatible client
+- **`GPT_PROMPT.md`** — ready-to-paste system prompt for creating a ChatGPT Custom GPT on the GPT Store
+- **`VISIBILITY.md`** — step-by-step guide for getting SecureAI-Scan discovered on ChatGPT, Claude, Perplexity, npm, OWASP, and developer communities
+
+### Improved
+- CLI description and `--debug` output now show separate TS/JS and Python file counts
+- `scan_repository` (programmatic API) returns `pythonFiles` alongside `scannedFiles`
+- `skipPaths` and `blockedRules` from policy now apply to Python file scanning too
+- README updated to cover Python examples, MCP server setup, and updated FAQ
+
 ## 0.2.0 — 2026-06-07
 
 ### Added

@@ -3,12 +3,14 @@ import type { Finding, RuleContext } from "./types.js";
 import { RULES } from "./rules/index.js";
 import { createScanProject } from "./project.js";
 import { selectRules } from "./filters.js";
+import { scanPythonFiles } from "./python-scanner.js";
 import type { SourceFile } from "ts-morph";
 
 export interface ScanResult {
   findings: Finding[];
   ignoredFindings: IgnoredFinding[];
   scannedFiles: string[];
+  pythonFiles?: string[];
 }
 
 export interface IgnoredFinding {
@@ -19,9 +21,9 @@ export interface IgnoredFinding {
 
 export function scanRepositoryDetailed(
   rootPath: string,
-  options?: { rules?: string[] },
+  options?: { rules?: string[]; skipPaths?: string[]; blockedRules?: string[] },
 ): ScanResult {
-  const project = createScanProject(rootPath);
+  const project = createScanProject(rootPath, options?.skipPaths);
   const sourceFiles = project.getSourceFiles();
 
   const context: RuleContext = {
@@ -31,11 +33,19 @@ export function scanRepositoryDetailed(
   };
 
   const findings: Finding[] = [];
-  const activeRules = selectRules(RULES, options?.rules);
+  const activeRules = selectRules(RULES, options?.rules, options?.blockedRules);
 
   for (const rule of activeRules) {
     findings.push(...rule.run(context));
   }
+
+  // Python scanning — merged into same findings list
+  const pythonResult = scanPythonFiles(rootPath, {
+    rules: options?.rules,
+    blockedRules: options?.blockedRules,
+    skipPaths: options?.skipPaths,
+  });
+  findings.push(...pythonResult.findings);
 
   const deduped = dedupeFindings(findings);
   const { activeFindings, ignoredFindings } = applyIgnoreAnnotations(
@@ -48,12 +58,13 @@ export function scanRepositoryDetailed(
     findings: activeFindings,
     ignoredFindings,
     scannedFiles: sourceFiles.map((file) => file.getFilePath()),
+    pythonFiles: pythonResult.scannedFiles,
   };
 }
 
 export function scanRepository(
   rootPath: string,
-  options?: { rules?: string[] },
+  options?: { rules?: string[]; skipPaths?: string[]; blockedRules?: string[] },
 ): Finding[] {
   return scanRepositoryDetailed(rootPath, options).findings;
 }

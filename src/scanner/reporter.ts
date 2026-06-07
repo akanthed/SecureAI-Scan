@@ -1693,6 +1693,7 @@ function readSnippet(
 
 function readFileLines(context: SnippetContext, findingPath: string): string[] | undefined {
   const filePath = resolveFindingPath(context.rootPath, findingPath);
+  if (!filePath) return undefined;
   const key = filePath.toLowerCase();
   if (context.linesByFile.has(key)) {
     return context.linesByFile.get(key);
@@ -1710,10 +1711,24 @@ function readFileLines(context: SnippetContext, findingPath: string): string[] |
 }
 
 function resolveFindingPath(rootPath: string | undefined, findingPath: string): string {
-  if (path.isAbsolute(findingPath)) {
-    return findingPath;
+  const resolved = path.isAbsolute(findingPath)
+    ? findingPath
+    : rootPath
+      ? path.resolve(rootPath, findingPath)
+      : path.resolve(findingPath);
+
+  if (rootPath) {
+    const normalizedRoot = path.resolve(rootPath);
+    const normalizedResolved = path.normalize(resolved);
+    if (
+      normalizedResolved !== normalizedRoot &&
+      !normalizedResolved.startsWith(normalizedRoot + path.sep)
+    ) {
+      return "";
+    }
   }
-  return rootPath ? path.resolve(rootPath, findingPath) : path.resolve(findingPath);
+
+  return resolved;
 }
 
 function renderMarkdownSnippet(snippet?: ReportSnippetLine[]): string[] {

@@ -21,9 +21,14 @@ export function filterFindingsBySeverity(
 export function selectRules(
   rules: Rule[],
   selected?: string[],
+  blocked?: string[],
 ): Rule[] {
-  if (!selected || selected.length === 0) {
-    return rules;
+  let active = rules;
+  if (selected && selected.length > 0) {
+    active = active.filter((rule) => selected.includes(rule.id));
   }
-  return rules.filter((rule) => selected.includes(rule.id));
+  if (blocked && blocked.length > 0) {
+    active = active.filter((rule) => !blocked.includes(rule.id));
+  }
+  return active;
 }

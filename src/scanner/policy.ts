@@ -137,10 +137,15 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   secureai-scan:
     runs-on: ubuntu-latest
     steps:
+      # Pin action SHAs to protect against supply-chain attacks on mutable tags.
+      # Update SHAs periodically or use a tool like Dependabot to keep them current.
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
