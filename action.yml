@@ -1,5 +1,5 @@
 name: "SecureAI-Scan"
-description: "Find AI/LLM security vulnerabilities — prompt injection, MCP supply chain, RAG poisoning — with dataflow evidence and SARIF output"
+description: "Find AI/LLM security vulnerabilities in code, configs, and MCP setups with evidence and SARIF output"
 author: "Akshay Kanthed"
 branding:
   icon: "shield"
