@@ -1,6 +1,7 @@
-import { Node, SyntaxKind } from "ts-morph";
+﻿import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { evidenceConfidence } from "../confidence.js";
 import {
   getLlmPromptNodes,
   getObjectProperty,
@@ -56,7 +57,8 @@ export const ruleUnboundedLlmInput: Rule = {
                 "Unbounded user input can cause cost spikes, latency problems, context-window exhaustion, or denial-of-service behavior.",
               recommendation:
                 "Add request size limits, truncate or validate prompt input, and set model output token limits.",
-              confidence: 0.65,
+              confidence: evidenceConfidence("heuristic"),
+            evidence: "heuristic",
             });
           }
         }
@@ -76,7 +78,8 @@ export const ruleUnboundedLlmInput: Rule = {
               "Unbounded user input can cause cost spikes, latency problems, context-window exhaustion, or denial-of-service behavior.",
             recommendation:
               "Add request size limits, truncate or validate prompt input, and set model output token limits.",
-            confidence: 0.65,
+            confidence: evidenceConfidence("heuristic"),
+            evidence: "heuristic",
           });
         }
       }

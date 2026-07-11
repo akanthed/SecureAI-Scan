@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Finding, Severity } from "./types.js";
+import { evidenceConfidence, demoteEvidence } from "./confidence.js";
 
 // ── Python LLM SDK call patterns ──────────────────────────────────────────
 const LLM_CALL_PATTERNS = [
@@ -21,12 +22,12 @@ const LLM_CALL_PATTERNS = [
 ];
 
 // ── User input taint sources ───────────────────────────────────────────────
+// NOTE: os.environ deliberately excluded — env vars are operator-controlled
+// config, not user input. Including them flagged `api_key = os.environ.get(...)`
+// next to every LLM client construction as "prompt injection".
 const REQUEST_PATTERNS = [
   /request\s*\.\s*(json|form|args|data|values|get_json|files)/,
   /body\s*\[\s*['"]/,
-  /params\s*\.\s*get\s*\(/,
-  /environ\s*\.\s*get\s*\(/,
-  /os\.environ\s*\[\s*['"]/,
 ];
 
 // ── Vector store patterns ─────────────────────────────────────────────────
@@ -116,14 +117,17 @@ function hasSanitization(text: string): boolean {
   return SANITIZATION_SIGNALS.some((p) => p.test(text));
 }
 
-function isTestFile(filePath: string): boolean {
-  const normalized = filePath.toLowerCase().replace(/\\/g, "/");
+function isTestFile(relPath: string): boolean {
+  const normalized = relPath.toLowerCase().replace(/\\/g, "/");
+  const base = normalized.split("/").pop() ?? "";
   return (
-    normalized.includes("/test") ||
-    normalized.includes("_test.py") ||
-    normalized.includes("test_.py") ||
-    normalized.includes("conftest") ||
-    normalized.includes("/tests/")
+    normalized.includes("/tests/") ||
+    normalized.startsWith("tests/") ||
+    normalized.includes("/test/") ||
+    normalized.startsWith("test/") ||
+    base.endsWith("_test.py") ||
+    base.startsWith("test_") ||
+    base === "conftest.py"
   );
 }
 
@@ -133,7 +137,7 @@ function findingBase(
   severity: Severity,
   filePath: string,
   line: number,
-): Omit<Finding, "summary" | "description" | "recommendation" | "confidence"> {
+): Omit<Finding, "summary" | "description" | "recommendation" | "confidence" | "evidence"> {
   return { rule_id: ruleId, title, severity, file: filePath, line };
 }
 
@@ -157,7 +161,8 @@ function checkAI001(lines: string[], i: number, file: string): Finding | null {
       "Request parameters (request.json, request.form, etc.) are used in an LLM call without role separation or encoding. An attacker can inject instructions that override your system prompt.",
     recommendation:
       'Use separate message roles: messages=[{"role":"system","content":system_prompt},{"role":"user","content":str(user_input)}]',
-    confidence: 0.7,
+    confidence: evidenceConfidence("likely"),
+    evidence: "likely",
   };
 }
 
@@ -176,7 +181,8 @@ function checkAI002(lines: string[], i: number, file: string): Finding | null {
       "Logging prompts or responses can expose user data, PII, and model outputs to log storage systems accessible by unintended parties.",
     recommendation:
       "Avoid logging raw prompts or responses. Log only a request ID. If logging is required, redact sensitive fields first.",
-    confidence: 0.65,
+    confidence: evidenceConfidence("heuristic"),
+    evidence: "heuristic",
   };
 }
 
@@ -201,7 +207,8 @@ function checkAI003(lines: string[], i: number, file: string): Finding | null {
       "An LLM call is made in a route handler without @login_required, JWT validation, or equivalent auth middleware. Unauthenticated callers can trigger model usage.",
     recommendation:
       "Add @login_required, @jwt_required, or a Depends(get_current_user) guard before the handler. Always authenticate before any LLM invocation.",
-    confidence: 0.6,
+    confidence: evidenceConfidence("likely"),
+    evidence: "likely",
   };
 }
 
@@ -221,7 +228,8 @@ function checkAI004(lines: string[], i: number, file: string): Finding | null {
       "Serializing an entire user, session, or profile object exposes PII and internal fields to the LLM provider. Fields like passwords, tokens, or internal IDs should never leave your system.",
     recommendation:
       "Send only the fields needed: minimal = {'name': user.name, 'plan': user.plan}. Never serialize full ORM objects.",
-    confidence: 0.75,
+    confidence: evidenceConfidence("heuristic"),
+    evidence: "heuristic",
   };
 }
 
@@ -244,7 +252,8 @@ function checkAI005(lines: string[], i: number, file: string): Finding | null {
       "LLM outputs are non-deterministic and can contain attacker-crafted payloads. Passing them to exec(), eval(), subprocess, or SQL queries allows remote code/SQL execution.",
     recommendation:
       "Never pass raw LLM output to execution sinks. Validate against an allowlist, use a schema, and run in a sandbox if code execution is required.",
-    confidence: 0.8,
+    confidence: evidenceConfidence("likely"),
+    evidence: "likely",
   };
 }
 
@@ -269,7 +278,8 @@ function checkAI006(lines: string[], i: number, file: string): Finding | null {
       "The model appears able to invoke tools that delete, execute, email, or deploy without requiring explicit human approval. A prompt injection attack can trigger these actions.",
     recommendation:
       "Require human confirmation before executing high-impact tool calls. Log all tool invocations. Scope tools to the minimum required permissions.",
-    confidence: 0.7,
+    confidence: evidenceConfidence("heuristic"),
+    evidence: "heuristic",
   };
 }
 
@@ -288,7 +298,8 @@ function checkAI007(lines: string[], i: number, file: string): Finding | null {
       "Retrieved RAG documents placed in the system prompt are treated as trusted instructions. A poisoned document in the vector store can hijack model behavior.",
     recommendation:
       'Place retrieved context in user-role messages, not system: messages=[{"role":"system","content":base_instructions},{"role":"user","content":f"Context: {docs}\\n{query}"}]',
-    confidence: 0.72,
+    confidence: evidenceConfidence("likely"),
+    evidence: "likely",
   };
 }
 
@@ -311,7 +322,8 @@ function checkAI010(lines: string[], i: number, file: string): Finding | null {
       "Content fetched from an external URL is passed to an LLM. An attacker who controls the external resource can plant injection instructions that override your system prompt.",
     recommendation:
       'Treat fetched content as untrusted. Place it in a user-role message: messages=[{"role":"system","content":system},{"role":"user","content":f"External content (untrusted):\\n{page_text}"}]',
-    confidence: 0.65,
+    confidence: evidenceConfidence("likely"),
+    evidence: "likely",
   };
 }
 
@@ -331,7 +343,8 @@ function checkVEC001(lines: string[], i: number, file: string): Finding | null {
       "Without a filter, this search returns results from all documents in the vector store. User A's query can retrieve User B's private documents, which the LLM then surfaces in its response.",
     recommendation:
       "Pass a filter scoped to the authenticated user: vectorstore.similarity_search(query, k=5, filter={'user_id': current_user.id})",
-    confidence: 0.68,
+    confidence: evidenceConfidence("likely"),
+    evidence: "likely",
   };
 }
 
@@ -352,7 +365,8 @@ function checkVEC003(lines: string[], i: number, file: string): Finding | null {
       "Allowing users to inject documents into a shared vector store enables RAG data poisoning. A malicious user plants a document with injection instructions that execute when later retrieved by any user.",
     recommendation:
       "Sanitize and validate all user-provided content before ingestion. Store user submissions in an isolated namespace pending review.",
-    confidence: 0.72,
+    confidence: evidenceConfidence("likely"),
+    evidence: "likely",
   };
 }
 
@@ -372,7 +386,8 @@ function checkMCP001(lines: string[], i: number, file: string): Finding | null {
       "Tool descriptions are sent to the LLM as part of its context. A malicious or compromised MCP server can include override instructions in a description field, hijacking model behavior for the entire session.",
     recommendation:
       "Validate all tool descriptions against an injection-phrase blocklist before registering. Pin third-party MCP servers to known-good versions.",
-    confidence: 0.93,
+    confidence: evidenceConfidence("proven"),
+    evidence: "proven",
   };
 }
 
@@ -452,7 +467,7 @@ export function scanPythonFiles(
   const findings: Finding[] = [];
 
   for (const filePath of pyFiles) {
-    const testFile = isTestFile(filePath);
+    const testFile = isTestFile(path.relative(resolved, filePath));
     let raw: string;
     try {
       raw = fs.readFileSync(filePath, "utf-8");
@@ -476,9 +491,10 @@ export function scanPythonFiles(
         if (options?.rules && !options.rules.includes(finding.rule_id)) continue;
         if (options?.blockedRules?.includes(finding.rule_id)) continue;
 
-        // Reduce confidence for test files
+        // Demote evidence for test files
         if (testFile) {
-          finding.confidence = Math.max(0.1, finding.confidence - 0.3);
+          finding.evidence = demoteEvidence(finding.evidence);
+          finding.confidence = evidenceConfidence(finding.evidence);
         }
 
         findings.push(finding);

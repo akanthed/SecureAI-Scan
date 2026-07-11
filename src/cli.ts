@@ -11,14 +11,15 @@ import type { Severity, Finding } from "./scanner/types.js";
 import { filterFindingsBySeverity } from "./scanner/filters.js";
 import { AVAILABLE_RULE_IDS } from "./scanner/rules/index.js";
 import { StaticExplainer } from "./scanner/explainer.js";
+import { catalogFor } from "./scanner/catalog.js";
 import { applyBaseline } from "./scanner/baseline.js";
-import { evaluatePromptRisk } from "./scanner/prompt-risk.js";
 import { scanDependencyFilesForRisks } from "./scanner/dependency-guard.js";
 import { loadPolicy, writeDefaultPolicy, writeGithubWorkflow } from "./scanner/policy.js";
 import { generateThreatModel } from "./scanner/threat-model.js";
+import { generateBom, formatBomMarkdown } from "./scanner/bom.js";
+import { getOwnVersion } from "./utils/version.js";
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 
 const ALLOWED_SEVERITIES = ["low", "medium", "high", "critical"] as const;
 
@@ -30,7 +31,7 @@ function parseSeverity(value: string): Severity {
     return normalized as Severity;
   }
   throw new InvalidArgumentError(
-    `Invalid --severity "${value}". Expected one of: ${ALLOWED_SEVERITIES.join(", ")}.`,
+    `Invalid severity "${value}". Expected one of: ${ALLOWED_SEVERITIES.join(", ")}.`,
   );
 }
 
@@ -72,6 +73,16 @@ function parseConfidence(value: string): number {
   return parsed;
 }
 
+function severityValue(severity: Severity): number {
+  switch (severity) {
+    case "critical": return 4;
+    case "high": return 3;
+    case "medium": return 2;
+    case "low": return 1;
+    default: return 0;
+  }
+}
+
 // ─── CLI entry ───────────────────────────────────────────────────────────────
 
 export async function runCli(argv: string[]): Promise<void> {
@@ -79,21 +90,21 @@ export async function runCli(argv: string[]): Promise<void> {
 
   program
     .name("secureai-scan")
-    .description("Repo-native AI security scanner — finds LLM, MCP, and RAG vulnerabilities in TypeScript, JavaScript, and Python")
-    .version("0.2.1")
+    .description("AI security scanner — proves LLM, MCP, and RAG vulnerabilities with dataflow evidence")
+    .version(getOwnVersion())
     .addHelpText(
       "after",
       [
         "",
         "Quick start:",
-        "  secureai-scan init                   Set up policy + CI in 30 seconds",
-        "  secureai-scan scan .                 Scan current repo",
-        "  secureai-scan scan . --output r.html Save a shareable HTML report",
-        "  secureai-scan threat-model .         Generate THREAT_MODEL.md",
-        "  secureai-scan explain AI001          Show fix guide for a rule",
-        "  secureai-scan prompt \"<text>\"        Evaluate raw prompt text",
+        "  secureai-scan scan .                  Scan current repo (proven + likely findings)",
+        "  secureai-scan scan . --paranoid       Include heuristic-tier findings",
+        "  secureai-scan scan . --output r.sarif SARIF for GitHub code scanning",
+        "  secureai-scan bom .                   AI Bill of Materials (SDKs, models, MCP servers)",
+        "  secureai-scan explain AI001           Fix guide for a rule",
+        "  secureai-scan init                    Policy file + CI workflow",
         "",
-        "Ignore a specific finding in code:",
+        "Suppress a reviewed finding in code:",
         "  // secureai-ignore AI001: reviewed, sanitized via allowlist",
         "",
         `Rules: ${AVAILABLE_RULE_IDS.join(", ")}`,
@@ -107,24 +118,17 @@ export async function runCli(argv: string[]): Promise<void> {
     .option("-s, --severity <level>", "Minimum severity: low | medium | high | critical", parseSeverity)
     .option("-r, --rules <list>", "Comma-separated rule IDs to run", parseRules)
     .option("--only-ai", "Run only AI/LLM rules (AI001–AI012)")
-    .option("--only-mcp", "Run only MCP rules (MCP001–MCP003)")
-    .option("--only-vec", "Run only Vector/RAG rules (VEC001–VEC003)")
-    .option("--limit <number>", "Limit number of findings shown in terminal", parseLimit)
-    .option("--output <file>", "Save a full report as .html, .md, or .json")
+    .option("--only-mcp", "Run only MCP rules (MCP001–MCP006)")
+    .option("--only-vec", "Run only Vector/RAG rules (VEC001–VEC004)")
+    .option("--paranoid", "Include heuristic-tier findings (hidden by default)")
+    .option("--limit <number>", "Max rule groups shown in terminal (default: 10)", parseLimit)
+    .option("--output <file>", "Save a full report as .sarif, .json, .md, or .html")
     .option("--baseline <file>", "Track only new/changed issues using a baseline file")
     .option("--policy <file>", "Path to a .secureai-policy.json file (auto-detected if omitted)")
-    .option("--min-confidence <0-1>", "Hide findings below this confidence score (default: 0.4)", parseConfidence)
+    .option("--fail-on <severity>", "Exit 1 if findings at/above this severity exist", parseSeverity)
+    .option("--min-confidence <0-1>", "Additionally hide findings below this confidence score", parseConfidence)
     .option("--check-dependencies", "Scan package.json and requirements.txt for suspicious packages")
     .option("--debug", "Show scanned files and rule metadata")
-    .addHelpText(
-      "after",
-      [
-        "",
-        "Ignore annotations:",
-        "  // secureai-ignore <RULE_ID>: <reason>",
-        "  Suppresses the next matching finding and records it under Ignored Findings.",
-      ].join("\n"),
-    )
     .action(
       async (
         targetPath: string,
@@ -134,28 +138,27 @@ export async function runCli(argv: string[]): Promise<void> {
           onlyAi?: boolean;
           onlyMcp?: boolean;
           onlyVec?: boolean;
+          paranoid?: boolean;
           limit?: number;
           output?: string;
           baseline?: string;
           policy?: string;
+          failOn?: Severity;
           minConfidence?: number;
           checkDependencies?: boolean;
           debug?: boolean;
         },
       ) => {
-        // Load policy (file arg > auto-detect in rootPath)
-        let policyPath = options.policy;
-        const policyResult = policyPath
-          ? loadPolicy(path.dirname(policyPath))
-          : loadPolicy(targetPath);
+        const startedAt = Date.now();
 
+        const policyResult = options.policy
+          ? loadPolicy(path.dirname(options.policy))
+          : loadPolicy(targetPath);
         if (policyResult) {
           process.stdout.write(`Policy loaded: ${policyResult.policyPath}\n`);
         }
-
         const activePolicy = policyResult?.policy ?? {};
 
-        // Rule selection: CLI args override policy
         const selectedRules = resolveRuleSelection(
           options.rules ?? (activePolicy.onlyRules?.length ? activePolicy.onlyRules : undefined),
           options.onlyAi ?? false,
@@ -163,7 +166,6 @@ export async function runCli(argv: string[]): Promise<void> {
           options.onlyVec ?? false,
         );
 
-        const previousState = readScanState(targetPath);
         const scanResult = scanRepositoryDetailed(targetPath, {
           rules: selectedRules,
           skipPaths: activePolicy.skipPaths,
@@ -176,11 +178,20 @@ export async function runCli(argv: string[]): Promise<void> {
           findings.push(...depFindings);
         }
 
-        // Confidence filter: CLI > policy > default 0.4
-        const minConfidence = options.minConfidence ?? activePolicy.minConfidence ?? 0.4;
-        const confidenceFiltered = findings.filter((f) => f.confidence >= minConfidence);
+        // Evidence filter: heuristic findings are hidden unless --paranoid.
+        const paranoid = options.paranoid ?? false;
+        const evidenceFiltered = paranoid
+          ? findings
+          : findings.filter((f) => f.evidence !== "heuristic");
+        const hiddenHeuristic = findings.length - evidenceFiltered.length;
 
-        // Severity filter: CLI > policy
+        // Optional numeric confidence filter (CLI > policy; no hidden default).
+        const minConfidence = options.minConfidence ?? activePolicy.minConfidence;
+        const confidenceFiltered =
+          minConfidence !== undefined
+            ? evidenceFiltered.filter((f) => f.confidence >= minConfidence)
+            : evidenceFiltered;
+
         const minSeverity = options.severity ?? activePolicy.minSeverity;
         const filtered = filterFindingsBySeverity(confidenceFiltered, minSeverity);
         const filteredIgnored = filterIgnoredBySeverity(scanResult.ignoredFindings, minSeverity);
@@ -199,28 +210,29 @@ export async function runCli(argv: string[]): Promise<void> {
             unchangedCount: Math.max(0, baseline.currentCount - baseline.newOrRegressedCount),
           };
           if (baseline.created) {
-            process.stdout.write(
-              "Baseline created. Future runs will show only new or changed issues.\n\n",
-            );
+            process.stdout.write("Baseline created. Future runs will show only new or changed issues.\n");
           } else {
             outputFindings = baseline.findings;
-            process.stdout.write(
-              `New issues since baseline: ${baseline.newOrRegressedCount} (baseline: ${baseline.baselineCount}, current: ${baseline.currentCount})\n\n`,
-            );
           }
         }
+
+        const filesScanned =
+          scanResult.scannedFiles.length + (scanResult.pythonFiles?.length ?? 0);
 
         const report = buildReport(
           outputFindings,
           {
             tool: "SecureAI-Scan",
-            version: readPackageVersion(),
+            version: getOwnVersion(),
             scannedAt: new Date().toISOString(),
           },
           {
             rootPath: targetPath,
             ignoredFindings: filteredIgnored,
             baselineDiff,
+            hiddenHeuristic,
+            filesScanned,
+            durationMs: Date.now() - startedAt,
           },
         );
 
@@ -228,45 +240,29 @@ export async function runCli(argv: string[]): Promise<void> {
           writeFullReport(report, options.output);
         }
 
-        const terminal = formatTerminalReport(report, options.limit ?? 3);
-        process.stdout.write(`${terminal}\n`);
-
-        // Hidden-by-confidence hint
-        const hiddenCount = findings.length - confidenceFiltered.length;
-        if (hiddenCount > 0) {
-          process.stdout.write(
-            `Note: ${hiddenCount} finding(s) hidden (confidence < ${minConfidence}). Lower --min-confidence to see them.\n`,
-          );
-        }
-
-        maybePrintContextualHints(report, options.baseline, options.output, previousState, policyResult !== undefined);
-        persistScanRun(targetPath, Boolean(options.baseline), previousState);
-
-        // Policy: fail the process on severity threshold
-        const failSeverity = activePolicy.failOnSeverity;
-        if (failSeverity) {
-          const failFindings = outputFindings.filter(
-            (f) => severityValue(f.severity) >= severityValue(failSeverity),
-          );
-          if (failFindings.length > 0) {
-            process.stderr.write(
-              `\nPolicy violation: ${failFindings.length} finding(s) at or above "${failSeverity}" severity. Exiting with code 1.\n`,
-            );
-            process.exit(1);
-          }
-        }
+        process.stdout.write(`${formatTerminalReport(report, options.limit ?? 10)}\n`);
 
         if (options.debug) {
           const tsFiles = scanResult.scannedFiles;
           const pyFiles = scanResult.pythonFiles ?? [];
           process.stderr.write(
-            `\n[debug] Scanned: ${tsFiles.length} TS/JS file(s), ${pyFiles.length} Python file(s) | Rules: ${selectedRules?.join(", ") ?? "all"} | minConfidence: ${minConfidence}\n`,
+            `\n[debug] Scanned: ${tsFiles.length} TS/JS file(s), ${pyFiles.length} Python file(s) | Rules: ${selectedRules?.join(", ") ?? "all"} | paranoid: ${paranoid}\n`,
           );
-          const allFiles = [...tsFiles, ...pyFiles];
-          const preview = allFiles.slice(0, 20);
-          for (const f of preview) process.stderr.write(`  ${f}\n`);
-          if (allFiles.length > preview.length)
-            process.stderr.write(`  ...and ${allFiles.length - preview.length} more\n`);
+          for (const f of [...tsFiles, ...pyFiles].slice(0, 20)) process.stderr.write(`  ${f}\n`);
+        }
+
+        // Fail threshold: CLI flag > policy.
+        const failSeverity = options.failOn ?? activePolicy.failOnSeverity;
+        if (failSeverity) {
+          const failing = outputFindings.filter(
+            (f) => severityValue(f.severity) >= severityValue(failSeverity),
+          );
+          if (failing.length > 0) {
+            process.stderr.write(
+              `\nFailing: ${failing.length} finding(s) at or above "${failSeverity}" severity.\n`,
+            );
+            process.exit(1);
+          }
         }
       },
     );
@@ -274,7 +270,7 @@ export async function runCli(argv: string[]): Promise<void> {
   // ── explain ──────────────────────────────────────────────────────────────
   program
     .command("explain")
-    .argument("<rule_id>", "Rule ID to explain (e.g. AI001, MCP002, VEC003)")
+    .argument("<rule_id>", "Rule ID to explain (e.g. AI001, MCP004, VEC003)")
     .description("Show why a rule exists, how it's exploited, and a concrete fix example")
     .action((ruleId: string) => {
       const normalized = ruleId.trim().toUpperCase();
@@ -283,45 +279,56 @@ export async function runCli(argv: string[]): Promise<void> {
           `Unknown rule ID "${ruleId}". Available: ${AVAILABLE_RULE_IDS.join(", ")}.`,
         );
       }
+      const catalog = catalogFor(normalized);
       const explainer = new StaticExplainer();
       const explanation = explainer.explain({
         rule_id: normalized,
-        title: normalized,
-        severity: "medium",
+        title: catalog?.title ?? normalized,
+        severity: catalog?.severity ?? "medium",
         file: "",
         line: 0,
         summary: "",
         description: "",
         recommendation: "",
         confidence: 0,
+        evidence: "likely",
       });
 
-      process.stdout.write(`\n# ${normalized} — ${explanation.summary}\n\n`);
-      process.stdout.write(`Why this is dangerous\n${"─".repeat(40)}\n${explanation.whyRisky}\n\n`);
-      process.stdout.write(`How attackers exploit it\n${"─".repeat(40)}\n${explanation.howExploited}\n\n`);
-      process.stdout.write(`How to fix it\n${"─".repeat(40)}\n${explanation.howToFix}\n\n`);
-      process.stdout.write("Code example\n" + "─".repeat(40) + "\n");
-      process.stdout.write("```ts\n");
-      process.stdout.write(`${explanation.codeExample}\n`);
-      process.stdout.write("```\n\n");
+      const divider = "─".repeat(48);
+      process.stdout.write(`\n# ${normalized} — ${catalog?.title ?? explanation.summary}\n\n`);
+      if (catalog) {
+        const tags = [
+          `Severity: ${catalog.severity}`,
+          `OWASP ${catalog.owasp} (${catalog.owaspName})`,
+          catalog.euAiAct ? `EU AI Act ${catalog.euAiAct}` : "",
+        ].filter(Boolean);
+        process.stdout.write(`${tags.join("  ·  ")}\n\n`);
+      }
+      process.stdout.write(`Why this is dangerous\n${divider}\n${explanation.whyRisky}\n\n`);
+      process.stdout.write(`How attackers exploit it\n${divider}\n${explanation.howExploited}\n\n`);
+      process.stdout.write(`How to fix it\n${divider}\n${explanation.howToFix}\n\n`);
+      process.stdout.write(`Code example\n${divider}\n`);
+      process.stdout.write("```ts\n" + explanation.codeExample + "\n```\n\n");
     });
 
-  // ── prompt ────────────────────────────────────────────────────────────────
+  // ── bom ──────────────────────────────────────────────────────────────────
   program
-    .command("prompt")
-    .argument("<promptText...>", "Raw prompt text to evaluate for injection risk")
-    .description("Evaluate prompt text for instruction-override and injection patterns")
-    .action((promptText: string[]) => {
-      const input = promptText.join(" ").trim();
-      const result = evaluatePromptRisk(input);
-      process.stdout.write("\nPrompt Risk Evaluator\n");
-      process.stdout.write("─".repeat(40) + "\n");
-      process.stdout.write(`Risk level:  ${result.level}\n`);
-      process.stdout.write("Reasons:\n");
-      for (const reason of result.reasons) process.stdout.write(`  • ${reason}\n`);
-      process.stdout.write("Suggestions:\n");
-      for (const suggestion of result.suggestions) process.stdout.write(`  • ${suggestion}\n`);
-      process.stdout.write("\n");
+    .command("bom")
+    .argument("[path]", "Repository to inventory (default: current directory)", ".")
+    .option("--output <file>", "Write to file (.json or .md); prints markdown otherwise")
+    .description("Generate an AI Bill of Materials: SDKs, models, vector stores, agent frameworks, MCP servers")
+    .action((targetPath: string, options: { output?: string }) => {
+      const bom = generateBom(targetPath);
+      if (options.output) {
+        const resolved = path.resolve(options.output);
+        const content = options.output.toLowerCase().endsWith(".json")
+          ? JSON.stringify(bom, null, 2)
+          : formatBomMarkdown(bom);
+        fs.writeFileSync(resolved, content, "utf-8");
+        process.stdout.write(`AI-BOM written to: ${resolved} (${bom.components.length} component(s))\n`);
+      } else {
+        process.stdout.write(formatBomMarkdown(bom) + "\n");
+      }
     });
 
   // ── threat-model ─────────────────────────────────────────────────────────
@@ -336,21 +343,15 @@ export async function runCli(argv: string[]): Promise<void> {
       const scanResult = scanRepositoryDetailed(targetPath);
       const findings = filterFindingsBySeverity(scanResult.findings, options.severity);
 
-      const version = readPackageVersion();
       const content = generateThreatModel(findings, {
         scannedAt: new Date().toISOString(),
-        version,
+        version: getOwnVersion(),
         rootPath: path.resolve(targetPath),
       });
 
       const outPath = path.resolve(options.output ?? path.join(targetPath, "THREAT_MODEL.md"));
       fs.writeFileSync(outPath, content, "utf-8");
-      process.stdout.write(`Threat model written to: ${outPath}\n`);
-      process.stdout.write(`Findings included: ${findings.length}\n`);
-      process.stdout.write("\nNext steps:\n");
-      process.stdout.write("  1. Review the attack scenarios with your security team\n");
-      process.stdout.write("  2. Prioritise fixes from the Remediation Priority section\n");
-      process.stdout.write("  3. Use `secureai-scan explain <RULE_ID>` for code-level guidance\n\n");
+      process.stdout.write(`Threat model written to: ${outPath} (${findings.length} finding(s) included)\n`);
     });
 
   // ── init ─────────────────────────────────────────────────────────────────
@@ -364,36 +365,24 @@ export async function runCli(argv: string[]): Promise<void> {
       process.stdout.write("\nSecureAI-Scan Setup\n");
       process.stdout.write("─".repeat(40) + "\n\n");
 
-      // Policy file
       const policyPath = writeDefaultPolicy(resolved);
       process.stdout.write(`✓ Policy file created: ${policyPath}\n`);
-      process.stdout.write("  Edit it to tune severity thresholds and rule selection.\n\n");
 
-      // GitHub Actions
       if (options.ci) {
         try {
           const workflowPath = writeGithubWorkflow(resolved);
-          process.stdout.write(`✓ CI workflow created: ${workflowPath}\n\n`);
+          process.stdout.write(`✓ CI workflow created: ${workflowPath}\n`);
+          process.stdout.write("  Findings will appear in GitHub code scanning via SARIF upload.\n");
         } catch {
-          process.stdout.write("  (Skipped CI workflow — could not write .github/workflows/)\n\n");
+          process.stdout.write("  (Skipped CI workflow — could not write .github/workflows/)\n");
         }
       }
 
-      // Baseline
-      process.stdout.write("Your 4-step security journey:\n\n");
-      process.stdout.write("  Step 1 — Scan your repo now:\n");
-      process.stdout.write("    secureai-scan scan . --policy .secureai-policy.json\n\n");
-      process.stdout.write("  Step 2 — Create a baseline (focus only on new issues in future):\n");
-      process.stdout.write("    secureai-scan scan . --baseline .secureai-baseline.json\n\n");
-      process.stdout.write("  Step 3 — Understand any finding:\n");
-      process.stdout.write("    secureai-scan explain <RULE_ID>   e.g. secureai-scan explain AI001\n\n");
-      process.stdout.write("  Step 4 — Generate a threat model for security review:\n");
-      process.stdout.write("    secureai-scan threat-model .\n\n");
-      process.stdout.write("  Bonus — Suppress a known-safe finding in code:\n");
-      process.stdout.write("    // secureai-ignore AI001: sanitized via DOMPurify\n\n");
-
-      process.stdout.write("─".repeat(40) + "\n");
-      process.stdout.write("Docs: https://github.com/akanthed/SecureAI-Scan\n\n");
+      process.stdout.write("\nNext steps:\n");
+      process.stdout.write("  1. secureai-scan scan .                     scan now\n");
+      process.stdout.write("  2. secureai-scan scan . --baseline .secureai-baseline.json\n");
+      process.stdout.write("  3. secureai-scan bom . --output AI_BOM.md   inventory your AI stack\n");
+      process.stdout.write("  4. secureai-scan explain <RULE_ID>          fix guide per rule\n\n");
     });
 
   await program.parseAsync(argv);
@@ -435,7 +424,9 @@ function writeFullReport(report: ReportModel, outputPath: string): void {
   const resolved = path.resolve(outputPath);
   const lower = outputPath.toLowerCase();
   let content: string;
-  if (lower.endsWith(".json")) {
+  if (lower.endsWith(".sarif")) {
+    content = formatReport(report, "sarif");
+  } else if (lower.endsWith(".json")) {
     content = formatReport(report, "json");
   } else if (lower.endsWith(".md")) {
     content = formatReport(report, "markdown");
@@ -443,22 +434,11 @@ function writeFullReport(report: ReportModel, outputPath: string): void {
     content = formatReport(report, "html");
   } else {
     throw new InvalidArgumentError(
-      `Unsupported output format for "${outputPath}". Use .json, .md, or .html.`,
+      `Unsupported output format for "${outputPath}". Use .sarif, .json, .md, or .html.`,
     );
   }
   fs.writeFileSync(resolved, content, "utf-8");
-  process.stdout.write(`Full report written to: ${resolved}\n`);
-}
-
-function readPackageVersion(): string {
-  try {
-    const pkgPath = path.resolve("package.json");
-    const raw = fs.readFileSync(pkgPath, "utf-8");
-    const parsed = JSON.parse(raw) as { version?: string };
-    return parsed.version ?? "0.0.0";
-  } catch {
-    return "0.0.0";
-  }
+  process.stdout.write(`Report written to: ${resolved}\n`);
 }
 
 function filterIgnoredBySeverity(
@@ -470,101 +450,4 @@ function filterIgnoredBySeverity(
   return ignoredFindings.filter(
     (entry) => severityValue(entry.finding.severity) >= threshold,
   );
-}
-
-function severityValue(severity: Severity): number {
-  switch (severity) {
-    case "critical": return 4;
-    case "high": return 3;
-    case "medium": return 2;
-    case "low": return 1;
-    default: return 0;
-  }
-}
-
-function maybePrintContextualHints(
-  report: ReportModel,
-  baselinePath: string | undefined,
-  outputPath: string | undefined,
-  previousState: ScanState | undefined,
-  hasPolicy: boolean,
-): void {
-  const hints: string[] = [];
-
-  if (report.summary.total > 10) {
-    hints.push("Tip: `--baseline` focuses only on new issues after each commit.");
-  }
-
-  if (!outputPath) {
-    hints.push("Tip: `--output report.html` generates a shareable, detailed report.");
-  }
-
-  if (!baselinePath && previousState?.withoutBaselineRuns === 1) {
-    hints.push("Tip: create a baseline with `--baseline .secureai-baseline.json`.");
-  }
-
-  if (!hasPolicy && report.summary.total > 0) {
-    hints.push("Tip: run `secureai-scan init` to create a policy file and CI workflow.");
-  }
-
-  if (report.summary.bySeverity.critical > 0 || report.summary.bySeverity.high > 0) {
-    hints.push("Tip: `secureai-scan explain <RULE_ID>` shows a code-level fix for any finding.");
-  }
-
-  if (report.summary.total > 0) {
-    hints.push("Tip: `secureai-scan threat-model .` builds a THREAT_MODEL.md for security review.");
-  }
-
-  if (hints.length > 0) {
-    process.stdout.write("\n");
-    for (const hint of hints.slice(0, 2)) {
-      process.stdout.write(`${hint}\n`);
-    }
-  }
-}
-
-interface ScanState {
-  target: string;
-  lastRunAt: string;
-  withoutBaselineRuns: number;
-}
-
-function persistScanRun(
-  scanTarget: string,
-  baselineUsed: boolean,
-  previousState: ScanState | undefined,
-): void {
-  const statePath = path.join(os.homedir(), ".secureai-scan", "state.json");
-  const stateDir = path.dirname(statePath);
-  const resolvedTarget = path.resolve(scanTarget);
-  const sameTarget = previousState?.target === resolvedTarget;
-  const priorWithoutBaseline = sameTarget ? previousState?.withoutBaselineRuns ?? 0 : 0;
-  const state = {
-    target: resolvedTarget,
-    lastRunAt: new Date().toISOString(),
-    withoutBaselineRuns: baselineUsed ? 0 : priorWithoutBaseline + 1,
-  };
-  try {
-    fs.mkdirSync(stateDir, { recursive: true });
-    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), "utf-8");
-  } catch {
-    // Non-fatal helper state.
-  }
-}
-
-function readScanState(scanTarget: string): ScanState | undefined {
-  const statePath = path.join(os.homedir(), ".secureai-scan", "state.json");
-  try {
-    const raw = fs.readFileSync(statePath, "utf-8");
-    const state = JSON.parse(raw) as ScanState;
-    if (!state.target || !state.lastRunAt || typeof state.withoutBaselineRuns !== "number") {
-      return undefined;
-    }
-    if (path.resolve(scanTarget) !== path.resolve(state.target)) {
-      return undefined;
-    }
-    return state;
-  } catch {
-    return undefined;
-  }
 }

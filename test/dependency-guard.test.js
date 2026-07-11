@@ -41,6 +41,6 @@ test("dependency guard flags missing and suspicious dependency names", async () 
   });
 
   const ruleIds = findings.map((f) => f.rule_id);
-  assert.equal(ruleIds.includes("LLM_DEP001"), true);
-  assert.equal(ruleIds.includes("LLM_DEP002"), true);
+  assert.equal(ruleIds.includes("DEP001"), true);
+  assert.equal(ruleIds.includes("DEP002"), true);
 });

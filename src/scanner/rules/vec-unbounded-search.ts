@@ -1,7 +1,8 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
-import { calculateConfidence, isTestFilePath } from "../confidence.js";
+import { evidenceConfidence, demoteEvidence, isTestFilePath } from "../confidence.js";
+import type { Evidence } from "../types.js";
 
 // Search method names that accept a k/limit parameter
 const VECTOR_SEARCH_METHODS = [
@@ -89,10 +90,8 @@ export const ruleVecUnboundedSearch: Rule = {
               "Without an explicit result count limit, a vector search may return an unbounded number of documents. This can inject excessive retrieved content into LLM context (prompt stuffing), exhaust token budgets, and inadvertently expose documents from unrelated records.",
             recommendation:
               "Always specify an explicit, hardcoded k value appropriate for your use case (typically 3-10). Never derive k from user input.",
-            confidence: calculateConfidence({
-              multipleSignals: false,
-              isTestFile: isTest,
-            }),
+            confidence: evidenceConfidence("heuristic"),
+            evidence: "heuristic",
           });
           continue;
         }
@@ -110,12 +109,8 @@ export const ruleVecUnboundedSearch: Rule = {
               "An attacker can set k to a large number, forcing the system to retrieve and process thousands of documents per request. This enables prompt-stuffing attacks, cost exhaustion (LLM token abuse), and potential cross-tenant data exposure.",
             recommendation:
               "Hardcode k as a server-side constant. If k must vary, clamp it to a safe maximum (e.g. Math.min(userK, 10)).",
-            confidence: calculateConfidence({
-              directUserInput: true,
-              requestObjectSource: true,
-              multipleSignals: true,
-              isTestFile: isTest,
-            }),
+            confidence: evidenceConfidence(isTest ? demoteEvidence("likely") : "likely"),
+            evidence: (isTest ? demoteEvidence("likely") : "likely") as Evidence,
           });
           continue;
         }
@@ -133,10 +128,8 @@ export const ruleVecUnboundedSearch: Rule = {
               "A very large k value retrieves a large number of documents per search, which may exceed LLM context limits or unexpectedly expose a broad cross-section of stored data.",
             recommendation:
               `Consider reducing k to 3–10 for typical RAG use cases. The current value of ${kArg.getText()} retrieves far more context than most LLMs can use effectively.`,
-            confidence: calculateConfidence({
-              multipleSignals: false,
-              isTestFile: isTest,
-            }),
+            confidence: evidenceConfidence("heuristic"),
+            evidence: "heuristic",
           });
         }
       }

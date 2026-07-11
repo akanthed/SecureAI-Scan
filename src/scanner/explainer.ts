@@ -344,6 +344,63 @@ const sanitized = req.body.documents.map(doc => ({
 await userSubmittedStore.addDocuments(sanitized);  // separate namespace
 await reviewQueue.enqueue(sanitized);              // pending audit`,
   },
+  VEC004: {
+    summary: "Documents are ingested into the vector store without a tenant/namespace tag.",
+    whyRisky:
+      "Read-side access filters (VEC001) only work if every document was stamped with an owner at write time. Untagged documents are retrievable by every tenant.",
+    howExploited:
+      "Tenant A uploads a contract. Because it was ingested without a tenant tag, Tenant B's similarity search retrieves it and the LLM quotes it back.",
+    howToFix:
+      "Attach a tenant/owner identifier to every ingested document and use the same key in every retrieval filter.",
+    codeExample: `// Bad
+await store.addDocuments(docs);
+
+// Good
+await store.addDocuments(docs, { namespace: tenantId });
+// ...and on retrieval:
+await store.similaritySearch(query, 5, { filter: { namespace: tenantId } });`,
+  },
+  MCP004: {
+    summary: "An MCP server is launched via npx/uvx without a pinned version.",
+    whyRisky:
+      "Every launch fetches whatever version the registry currently serves. A hijacked or typosquatted package runs immediately with your machine's permissions and the MCP server's context access.",
+    howExploited:
+      "An attacker compromises the package (or publishes a malicious update). The next time your editor or agent starts, the new code executes — same class of risk as curl|bash.",
+    howToFix:
+      "Pin an exact version and review before upgrading. For internal servers, install locally and reference the binary path.",
+    codeExample: `// Bad (.mcp.json)
+"args": ["-y", "some-mcp-server"]
+
+// Good
+"args": ["-y", "some-mcp-server@1.4.2"]`,
+  },
+  MCP005: {
+    summary: "A secret value is written directly into an MCP config file.",
+    whyRisky:
+      "MCP configs are committed and shared. An inline API key is exposed to everyone with repo access and every tool that reads the file.",
+    howExploited:
+      "Anyone who clones the repo (or any agent that reads the config) obtains a live credential.",
+    howToFix:
+      "Reference the environment instead of inlining, and rotate the exposed credential immediately.",
+    codeExample: `// Bad (.mcp.json)
+"env": { "API_KEY": "sk-live-4f9a8b..." }
+
+// Good
+"env": { "API_KEY": "\${env:API_KEY}" }`,
+  },
+  MCP006: {
+    summary: "An MCP server is reached over plaintext HTTP.",
+    whyRisky:
+      "Tool definitions, tool results, and header credentials travel unencrypted. An on-path attacker who swaps tool definitions hijacks the whole agent.",
+    howExploited:
+      "On a shared network, an attacker intercepts the HTTP MCP traffic and injects a malicious tool description; the model then follows the attacker's instructions.",
+    howToFix: "Use https:// for every non-localhost MCP server URL.",
+    codeExample: `// Bad (.mcp.json)
+"url": "http://tools.example.com/mcp"
+
+// Good
+"url": "https://tools.example.com/mcp"`,
+  },
 };
 
 export class StaticExplainer implements Explainer {

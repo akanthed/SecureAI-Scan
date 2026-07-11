@@ -1,7 +1,7 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
-import { calculateConfidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
+import { evidenceConfidence, demoteEvidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
 
 // Methods used to ingest content into vector stores
 const INGESTION_METHODS = [
@@ -120,12 +120,8 @@ export const ruleVecUserIngestion: Rule = {
               "Allowing users to directly ingest content into a shared vector store is a training/retrieval data poisoning attack. A malicious user can plant documents containing prompt injection payloads. When those documents are later retrieved via similarity search, the injected instructions are silently executed by the LLM.",
             recommendation:
               "Validate and sanitize all user-provided content before ingestion. Isolate user-submitted documents in a quarantine namespace pending review. Consider scanning ingested content for injection patterns before making it available to retrieval pipelines.",
-            confidence: calculateConfidence({
-              directUserInput: true,
-              requestObjectSource: true,
-              multipleSignals: true,
-              isTestFile: isTest,
-            }),
+            confidence: evidenceConfidence(isTest ? demoteEvidence("likely") : "likely"),
+            evidence: isTest ? demoteEvidence("likely") : "likely",
           });
         }
       }

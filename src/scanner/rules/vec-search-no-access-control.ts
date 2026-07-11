@@ -1,7 +1,7 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
-import { calculateConfidence, isTestFilePath } from "../confidence.js";
+import { evidenceConfidence, demoteEvidence, isTestFilePath } from "../confidence.js";
 
 // Method names used for vector similarity search across major SDKs
 const VECTOR_SEARCH_METHODS = [
@@ -96,11 +96,8 @@ export const ruleVecSearchNoAccessControl: Rule = {
             "Without a per-user or per-tenant filter, a similarity search returns results from all documents stored in the vector database. User A can receive documents that belong to User B through the LLM's context, causing data leakage across tenant boundaries.",
           recommendation:
             "Always pass a namespace, filter, or where-clause scoped to the authenticated user or tenant. For example: store.similaritySearch(query, k, { filter: { userId: req.user.id } }).",
-          confidence: calculateConfidence({
-            confirmedLlmCall: false,
-            multipleSignals: true,
-            isTestFile: isTest,
-          }),
+          confidence: evidenceConfidence(isTest ? demoteEvidence("likely") : "likely"),
+          evidence: isTest ? demoteEvidence("likely") : "likely",
         });
       }
     }

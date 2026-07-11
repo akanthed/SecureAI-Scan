@@ -1,19 +1,19 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
-import { calculateConfidence } from "../confidence.js";
+import { evidenceConfidence } from "../confidence.js";
 import { isLikelyLlmCall } from "./llm-rule-utils.js";
 
+// Note: JSON.parse is intentionally NOT here — parsing structured output is
+// normal and is covered by AI012 (unvalidated structured output) instead.
 const DANGEROUS_CALLEES = [
   "eval",
-  "function",
   "exec",
   "execsync",
   "spawn",
   "spawnsync",
   "query",
   "raw",
-  "json.parse",
 ];
 
 function collectLlmOutputIdentifiers(functionNode: Node): Set<string> {
@@ -31,6 +31,28 @@ function collectLlmOutputIdentifiers(functionNode: Node): Set<string> {
         .some(isLikelyLlmCall)
     ) {
       outputs.add(declaration.getName().toLowerCase());
+    }
+  }
+
+  // Propagate through derivations: const code = completion.choices[0].message.content
+  let changed = true;
+  let passes = 0;
+  while (changed && passes < 4) {
+    changed = false;
+    passes += 1;
+    for (const declaration of functionNode.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+      const name = declaration.getName().toLowerCase();
+      if (outputs.has(name)) continue;
+      const initializer = declaration.getInitializer();
+      if (!initializer) continue;
+      const derived = initializer
+        .getDescendantsOfKind(SyntaxKind.Identifier)
+        .some((id) => outputs.has(id.getText().toLowerCase()));
+      const direct = Node.isIdentifier(initializer) && outputs.has(initializer.getText().toLowerCase());
+      if (derived || direct) {
+        outputs.add(name);
+        changed = true;
+      }
     }
   }
 
@@ -111,12 +133,8 @@ export const ruleUnsafeOutputHandling: Rule = {
               "Model output flows into code execution, command execution, database, HTML, or parser behavior without an obvious validation boundary.",
             recommendation:
               "Validate model output against a strict schema and keep it away from eval, shell, SQL, HTML, and dynamic execution sinks.",
-            confidence: calculateConfidence({
-              directUserInput: false,
-              requestObjectSource: false,
-              stringConcatOrTemplate: false,
-              confirmedLlmCall: true,
-            }),
+            confidence: evidenceConfidence("likely"),
+            evidence: "likely",
           });
         }
 
@@ -135,7 +153,8 @@ export const ruleUnsafeOutputHandling: Rule = {
               "Model output is rendered as HTML without an obvious sanitizer, which can turn prompt output into script execution.",
             recommendation:
               "Render model output as text or sanitize it with a proven HTML sanitizer before assigning it to DOM HTML sinks.",
-            confidence: 0.7,
+            confidence: evidenceConfidence("likely"),
+            evidence: "likely",
           });
         }
       }

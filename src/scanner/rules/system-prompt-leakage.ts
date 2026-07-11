@@ -1,6 +1,7 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { evidenceConfidence } from "../confidence.js";
 import { getObjectProperty, getStringValue, isLikelyLlmCall } from "./llm-rule-utils.js";
 
 const SECRET_HINTS = [
@@ -77,7 +78,8 @@ export const ruleSystemPromptLeakage: Rule = {
               "System prompts can be exposed through prompt injection, logs, traces, or provider tooling. They should not contain secrets or privileged internals.",
             recommendation:
               "Move secrets and internal credentials to server-side configuration and expose only non-sensitive policy instructions to the model.",
-            confidence: 0.75,
+            confidence: evidenceConfidence("likely"),
+            evidence: "likely",
           });
         }
       }

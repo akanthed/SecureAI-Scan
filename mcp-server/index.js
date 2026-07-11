@@ -3,9 +3,9 @@
  * SecureAI-Scan MCP Server
  *
  * Exposes three tools to Claude (and any MCP-compatible LLM host):
- *   • scan_repository   — scan a local path, return findings as JSON
- *   • explain_rule      — return rule explanation
- *   • evaluate_prompt   — evaluate raw prompt text for injection risk
+ *   - scan_repository — scan a local path, return findings with evidence tiers
+ *   - explain_rule    — return rule explanation with OWASP mapping
+ *   - generate_bom    — AI Bill of Materials for a repository
  *
  * Register in claude_desktop_config.json:
  *   {
@@ -17,20 +17,10 @@
  *     }
  *   }
  *
- * Or in a project .mcp.json:
- *   {
- *     "mcpServers": {
- *       "secureai-scan": {
- *         "command": "node",
- *         "args": ["./mcp-server/index.js"]
- *       }
- *     }
- *   }
- *
  * Requires: npm run build (in the secureai-scan root) first.
  */
 
-import { createRequire } from "node:module";
+import fs from "node:fs";
 import readline from "node:readline";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,8 +32,17 @@ const distRoot = path.resolve(__dirname, "..", "dist");
 const { scanRepositoryDetailed } = await import(`${distRoot}/scanner/scan.js`);
 const { filterFindingsBySeverity } = await import(`${distRoot}/scanner/filters.js`);
 const { StaticExplainer } = await import(`${distRoot}/scanner/explainer.js`);
-const { evaluatePromptRisk } = await import(`${distRoot}/scanner/prompt-risk.js`);
+const { catalogFor } = await import(`${distRoot}/scanner/catalog.js`);
+const { generateBom } = await import(`${distRoot}/scanner/bom.js`);
 const { AVAILABLE_RULE_IDS } = await import(`${distRoot}/scanner/rules/index.js`);
+
+const OWN_VERSION = (() => {
+  try {
+    return JSON.parse(fs.readFileSync(path.resolve(__dirname, "..", "package.json"), "utf-8")).version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
 
 // ── Tool definitions ──────────────────────────────────────────────────────
 
@@ -51,7 +50,7 @@ const TOOLS = [
   {
     name: "scan_repository",
     description:
-      "Scan a local repository for AI/LLM security vulnerabilities. Detects prompt injection, MCP tool poisoning, RAG data poisoning, agent trust boundary violations, and 19 more rules (TypeScript/JS + Python). Returns structured findings.",
+      "Scan a local repository for AI/LLM security vulnerabilities with evidence-tiered findings (proven/likely/heuristic). Detects prompt injection (with source→sink dataflow traces), MCP supply-chain issues, RAG data poisoning, and agent trust violations in TypeScript/JS, Python, and MCP config files.",
     inputSchema: {
       type: "object",
       properties: {
@@ -64,9 +63,9 @@ const TOOLS = [
           enum: ["low", "medium", "high", "critical"],
           description: "Minimum severity to return (default: low).",
         },
-        min_confidence: {
-          type: "number",
-          description: "Minimum confidence threshold 0–1 (default: 0.4).",
+        paranoid: {
+          type: "boolean",
+          description: "Include heuristic-tier findings (default: false — only proven/likely).",
         },
         rules: {
           type: "array",
@@ -84,7 +83,7 @@ const TOOLS = [
   {
     name: "explain_rule",
     description:
-      "Return a detailed explanation for any SecureAI-Scan rule: why it's dangerous, how attackers exploit it, and how to fix it with a code example.",
+      "Return a detailed explanation for any SecureAI-Scan rule: OWASP LLM Top 10 mapping, why it's dangerous, how attackers exploit it, and how to fix it with a code example.",
     inputSchema: {
       type: "object",
       properties: {
@@ -97,18 +96,18 @@ const TOOLS = [
     },
   },
   {
-    name: "evaluate_prompt",
+    name: "generate_bom",
     description:
-      "Evaluate raw prompt text for injection risk patterns (instruction override, jailbreak phrases, role confusion). Returns a risk level and mitigations.",
+      "Generate an AI Bill of Materials for a repository: LLM provider SDKs, model identifiers, vector stores, agent frameworks, embedding models, and MCP servers, with the files where each was found.",
     inputSchema: {
       type: "object",
       properties: {
-        text: {
+        path: {
           type: "string",
-          description: "The prompt text to evaluate.",
+          description: "Absolute or relative path to the repository root.",
         },
       },
-      required: ["text"],
+      required: ["path"],
     },
   },
 ];
@@ -120,7 +119,7 @@ function handleScanRepository(args) {
   if (!targetPath) throw new Error("'path' is required.");
 
   const minSeverity = args.min_severity ?? undefined;
-  const minConfidence = args.min_confidence ?? 0.4;
+  const paranoid = args.paranoid ?? false;
   const rules = args.rules ?? undefined;
   const limit = args.limit ?? 50;
 
@@ -131,10 +130,10 @@ function handleScanRepository(args) {
     throw new Error(`Scan failed: ${err?.message ?? String(err)}`);
   }
 
-  const filtered = filterFindingsBySeverity(
-    scanResult.findings.filter((f) => f.confidence >= minConfidence),
-    minSeverity,
-  );
+  const evidenceFiltered = paranoid
+    ? scanResult.findings
+    : scanResult.findings.filter((f) => f.evidence !== "heuristic");
+  const filtered = filterFindingsBySeverity(evidenceFiltered, minSeverity);
 
   const bySeverity = {
     critical: filtered.filter((f) => f.severity === "critical").length,
@@ -147,10 +146,12 @@ function handleScanRepository(args) {
     rule_id: f.rule_id,
     title: f.title,
     severity: f.severity,
-    confidence: Math.round(f.confidence * 100),
+    evidence: f.evidence,
+    owasp: catalogFor(f.rule_id)?.owasp,
     file: f.file,
     line: f.line,
     summary: f.summary,
+    trace: f.trace,
     recommendation: f.recommendation,
   }));
 
@@ -158,6 +159,7 @@ function handleScanRepository(args) {
     scanned_ts_files: scanResult.scannedFiles.length,
     scanned_python_files: (scanResult.pythonFiles ?? []).length,
     total_findings: filtered.length,
+    hidden_heuristic: scanResult.findings.length - evidenceFiltered.length,
     shown: findings.length,
     by_severity: bySeverity,
     findings,
@@ -175,13 +177,19 @@ function handleExplainRule(args) {
   if (!AVAILABLE_RULE_IDS.includes(normalized)) {
     throw new Error(`Unknown rule ID "${normalized}". Available: ${AVAILABLE_RULE_IDS.join(", ")}`);
   }
+  const catalog = catalogFor(normalized);
   const explainer = new StaticExplainer();
   const exp = explainer.explain({
     rule_id: normalized, title: normalized, severity: "medium",
-    file: "", line: 0, summary: "", description: "", recommendation: "", confidence: 0,
+    file: "", line: 0, summary: "", description: "", recommendation: "",
+    confidence: 0, evidence: "likely",
   });
   return {
     rule_id: normalized,
+    title: catalog?.title,
+    severity: catalog?.severity,
+    owasp: catalog ? `${catalog.owasp} (${catalog.owaspName})` : undefined,
+    eu_ai_act: catalog?.euAiAct,
     summary: exp.summary,
     why_risky: exp.whyRisky,
     how_exploited: exp.howExploited,
@@ -190,11 +198,10 @@ function handleExplainRule(args) {
   };
 }
 
-function handleEvaluatePrompt(args) {
-  const text = args.text;
-  if (!text) throw new Error("'text' is required.");
-  const result = evaluatePromptRisk(text);
-  return { risk_level: result.level, reasons: result.reasons, suggestions: result.suggestions };
+function handleGenerateBom(args) {
+  const targetPath = args.path;
+  if (!targetPath) throw new Error("'path' is required.");
+  return generateBom(targetPath);
 }
 
 // ── JSON-RPC dispatcher ───────────────────────────────────────────────────
@@ -215,7 +222,7 @@ function dispatch(req) {
       jsonrpc: "2.0", id,
       result: {
         protocolVersion: "2024-11-05",
-        serverInfo: { name: "secureai-scan", version: "0.2.1" },
+        serverInfo: { name: "secureai-scan", version: OWN_VERSION },
         capabilities: { tools: {} },
       },
     });
@@ -236,7 +243,7 @@ function dispatch(req) {
       let result;
       if (toolName === "scan_repository") result = handleScanRepository(args);
       else if (toolName === "explain_rule") result = handleExplainRule(args);
-      else if (toolName === "evaluate_prompt") result = handleEvaluatePrompt(args);
+      else if (toolName === "generate_bom") result = handleGenerateBom(args);
       else { send(errResp(id, -32601, `Unknown tool: "${toolName}"`)); return; }
 
       send({

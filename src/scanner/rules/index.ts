@@ -1,6 +1,5 @@
 import type { Rule } from "../types.js";
 import { rulePromptInjectionConcat } from "./prompt-injection-concat.js";
-import { ruleLlmUsageDetect } from "./llm-usage-detect.js";
 import { ruleSensitivePromptLogging } from "./sensitive-prompt-logging.js";
 import { ruleLlmBeforeAuth } from "./llm-before-auth.js";
 import { ruleSensitiveDataToLlm } from "./sensitive-data-to-llm.js";
@@ -21,11 +20,11 @@ import { ruleMcpUnvalidatedToolResult } from "./mcp-unvalidated-tool-result.js";
 import { ruleVecSearchNoAccessControl } from "./vec-search-no-access-control.js";
 import { ruleVecUnboundedSearch } from "./vec-unbounded-search.js";
 import { ruleVecUserIngestion } from "./vec-user-ingestion.js";
+import { ruleVecIngestionNoNamespace } from "./vec-ingestion-no-namespace.js";
 
 export const RULES: Rule[] = [
   // Core AI/LLM rules (AI001–AI009)
   rulePromptInjectionConcat,
-  ruleLlmUsageDetect,
   ruleSensitivePromptLogging,
   ruleLlmBeforeAuth,
   ruleSensitiveDataToLlm,
@@ -42,10 +41,14 @@ export const RULES: Rule[] = [
   ruleMcpToolDescInjection,
   ruleMcpDynamicServerUrl,
   ruleMcpUnvalidatedToolResult,
-  // Vector/RAG rules (VEC001–VEC003)
+  // Vector/RAG rules (VEC001–VEC004)
   ruleVecSearchNoAccessControl,
   ruleVecUnboundedSearch,
   ruleVecUserIngestion,
+  ruleVecIngestionNoNamespace,
 ];
 
-export const AVAILABLE_RULE_IDS = RULES.map((rule) => rule.id);
+// Config-file rules implemented outside the AST rule engine (mcp-config-scanner).
+export const CONFIG_RULE_IDS = ["MCP004", "MCP005", "MCP006"];
+
+export const AVAILABLE_RULE_IDS = [...RULES.map((rule) => rule.id), ...CONFIG_RULE_IDS];

@@ -2,7 +2,8 @@ import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { isLikelyLlmCall } from "./llm-rule-utils.js";
-import { calculateConfidence, isTestFilePath } from "../confidence.js";
+import { evidenceConfidence, demoteEvidence, isTestFilePath } from "../confidence.js";
+import type { Evidence } from "../types.js";
 
 // Variable names that suggest agent or chain output
 const AGENT_OUTPUT_PATTERNS = [
@@ -157,11 +158,8 @@ export const ruleMultiagentTrustBoundary: Rule = {
               "Output from one agent is used as a system or developer-role message in a downstream LLM call. If the upstream agent was compromised or manipulated, this creates a privilege escalation path across the agent chain.",
             recommendation:
               "Treat all inter-agent messages as untrusted user content. Validate and sanitize agent outputs, use separate message roles, and enforce explicit trust grants at each boundary.",
-            confidence: calculateConfidence({
-              confirmedLlmCall: true,
-              multipleSignals: true,
-              isTestFile: isTest,
-            }),
+            confidence: evidenceConfidence(isTest ? demoteEvidence("likely") : "likely"),
+            evidence: isTest ? demoteEvidence("likely") : "likely",
           });
         }
       }

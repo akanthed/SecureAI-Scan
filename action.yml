@@ -1,0 +1,49 @@
+name: "SecureAI-Scan"
+description: "Find AI/LLM security vulnerabilities — prompt injection, MCP supply chain, RAG poisoning — with dataflow evidence and SARIF output"
+author: "Akshay Kanthed"
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  path:
+    description: "Path to scan"
+    required: false
+    default: "."
+  fail-on:
+    description: "Fail the job if findings at/above this severity exist (low|medium|high|critical). Empty = never fail."
+    required: false
+    default: ""
+  paranoid:
+    description: "Include heuristic-tier findings"
+    required: false
+    default: "false"
+  sarif-file:
+    description: "Where to write the SARIF report"
+    required: false
+    default: "secureai.sarif"
+  upload-sarif:
+    description: "Upload the SARIF to GitHub code scanning (requires security-events: write)"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install secureai-scan
+      shell: bash
+      run: npm install -g secureai-scan
+
+    - name: Run SecureAI-Scan
+      shell: bash
+      run: |
+        ARGS="--output ${{ inputs.sarif-file }}"
+        if [ "${{ inputs.paranoid }}" = "true" ]; then ARGS="$ARGS --paranoid"; fi
+        if [ -n "${{ inputs.fail-on }}" ]; then ARGS="$ARGS --fail-on ${{ inputs.fail-on }}"; fi
+        secureai-scan scan "${{ inputs.path }}" $ARGS
+
+    - name: Upload SARIF to GitHub code scanning
+      if: ${{ inputs.upload-sarif == 'true' && always() }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ inputs.sarif-file }}

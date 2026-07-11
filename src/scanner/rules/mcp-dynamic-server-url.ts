@@ -1,7 +1,7 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
-import { isTestFilePath, calculateConfidence } from "../confidence.js";
+import { isTestFilePath, evidenceConfidence } from "../confidence.js";
 
 // Properties in MCP server config that hold the endpoint URL
 const MCP_URL_PROPS = [
@@ -119,12 +119,8 @@ export const ruleMcpDynamicServerUrl: Rule = {
                 "Allowing user input to determine which MCP server is connected lets an attacker point your agent at a malicious server they control. That server can return adversarial tool definitions and responses, fully redirecting agent behavior.",
               recommendation:
                 "Keep MCP server URLs in server-side configuration only. Never accept them from client requests. Use a hardcoded allowlist of trusted MCP server endpoints.",
-              confidence: calculateConfidence({
-                directUserInput: true,
-                requestObjectSource: true,
-                confirmedLlmCall: false,
-                multipleSignals: true,
-              }),
+              confidence: evidenceConfidence("likely"),
+              evidence: "likely",
             });
           }
         }

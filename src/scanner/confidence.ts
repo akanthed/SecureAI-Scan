@@ -1,29 +1,24 @@
-export interface ConfidenceInputs {
-  directUserInput?: boolean;
-  stringConcatOrTemplate?: boolean;
-  requestObjectSource?: boolean;
-  confirmedLlmCall?: boolean;
-  isTestFile?: boolean;
-  hasInputSanitization?: boolean;
-  isEmbeddingCall?: boolean;
-  multipleSignals?: boolean;
+import type { Evidence } from "./types.js";
+
+/**
+ * Numeric confidence derived from the evidence tier. Kept for JSON/report
+ * compatibility and for --min-confidence; the tier is the source of truth.
+ */
+export function evidenceConfidence(evidence: Evidence): number {
+  switch (evidence) {
+    case "proven":
+      return 0.9;
+    case "likely":
+      return 0.65;
+    case "heuristic":
+      return 0.35;
+  }
 }
 
-export function calculateConfidence(inputs: ConfidenceInputs): number {
-  let score = 0;
-
-  if (inputs.confirmedLlmCall) score += 0.2;
-  if (inputs.directUserInput) score += 0.3;
-  if (inputs.stringConcatOrTemplate) score += 0.2;
-  if (inputs.requestObjectSource) score += 0.15;
-  if (inputs.multipleSignals) score += 0.15;
-
-  // Reducers — lower confidence when context suggests lower risk
-  if (inputs.isTestFile) score -= 0.3;
-  if (inputs.hasInputSanitization) score -= 0.35;
-  if (inputs.isEmbeddingCall) score -= 0.4;
-
-  return Math.min(1, Math.max(0.1, Number(score.toFixed(2))));
+/** Downgrade an evidence tier by one step (e.g. test file, sanitizer nearby). */
+export function demoteEvidence(evidence: Evidence): Evidence {
+  if (evidence === "proven") return "likely";
+  return "heuristic";
 }
 
 export function isTestFilePath(filePath: string): boolean {
@@ -39,16 +34,49 @@ export function isTestFilePath(filePath: string): boolean {
   );
 }
 
+/**
+ * Tokenize an identifier into lowercase words: splits camelCase, snake_case,
+ * kebab-case and digits. "requireAuth" → ["require","auth"], "oauthRedirect"
+ * → ["oauth","redirect"] (so "auth" no longer matches inside "oauth"/"author").
+ */
+export function identifierTokens(name: string): string[] {
+  return name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .split(/[^A-Za-z]+/)
+    .filter((t) => t.length > 0)
+    .map((t) => t.toLowerCase());
+}
+
+/** True when any token of the identifier is in the given token set. */
+export function hasToken(name: string, tokens: Set<string>): boolean {
+  return identifierTokens(name).some((t) => tokens.has(t));
+}
+
+const SANITIZER_TOKENS = new Set([
+  "sanitize",
+  "sanitized",
+  "sanitizer",
+  "escape",
+  "escaped",
+  "redact",
+  "redacted",
+  "allowlist",
+  "whitelist",
+  "purify",
+]);
+
+/**
+ * Word-boundary sanitizer detection. Intentionally narrower than before:
+ * generic words like "validate", "strip", "encode" matched far too much
+ * (any comment or unrelated call suppressed real findings).
+ */
 export function hasSanitizationNearby(text: string): boolean {
-  const lower = text.toLowerCase();
-  return (
-    lower.includes("sanitize") ||
-    lower.includes("escape") ||
-    lower.includes("encode") ||
-    lower.includes("validate") ||
-    lower.includes("allowlist") ||
-    lower.includes("whitelist") ||
-    lower.includes("strip") ||
-    lower.includes("purify")
-  );
+  const words = text.split(/[^A-Za-z]+/);
+  for (const word of words) {
+    for (const token of identifierTokens(word)) {
+      if (SANITIZER_TOKENS.has(token)) return true;
+    }
+  }
+  return false;
 }

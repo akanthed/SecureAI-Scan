@@ -139,13 +139,12 @@ on:
 
 permissions:
   contents: read
+  security-events: write
 
 jobs:
   secureai-scan:
     runs-on: ubuntu-latest
     steps:
-      # Pin action SHAs to protect against supply-chain attacks on mutable tags.
-      # Update SHAs periodically or use a tool like Dependabot to keep them current.
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -153,17 +152,13 @@ jobs:
       - name: Install secureai-scan
         run: npm install -g secureai-scan
       - name: Run security scan
-        run: |
-          secureai-scan scan . \\
-            --policy .secureai-policy.json \\
-            --output secureai-report.html \\
-            --baseline .secureai-baseline.json
-      - name: Upload report
+        run: secureai-scan scan . --output secureai.sarif
+      # Findings appear inline on PRs and in the Security tab.
+      - name: Upload SARIF to GitHub code scanning
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: github/codeql-action/upload-sarif@v3
         with:
-          name: secureai-report
-          path: secureai-report.html
+          sarif_file: secureai.sarif
 `;
 
 export function writeGithubWorkflow(rootPath: string): string {

@@ -1,6 +1,7 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { evidenceConfidence } from "../confidence.js";
 import {
   containsIdentifierNamed,
   getLlmPromptNodes,
@@ -78,7 +79,8 @@ export const ruleRagContextInjection: Rule = {
               "Untrusted retrieved documents can contain indirect prompt injection. Putting that content in privileged instructions increases impact.",
             recommendation:
               "Keep retrieved content in user/data messages, delimit it clearly, cite sources, and instruct the model that retrieved text is untrusted data.",
-            confidence: 0.8,
+            confidence: evidenceConfidence("likely"),
+            evidence: "likely",
           });
         }
       }

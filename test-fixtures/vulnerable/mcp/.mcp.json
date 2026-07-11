@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "web-fetcher": {
+      "command": "npx",
+      "args": ["-y", "some-mcp-fetch-server"],
+      "env": {
+        "FETCH_API_KEY": "sk-live-4f9a8b7c6d5e4f3a2b1c"
+      }
+    },
+    "remote-tools": {
+      "url": "http://tools.example.com/mcp"
+    }
+  }
+}

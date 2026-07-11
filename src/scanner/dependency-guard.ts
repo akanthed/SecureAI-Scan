@@ -44,17 +44,18 @@ export async function scanDependencyFilesForRisks(
     const exists = await checker.exists(candidate.ecosystem, candidate.name);
     if (!exists) {
       findings.push({
-        rule_id: "LLM_DEP001",
+        rule_id: "DEP001",
         title: "Dependency package not found in registry",
-        severity: "low",
+        severity: "medium",
         file: candidate.file,
         line: candidate.line,
         summary: `${candidate.name} was not found in ${candidate.ecosystem}.`,
         description:
-          "The dependency name could be a typo, hallucinated package, or stale reference.",
+          "The dependency name could be a typo, a hallucinated package (slopsquatting target), or a stale reference. If someone later publishes a package under this name, your install pulls their code.",
         recommendation:
           "Verify package spelling and replace with a known, maintained package before installation.",
         confidence: 0.9,
+        evidence: "proven",
       });
       continue;
     }
@@ -62,7 +63,7 @@ export async function scanDependencyFilesForRisks(
     const target = looksLikeTyposquat(candidate.name);
     if (target) {
       findings.push({
-        rule_id: "LLM_DEP002",
+        rule_id: "DEP002",
         title: "Dependency name looks similar to a popular package",
         severity: "low",
         file: candidate.file,
@@ -73,6 +74,7 @@ export async function scanDependencyFilesForRisks(
         recommendation:
           "Confirm package ownership and intended source before installing in production.",
         confidence: 0.6,
+        evidence: "heuristic",
       });
     }
   }

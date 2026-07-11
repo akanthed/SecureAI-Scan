@@ -2,7 +2,8 @@ import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { isLikelyLlmCall } from "./llm-rule-utils.js";
-import { calculateConfidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
+import { evidenceConfidence, demoteEvidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
+import type { Evidence } from "../types.js";
 
 // HTTP client patterns that fetch external content
 const FETCH_PATTERNS = [
@@ -110,6 +111,8 @@ export const ruleIndirectPromptInjection: Rule = {
           if (!usesExternalContent) continue;
 
           const hasSanitization = hasSanitizationNearby(fnText);
+          let evidence: Evidence = "likely";
+          if (isTest || hasSanitization) evidence = demoteEvidence(evidence);
 
           findings.push({
             rule_id: "AI010",
@@ -122,13 +125,8 @@ export const ruleIndirectPromptInjection: Rule = {
               "Content fetched from an external URL is passed to an LLM prompt. An attacker who controls the external resource can inject instructions that override your system prompt.",
             recommendation:
               "Treat all externally fetched content as untrusted. Use a separate user-role message, limit allowed content with a schema, and consider a content safety classifier before forwarding to the LLM.",
-            confidence: calculateConfidence({
-              confirmedLlmCall: true,
-              directUserInput: false,
-              stringConcatOrTemplate: true,
-              isTestFile: isTest,
-              hasInputSanitization: hasSanitization,
-            }),
+            confidence: evidenceConfidence(evidence),
+            evidence,
           });
         }
       }

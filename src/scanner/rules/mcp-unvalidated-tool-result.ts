@@ -2,7 +2,8 @@ import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { isLikelyLlmCall } from "./llm-rule-utils.js";
-import { calculateConfidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
+import { evidenceConfidence, demoteEvidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
+import type { Evidence } from "../types.js";
 
 // Variable names suggesting MCP tool call results
 const TOOL_RESULT_PATTERNS = [
@@ -110,6 +111,8 @@ export const ruleMcpUnvalidatedToolResult: Rule = {
           if (!isLikelyLlmCall(call)) continue;
           if (!toolResultElevatedToHighTrustRole(call, toolVars)) continue;
 
+          const evidence: Evidence = hasSanitization ? demoteEvidence("likely") : "likely";
+
           findings.push({
             rule_id: "MCP003",
             title: "Unvalidated MCP tool result used as trusted LLM context",
@@ -121,11 +124,8 @@ export const ruleMcpUnvalidatedToolResult: Rule = {
               "Tool results from MCP servers should be treated as untrusted data. Placing them directly into a system-role message means a compromised tool server can inject arbitrary instructions with full system-level trust.",
             recommendation:
               "Always place tool results in the 'tool' role (not 'system' or 'developer'). Validate and sanitize tool outputs before including them in any message context. Use output schemas to restrict the shape of tool responses.",
-            confidence: calculateConfidence({
-              confirmedLlmCall: true,
-              multipleSignals: true,
-              hasInputSanitization: hasSanitization,
-            }),
+            confidence: evidenceConfidence(evidence),
+            evidence,
           });
         }
       }

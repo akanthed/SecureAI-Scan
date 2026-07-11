@@ -2,7 +2,7 @@ import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { isLikelyLlmCall } from "./llm-rule-utils.js";
-import { calculateConfidence, isTestFilePath } from "../confidence.js";
+import { evidenceConfidence, demoteEvidence, isTestFilePath } from "../confidence.js";
 
 // Names that typically hold LLM response content
 const LLM_RESPONSE_PATTERNS = [
@@ -120,11 +120,8 @@ export const ruleUnvalidatedStructuredOutput: Rule = {
               "LLM outputs are non-deterministic. Parsing them directly as structured data without a schema (Zod, Yup, Joi, etc.) allows unexpected shapes, missing fields, or injected keys to propagate silently into application logic.",
             recommendation:
               "Validate parsed JSON against a strict schema (e.g. z.object({...}).parse(JSON.parse(raw))). Consider using structured output mode (response_format: { type: 'json_schema' }) to constrain model output at the API level.",
-            confidence: calculateConfidence({
-              confirmedLlmCall: true,
-              multipleSignals: true,
-              isTestFile: isTest,
-            }),
+            confidence: evidenceConfidence(isTest ? demoteEvidence("likely") : "likely"),
+            evidence: isTest ? demoteEvidence("likely") : "likely",
           });
         }
       }

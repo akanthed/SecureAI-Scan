@@ -1,37 +1,93 @@
 import { Node, SyntaxKind } from "ts-morph";
-import type { Finding, Rule, RuleContext } from "../types.js";
+import type { Evidence, Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
-import { getObjectProperty, isLikelyLlmCall } from "./llm-rule-utils.js";
+import {
+  evidenceConfidence,
+  demoteEvidence,
+  identifierTokens,
+  isTestFilePath,
+} from "../confidence.js";
+import { getObjectProperty, resolveLlmSink } from "./llm-rule-utils.js";
 
-const DANGEROUS_TOOL_WORDS = [
-  "write",
+// High-impact actions only. Generic words (fetch/http/request/write/send)
+// matched nearly every real tool list and are deliberately excluded.
+const DANGEROUS_TOKENS = new Set([
   "delete",
   "remove",
+  "drop",
+  "destroy",
   "exec",
+  "execute",
   "shell",
   "command",
-  "email",
-  "send",
+  "deploy",
   "purchase",
   "payment",
   "refund",
-  "http",
-  "request",
-  "fetch",
-  "deploy",
+  "transfer",
+  "wire",
+  "terminate",
+]);
+const DANGEROUS_TOKEN_PAIRS: Array<[string, string]> = [
+  ["send", "email"],
+  ["send", "mail"],
+  ["send", "sms"],
+  ["write", "file"],
+  ["run", "sql"],
 ];
 
-const APPROVAL_WORDS = ["approve", "approval", "confirm", "authorize", "permission", "human"];
+const APPROVAL_TOKENS = new Set([
+  "approve",
+  "approval",
+  "confirm",
+  "confirmation",
+  "authorize",
+  "review",
+  "human",
+  "hitl",
+]);
 
-function hasToolConfig(call: Node): Node | undefined {
-  if (!Node.isCallExpression(call)) {
-    return undefined;
+function extractToolNames(toolsNode: Node): string[] {
+  const names: string[] = [];
+  // tools: [{ name: "deleteUser", ... }] or { function: { name: "..." } }
+  for (const prop of toolsNode.getDescendantsOfKind(SyntaxKind.PropertyAssignment)) {
+    const key = prop.getNameNode().getText().replace(/['"]/g, "");
+    if (key !== "name") continue;
+    const init = prop.getInitializer();
+    if (init && (Node.isStringLiteral(init) || Node.isNoSubstitutionTemplateLiteral(init))) {
+      names.push(init.getLiteralText());
+    }
   }
-  const firstArg = call.getArguments()[0];
-  if (!firstArg || !Node.isObjectLiteralExpression(firstArg)) {
-    return undefined;
+  // Vercel-style: tools: { deleteUser: tool({...}) }
+  if (Node.isObjectLiteralExpression(toolsNode)) {
+    for (const prop of toolsNode.getProperties()) {
+      if (Node.isPropertyAssignment(prop) || Node.isShorthandPropertyAssignment(prop)) {
+        names.push(prop.getName());
+      }
+    }
   }
-  return getObjectProperty(firstArg, "tools") ?? getObjectProperty(firstArg, "functions");
+  // Bare identifiers in an array: tools: [deleteUserTool]
+  if (Node.isArrayLiteralExpression(toolsNode)) {
+    for (const el of toolsNode.getElements()) {
+      if (Node.isIdentifier(el)) names.push(el.getText());
+    }
+  }
+  return names;
+}
+
+function isDangerousName(name: string): boolean {
+  const tokens = identifierTokens(name);
+  if (tokens.some((t) => DANGEROUS_TOKENS.has(t))) return true;
+  const set = new Set(tokens);
+  return DANGEROUS_TOKEN_PAIRS.some(([a, b]) => set.has(a) && set.has(b));
+}
+
+function hasApprovalGate(text: string): boolean {
+  const words = text.split(/[^A-Za-z]+/);
+  for (const word of words) {
+    if (identifierTokens(word).some((t) => APPROVAL_TOKENS.has(t))) return true;
+  }
+  return false;
 }
 
 export const ruleExcessiveAgency: Rule = {
@@ -42,45 +98,49 @@ export const ruleExcessiveAgency: Rule = {
     const findings: Finding[] = [];
 
     for (const sourceFile of context.sourceFiles) {
+      const relFile = getRelativeFilePath(context.rootPath, sourceFile);
+      const testFile = isTestFilePath(relFile);
+
       for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-        if (!isLikelyLlmCall(call)) {
-          continue;
-        }
-        const toolConfig = hasToolConfig(call);
-        if (!toolConfig) {
-          continue;
-        }
+        const sink = resolveLlmSink(call);
+        if (!sink) continue;
 
-        const toolText = toolConfig.getText().toLowerCase();
-        const hasDangerousTool = DANGEROUS_TOOL_WORDS.some((word) => toolText.includes(word));
-        if (!hasDangerousTool) {
-          continue;
-        }
+        const firstArg = call.getArguments()[0];
+        if (!firstArg || !Node.isObjectLiteralExpression(firstArg)) continue;
+        const toolConfig =
+          getObjectProperty(firstArg, "tools") ?? getObjectProperty(firstArg, "functions");
+        if (!toolConfig) continue;
 
-        const enclosingFunction = call.getFirstAncestor((ancestor) =>
-          Node.isFunctionDeclaration(ancestor) ||
-          Node.isFunctionExpression(ancestor) ||
-          Node.isArrowFunction(ancestor) ||
-          Node.isMethodDeclaration(ancestor),
+        const toolNames = extractToolNames(toolConfig);
+        const dangerous = toolNames.filter(isDangerousName);
+        if (dangerous.length === 0) continue;
+
+        const enclosingFunction = call.getFirstAncestor(
+          (a) =>
+            Node.isFunctionDeclaration(a) ||
+            Node.isFunctionExpression(a) ||
+            Node.isArrowFunction(a) ||
+            Node.isMethodDeclaration(a),
         );
-        const functionText = enclosingFunction?.getText().toLowerCase() ?? "";
-        const hasApprovalGate = APPROVAL_WORDS.some((word) => functionText.includes(word));
-        if (hasApprovalGate) {
-          continue;
-        }
+        const scopeText = enclosingFunction?.getText() ?? sourceFile.getFullText();
+        if (hasApprovalGate(scopeText)) continue;
+
+        let evidence: Evidence = sink.resolved ? "likely" : "heuristic";
+        if (testFile) evidence = demoteEvidence(evidence);
 
         findings.push({
           rule_id: "AI006",
           title: "Excessive LLM agency",
           severity: "critical",
-          file: getRelativeFilePath(context.rootPath, sourceFile),
+          file: relFile,
           line: getNodeLine(toolConfig),
-          summary: "LLM is configured with high-impact tools without an obvious approval gate.",
+          summary: `Model can invoke high-impact tool(s) ${dangerous.map((d) => `\`${d}\``).join(", ")} with no approval gate in scope.`,
           description:
-            "The model appears able to invoke tools that can change state, communicate externally, execute commands, or call arbitrary services.",
+            `The ${sink.provider} call exposes tools whose names indicate irreversible or costly actions (${dangerous.join(", ")}). A prompt-injection payload anywhere in the model's context can trigger these tools; no human-approval or confirmation logic is visible in the surrounding code.`,
           recommendation:
-            "Require explicit authorization, scope tool permissions, validate arguments, and keep high-impact actions behind human or policy gates.",
-          confidence: 0.75,
+            "Gate high-impact tools behind explicit confirmation (human-in-the-loop) or a policy check on the tool-call arguments before execution. Log every tool invocation with its triggering context.",
+          confidence: evidenceConfidence(evidence),
+          evidence,
         });
       }
     }
@@ -88,4 +148,3 @@ export const ruleExcessiveAgency: Rule = {
     return findings;
   },
 };
-
