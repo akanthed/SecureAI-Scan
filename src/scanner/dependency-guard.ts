@@ -82,6 +82,8 @@ export async function scanDependencyFilesForRisks(
   return findings;
 }
 
+let warnedNetworkFailure = false;
+
 class RegistryExistenceChecker implements PackageExistenceChecker {
   async exists(ecosystem: "npm" | "pypi", name: string): Promise<boolean> {
     if (!isReasonablePackageName(name)) {
@@ -99,6 +101,16 @@ class RegistryExistenceChecker implements PackageExistenceChecker {
       });
       return response.ok;
     } catch {
+      // Fail open (assume the package exists) so a transient network issue
+      // can't manufacture a false "package not found" finding — but warn
+      // once so a fully offline run doesn't silently no-op dependency
+      // checking with no indication in the report.
+      if (!warnedNetworkFailure) {
+        warnedNetworkFailure = true;
+        process.stderr.write(
+          "Warning: could not reach package registry — dependency checks (DEP001) may be incomplete.\n",
+        );
+      }
       return true;
     }
   }

@@ -64,6 +64,42 @@ const LLM_RESULT_VAR_PATTERNS = [
   /\b(response|completion|result|output|answer|reply|generated|llm_result|chat_result)\b/,
 ];
 
+// ── LLM SDK import detection ──────────────────────────────────────────────
+// Mirrors the TS scanner's fileImportsLlmSdk (llm-rule-utils.ts): name-only
+// heuristics like "a variable called `result` reached subprocess.run()" fire
+// constantly on ordinary shell-outs (ffmpeg, pip, etc.) in files that have
+// nothing to do with LLMs. Gate those heuristics on the file actually
+// importing a known LLM SDK first.
+const PY_LLM_IMPORT_PATTERNS = [
+  /^\s*(?:import|from)\s+openai\b/m,
+  /^\s*(?:import|from)\s+anthropic\b/m,
+  /^\s*(?:import|from)\s+google\.generativeai\b/m,
+  /^\s*(?:import|from)\s+google\.genai\b/m,
+  /^\s*(?:import|from)\s+langchain(?:[\w.]*)\b/m,
+  /^\s*(?:import|from)\s+litellm\b/m,
+  /^\s*(?:import|from)\s+cohere\b/m,
+  /^\s*(?:import|from)\s+mistralai\b/m,
+  /^\s*(?:import|from)\s+ollama\b/m,
+  /^\s*(?:import|from)\s+boto3\b/m,
+  /^\s*(?:import|from)\s+llama_index\b/m,
+  /^\s*(?:import|from)\s+vertexai\b/m,
+];
+
+function fileImportsLlmSdk(raw: string): boolean {
+  return PY_LLM_IMPORT_PATTERNS.some((p) => p.test(raw));
+}
+
+/** Variable names assigned directly from an LLM call within the given lines. */
+function assignedVarsFromLlmCalls(candidateLines: string[]): Set<string> {
+  const names = new Set<string>();
+  for (const l of candidateLines) {
+    if (!matchesAny(l, LLM_CALL_PATTERNS)) continue;
+    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(l);
+    if (m) names.add(m[1]);
+  }
+  return names;
+}
+
 // ── Auth decorator patterns ───────────────────────────────────────────────
 const AUTH_DECORATORS = [
   /@login_required/,
@@ -166,7 +202,8 @@ function checkAI001(lines: string[], i: number, file: string): Finding | null {
   };
 }
 
-function checkAI002(lines: string[], i: number, file: string): Finding | null {
+function checkAI002(lines: string[], i: number, file: string, ctx: FileContext): Finding | null {
+  if (!ctx.fileHasLlm) return null;
   const line = lines[i];
   const isLogCall = /\b(logging\s*\.\s*(info|debug|warning|error|critical)|print\s*\(|logger\s*\.\s*(info|debug))/.test(line);
   if (!isLogCall) return null;
@@ -233,27 +270,53 @@ function checkAI004(lines: string[], i: number, file: string): Finding | null {
   };
 }
 
-function checkAI005(lines: string[], i: number, file: string): Finding | null {
+function checkAI005(lines: string[], i: number, file: string, ctx: FileContext): Finding | null {
+  if (!ctx.fileHasLlm) return null;
   const line = lines[i];
   const matchedSink = EXEC_SINKS.find((s) => s.pattern.test(line));
   if (!matchedSink) return null;
 
-  // Check if an LLM result variable is referenced in this line
-  const hasLlmVar = LLM_RESULT_VAR_PATTERNS.some((p) => p.test(line));
-  // Also check the preceding 8 lines for LLM calls whose result flows here
-  const before = windowText(lines, i, 8, 0);
-  const hasLlmSource = hasLlmVar || matchesAny(before, LLM_CALL_PATTERNS);
-  if (!hasLlmSource) return null;
+  // Only inspect the sink's *arguments*, not the whole line — otherwise the
+  // assignment target of `result = subprocess.run(...)` (an LLM-shaped name
+  // that has nothing to do with the sink call) is mistaken for tainted input.
+  const sinkMatch = matchedSink.pattern.exec(line);
+  const parenIdx = sinkMatch ? line.indexOf("(", sinkMatch.index) : -1;
+  const argsFirstLine = parenIdx >= 0 ? line.slice(parenIdx + 1) : "";
+  const argsWindow = [argsFirstLine, ...windowText(lines, i, 0, 5).split("\n").slice(1)].join("\n");
+
+  const beforeLines = lines.slice(Math.max(0, i - 10), i);
+  const llmVars = assignedVarsFromLlmCalls(beforeLines);
+  const confirmedDataflow = [...llmVars].some((v) => new RegExp(`\\b${v}\\b`).test(argsWindow));
+
+  if (confirmedDataflow) {
+    return {
+      ...findingBase("AI005", "Unsafe LLM output handling", "critical", file, i + 1),
+      summary: `LLM output passed to ${matchedSink.label} — a dangerous execution sink.`,
+      description:
+        "LLM outputs are non-deterministic and can contain attacker-crafted payloads. Passing them to exec(), eval(), subprocess, or SQL queries allows remote code/SQL execution.",
+      recommendation:
+        "Never pass raw LLM output to execution sinks. Validate against an allowlist, use a schema, and run in a sandbox if code execution is required.",
+      confidence: evidenceConfidence("likely"),
+      evidence: "likely",
+    };
+  }
+
+  // Weaker fallback: no confirmed assignment link, but an LLM-result-shaped
+  // name appears in the sink's arguments and an LLM call happens nearby.
+  // Report at a lower tier since this is name-only proximity, not dataflow.
+  const hasGenericVarInArgs = LLM_RESULT_VAR_PATTERNS.some((p) => p.test(argsWindow));
+  const nearbyLlmCall = matchesAny(beforeLines.join("\n"), LLM_CALL_PATTERNS);
+  if (!hasGenericVarInArgs || !nearbyLlmCall) return null;
 
   return {
-    ...findingBase("AI005", "Unsafe LLM output handling", "critical", file, i + 1),
-    summary: `LLM output passed to ${matchedSink.label} — a dangerous execution sink.`,
+    ...findingBase("AI005", "Possible unsafe LLM output handling", "high", file, i + 1),
+    summary: `A variable that may hold LLM output is passed to ${matchedSink.label}.`,
     description:
       "LLM outputs are non-deterministic and can contain attacker-crafted payloads. Passing them to exec(), eval(), subprocess, or SQL queries allows remote code/SQL execution.",
     recommendation:
       "Never pass raw LLM output to execution sinks. Validate against an allowlist, use a schema, and run in a sandbox if code execution is required.",
-    confidence: evidenceConfidence("likely"),
-    evidence: "likely",
+    confidence: evidenceConfidence("heuristic"),
+    evidence: "heuristic",
   };
 }
 
@@ -393,7 +456,11 @@ function checkMCP001(lines: string[], i: number, file: string): Finding | null {
 
 // ── Registered rule functions ─────────────────────────────────────────────
 
-type RuleChecker = (lines: string[], i: number, file: string) => Finding | null;
+interface FileContext {
+  fileHasLlm: boolean;
+}
+
+type RuleChecker = (lines: string[], i: number, file: string, ctx: FileContext) => Finding | null;
 
 const PYTHON_RULES: RuleChecker[] = [
   checkAI001,
@@ -477,6 +544,7 @@ export function scanPythonFiles(
 
     const lines = raw.split(/\r?\n/);
     const relPath = path.relative(resolved, filePath);
+    const ctx: FileContext = { fileHasLlm: fileImportsLlmSdk(raw) };
 
     for (let i = 0; i < lines.length; i++) {
       for (const rule of PYTHON_RULES) {
@@ -484,7 +552,7 @@ export function scanPythonFiles(
         if (options?.rules) {
           // We'll check rule_id after — run first then filter
         }
-        const finding = rule(lines, i, relPath);
+        const finding = rule(lines, i, relPath, ctx);
         if (!finding) continue;
 
         // Filter by requested rules and blocked rules

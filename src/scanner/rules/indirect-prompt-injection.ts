@@ -19,18 +19,21 @@ const FETCH_PATTERNS = [
   "ky(",
 ];
 
-// Response extraction patterns — text/json content from HTTP responses
-const RESPONSE_CONTENT_PATTERNS = [
-  ".text()",
-  ".json()",
-  ".data",
-  ".body",
-  ".content",
-  ".result",
-  ".output",
-  ".message",
-];
+// Response extraction — property/method names for content pulled off an
+// HTTP response object.
+const RESPONSE_CONTENT_PROPS = ["data", "body", "content", "result", "output", "message"];
+const RESPONSE_CONTENT_METHODS = ["text", "json"];
 
+function unwrapAwait(node: Node): Node {
+  return Node.isAwaitExpression(node) ? node.getExpression() : node;
+}
+
+/**
+ * True only for an actual call expression whose callee is a known HTTP
+ * client function/method — not a substring match against arbitrary
+ * initializer text (which previously matched things like `{ fetch: true }`
+ * or a var named `prefetchedIds`).
+ */
 function isFetchLikeCall(node: Node): boolean {
   if (!Node.isCallExpression(node)) return false;
   const text = node.getExpression().getText().toLowerCase();
@@ -40,38 +43,44 @@ function isFetchLikeCall(node: Node): boolean {
 function collectFetchDerivedIdentifiers(functionNode: Node): Set<string> {
   const derived = new Set<string>();
 
-  for (const decl of functionNode.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
-    const init = decl.getInitializer();
-    if (!init) continue;
-    const initText = init.getText().toLowerCase();
+  // Iterate to a fixed point so multi-hop chains (page = await fetch(url);
+  // text = await page.text(); body = text.slice(...)) all get captured.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const decl of functionNode.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+      if (derived.has(decl.getName())) continue;
+      const init = decl.getInitializer();
+      if (!init) continue;
+      const unwrapped = unwrapAwait(init);
 
-    // Direct fetch call result
-    const isFetchResult = FETCH_PATTERNS.some((p) => initText.includes(p.replace("(", "")));
-    // Await of a fetch result
-    const isAwaited =
-      Node.isAwaitExpression(init) &&
-      FETCH_PATTERNS.some((p) => init.getText().toLowerCase().includes(p.replace("(", "")));
-    // Property access on a fetch-derived var
-    const isDerivedFromFetch =
-      Node.isPropertyAccessExpression(init) &&
-      derived.has(init.getExpression().getText()) &&
-      RESPONSE_CONTENT_PATTERNS.some((p) => initText.endsWith(p.replace("()", "").replace(".", "")));
-
-    if (isFetchResult || isAwaited || isDerivedFromFetch) {
-      derived.add(decl.getName());
-    }
-
-    // Also catch: const text = await response.text()
-    if (
-      Node.isAwaitExpression(init) &&
-      Node.isCallExpression(init.getExpression())
-    ) {
-      const innerText = init.getExpression().getText().toLowerCase();
-      if (
-        RESPONSE_CONTENT_PATTERNS.some((p) => innerText.endsWith(p.replace("()", ""))) &&
-        derived.size > 0
-      ) {
+      // const page = fetch(url) / const page = await fetch(url)
+      if (isFetchLikeCall(unwrapped)) {
         derived.add(decl.getName());
+        changed = true;
+        continue;
+      }
+
+      // const text = await response.text() / const json = response.json()
+      if (Node.isCallExpression(unwrapped) && Node.isPropertyAccessExpression(unwrapped.getExpression())) {
+        const callee = unwrapped.getExpression() as import("ts-morph").PropertyAccessExpression;
+        const base = callee.getExpression();
+        const method = callee.getName().toLowerCase();
+        if (derived.has(base.getText()) && RESPONSE_CONTENT_METHODS.includes(method)) {
+          derived.add(decl.getName());
+          changed = true;
+          continue;
+        }
+      }
+
+      // const data = response.data / axiosRes.body
+      if (Node.isPropertyAccessExpression(unwrapped)) {
+        const base = unwrapped.getExpression();
+        const prop = unwrapped.getName().toLowerCase();
+        if (derived.has(base.getText()) && RESPONSE_CONTENT_PROPS.includes(prop)) {
+          derived.add(decl.getName());
+          changed = true;
+        }
       }
     }
   }

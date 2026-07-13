@@ -4,19 +4,6 @@ import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { isLikelyLlmCall } from "./llm-rule-utils.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath } from "../confidence.js";
 
-// Names that typically hold LLM response content
-const LLM_RESPONSE_PATTERNS = [
-  "response",
-  "completion",
-  "result",
-  "output",
-  "answer",
-  "reply",
-  "llmresult",
-  "chatresult",
-  "generated",
-];
-
 // Schema validation libraries / patterns that indicate safe usage
 const VALIDATION_PATTERNS = [
   "zod",
@@ -32,11 +19,6 @@ const VALIDATION_PATTERNS = [
   "typeguard",
   "is(",
 ];
-
-function isLlmResponseVar(name: string): boolean {
-  const lower = name.toLowerCase();
-  return LLM_RESPONSE_PATTERNS.some((p) => lower.includes(p));
-}
 
 function collectLlmResponseVars(fnNode: Node): Set<string> {
   const vars = new Set<string>();
@@ -57,15 +39,20 @@ function collectLlmResponseVars(fnNode: Node): Set<string> {
   }
 
   // Propagate through property accesses: content = response.choices[0].message.content
-  for (const decl of fnNode.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
-    const init = decl.getInitializer();
-    if (!init) continue;
-    const initText = init.getText();
-    if ([...vars].some((v) => initText.startsWith(v + ".") || initText.startsWith(v + "["))) {
-      vars.add(decl.getName());
-    }
-    if (isLlmResponseVar(decl.getName())) {
-      vars.add(decl.getName());
+  // Iterate to a fixed point so multi-hop chains (a = llmCall(); b = a.x; c = b.y)
+  // are all captured, without ever adding a var on name alone.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const decl of fnNode.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+      if (vars.has(decl.getName())) continue;
+      const init = decl.getInitializer();
+      if (!init) continue;
+      const initText = init.getText();
+      if ([...vars].some((v) => initText.startsWith(v + ".") || initText.startsWith(v + "["))) {
+        vars.add(decl.getName());
+        changed = true;
+      }
     }
   }
 

@@ -227,7 +227,11 @@ class SnippetReader {
         return undefined;
       }
     }
-    const key = resolved.toLowerCase();
+    // Only fold case for the cache key on platforms with case-insensitive
+    // filesystems — on Linux/macOS CI runners, two paths differing only by
+    // case are distinct files, and lowercasing here would let one mask the
+    // other's snippet content.
+    const key = process.platform === "win32" ? resolved.toLowerCase() : resolved;
     if (this.cache.has(key)) return this.cache.get(key);
     try {
       const lines = fs.readFileSync(resolved, "utf-8").split(/\r?\n/);

@@ -21,7 +21,11 @@ const VECTOR_SEARCH_METHODS = [
   "nearobject",
 ];
 
-// Parameter/option names that indicate tenant/access filtering
+// Parameter/option names that indicate tenant/access filtering.
+// Deliberately excludes bare "metadata" — an object merely containing a
+// metadata key (e.g. { metadata: { source: "pdf" } }) doesn't establish
+// tenant/user scoping, so treating it as sufficient access control was a
+// false-negative-inducing heuristic.
 const ACCESS_CONTROL_ARGS = [
   "filter",
   "filters",
@@ -30,8 +34,6 @@ const ACCESS_CONTROL_ARGS = [
   "userid",
   "user_id",
   "where",
-  "metadata",
-  "metadatafilter",
   "accessfilter",
   "acl",
 ];
@@ -55,13 +57,23 @@ const VECTOR_STORE_CLIENTS = [
   "azureaisearch",
 ];
 
+// "supabase" and "opensearch" are generic clients also used for ordinary
+// (non-vector) database/full-text queries — e.g. supabase.from(...).select()
+// or a plain opensearchClient.search() text query. Require an explicit
+// vector/embedding signal somewhere in the call before flagging these two.
+const AMBIGUOUS_CLIENTS = new Set(["supabase", "opensearch"]);
+const VECTOR_CONTEXT_HINT = /vector|embedding|knn|semantic/;
+
 function isVectorSearchCall(node: Node): boolean {
   if (!Node.isCallExpression(node)) return false;
   const exprText = node.getExpression().getText().toLowerCase();
-  return (
-    VECTOR_STORE_CLIENTS.some((client) => exprText.includes(client)) &&
-    VECTOR_SEARCH_METHODS.some((method) => exprText.endsWith(method))
-  );
+  const matchedClient = VECTOR_STORE_CLIENTS.find((client) => exprText.includes(client));
+  if (!matchedClient) return false;
+  if (!VECTOR_SEARCH_METHODS.some((method) => exprText.endsWith(method))) return false;
+  if (AMBIGUOUS_CLIENTS.has(matchedClient) && !VECTOR_CONTEXT_HINT.test(node.getText().toLowerCase())) {
+    return false;
+  }
+  return true;
 }
 
 function hasAccessControlArg(call: Node): boolean {

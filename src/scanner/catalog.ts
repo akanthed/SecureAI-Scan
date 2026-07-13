@@ -249,6 +249,15 @@ export const RULE_CATALOG: Record<string, RuleCatalogEntry> = {
     "Verify the package name and provenance before installing.",
     "Art. 15 (cybersecurity)",
   ),
+  DEP002: entry(
+    "DEP002",
+    "Dependency name looks similar to a popular package",
+    "low",
+    "LLM03",
+    "A one-character-off package name can indicate typosquatting or accidental confusion with a trusted package.",
+    "Confirm package ownership and intended source before installing in production.",
+    "Art. 15 (cybersecurity)",
+  ),
 };
 
 export function catalogFor(ruleId: string): RuleCatalogEntry | undefined {

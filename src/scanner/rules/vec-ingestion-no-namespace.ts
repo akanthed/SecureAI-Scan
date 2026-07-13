@@ -51,13 +51,23 @@ const NAMESPACE_KEYS = [
   "tenant_id",
 ];
 
+// "supabase" and "opensearch" are generic clients also used for ordinary
+// (non-vector) database writes — e.g. supabase.from("orders").insert(data).
+// Require an explicit vector/embedding signal somewhere in the call before
+// flagging these two, mirroring the same guard in vec-search-no-access-control.ts.
+const AMBIGUOUS_CLIENTS = new Set(["supabase", "opensearch"]);
+const VECTOR_CONTEXT_HINT = /vector|embedding|knn|semantic/;
+
 function isVectorIngestionCall(node: Node): boolean {
   if (!Node.isCallExpression(node)) return false;
   const exprText = node.getExpression().getText().toLowerCase();
-  return (
-    VECTOR_STORE_CLIENTS.some((c) => exprText.includes(c)) &&
-    INGESTION_METHODS.some((m) => exprText.endsWith(m))
-  );
+  const matchedClient = VECTOR_STORE_CLIENTS.find((c) => exprText.includes(c));
+  if (!matchedClient) return false;
+  if (!INGESTION_METHODS.some((m) => exprText.endsWith(m))) return false;
+  if (AMBIGUOUS_CLIENTS.has(matchedClient) && !VECTOR_CONTEXT_HINT.test(node.getText().toLowerCase())) {
+    return false;
+  }
+  return true;
 }
 
 function hasNamespaceArg(call: Node): boolean {

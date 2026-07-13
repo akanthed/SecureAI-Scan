@@ -72,10 +72,18 @@ export const ruleSensitiveDataToLlm: Rule = {
             // Resolve identifier → its declaration to see what is serialized.
             let target: Node = serialized;
             if (Node.isIdentifier(serialized) && !SENSITIVE_OBJECT_NAMES.has(serialized.getText().toLowerCase())) {
-              const decl = serialized
-                .getSymbol()
-                ?.getDeclarations()
-                .find(Node.isVariableDeclaration);
+              // getSymbol()/getDeclarations() can throw on malformed/edge-case
+              // ASTs (same class of failure resolveLlmSink guards against) —
+              // one unparseable file must not abort the whole scan.
+              let decl: import("ts-morph").VariableDeclaration | undefined;
+              try {
+                decl = serialized
+                  .getSymbol()
+                  ?.getDeclarations()
+                  .find(Node.isVariableDeclaration);
+              } catch {
+                continue;
+              }
               const init = decl?.getInitializer();
               // A locally-built object literal (field picking / redaction)
               // is the recommended remediation — skip it.

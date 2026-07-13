@@ -108,6 +108,21 @@ function normalizePySpec(spec: string): string {
   return spec.split(".")[0].replace(/_/g, "-");
 }
 
+// Model identifiers (esp. bare "o1"/"o3"/"o4") are short enough to collide
+// with ordinary identifiers (loop vars, coordinates, temp names). Only scan
+// inside string literals — where model IDs actually appear in real code —
+// rather than the whole file text, to avoid flagging arbitrary source code.
+const STRING_LITERAL_RE = /(["'`])((?:\\.|(?!\1)[\s\S])*?)\1/g;
+
+function extractStringLiterals(raw: string): string {
+  let out = "";
+  STRING_LITERAL_RE.lastIndex = 0;
+  for (const m of raw.matchAll(STRING_LITERAL_RE)) {
+    out += m[2] + "\n";
+  }
+  return out;
+}
+
 export function generateBom(rootPath: string): BomResult {
   const resolved = path.resolve(rootPath);
   const componentMap = new Map<string, BomComponent>();
@@ -178,9 +193,10 @@ export function generateBom(rootPath: string): BomResult {
       }
     }
 
+    const stringLiterals = extractStringLiterals(raw);
     for (const { re, provider } of MODEL_PATTERNS) {
       re.lastIndex = 0;
-      for (const match of raw.matchAll(re)) {
+      for (const match of stringLiterals.matchAll(re)) {
         const model = match[1];
         const kind = provider === "embedding" ? "embedding" : "model";
         add(kind, model, rel, provider === "embedding" ? undefined : provider);

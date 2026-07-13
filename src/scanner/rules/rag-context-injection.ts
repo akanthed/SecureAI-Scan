@@ -1,5 +1,5 @@
 import { Node, SyntaxKind } from "ts-morph";
-import type { Finding, Rule, RuleContext } from "../types.js";
+import type { Evidence, Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { evidenceConfidence } from "../confidence.js";
 import {
@@ -9,17 +9,36 @@ import {
   isLikelyLlmCall,
 } from "./llm-rule-utils.js";
 
-const RAG_NAMES = new Set([
-  "context",
-  "contexts",
+// Unambiguous names — only plausible as retrieved RAG content.
+const RAG_NAMES_SPECIFIC = new Set([
   "retrieved",
   "retrieveddocs",
   "documents",
   "docs",
   "chunks",
   "searchresults",
-  "results",
 ]);
+
+// "context"/"contexts"/"results" are common names for unrelated values
+// (request context, React context, i18n context, arbitrary function
+// results). Only count them as RAG content when the enclosing function
+// also shows a retrieval call — bare-name matching alone was the same
+// false-positive class fixed in the Python scanner's AI005 rule.
+const RAG_NAMES_AMBIGUOUS = new Set(["context", "contexts", "results"]);
+
+const RETRIEVAL_HINT =
+  /similaritysearch|similarity_search|vectorstore|vector_store|retriever|\.query\(|pinecone|chroma|weaviate|qdrant|milvus|pgvector|embeddings?\.search/i;
+
+function enclosingScopeText(node: Node): string {
+  const fn = node.getFirstAncestor(
+    (a) =>
+      Node.isFunctionDeclaration(a) ||
+      Node.isFunctionExpression(a) ||
+      Node.isArrowFunction(a) ||
+      Node.isMethodDeclaration(a),
+  );
+  return (fn ?? node.getSourceFile()).getText();
+}
 
 function systemOrDeveloperMessageContent(call: Node): Node[] {
   if (!Node.isCallExpression(call)) {
@@ -65,7 +84,16 @@ export const ruleRagContextInjection: Rule = {
         }
 
         for (const promptNode of systemOrDeveloperMessageContent(call)) {
-          if (!containsIdentifierNamed(promptNode, RAG_NAMES)) {
+          let evidence: Evidence | undefined;
+          if (containsIdentifierNamed(promptNode, RAG_NAMES_SPECIFIC)) {
+            evidence = "likely";
+          } else if (
+            containsIdentifierNamed(promptNode, RAG_NAMES_AMBIGUOUS) &&
+            RETRIEVAL_HINT.test(enclosingScopeText(promptNode))
+          ) {
+            evidence = "heuristic";
+          }
+          if (!evidence) {
             continue;
           }
           findings.push({
@@ -79,8 +107,8 @@ export const ruleRagContextInjection: Rule = {
               "Untrusted retrieved documents can contain indirect prompt injection. Putting that content in privileged instructions increases impact.",
             recommendation:
               "Keep retrieved content in user/data messages, delimit it clearly, cite sources, and instruct the model that retrieved text is untrusted data.",
-            confidence: evidenceConfidence("likely"),
-            evidence: "likely",
+            confidence: evidenceConfidence(evidence),
+            evidence,
           });
         }
       }

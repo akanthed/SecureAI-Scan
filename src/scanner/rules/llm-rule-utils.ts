@@ -167,8 +167,22 @@ function lastMethodName(callText: string): string {
 /**
  * Resolve whether a call expression is an LLM generation call.
  * Returns undefined for non-LLM calls.
+ *
+ * ts-morph's symbol resolver can throw on malformed/edge-case input (e.g.
+ * files pulled in from a bundled venv or vendored node_modules that trip up
+ * its type checker). A single unparseable file must never abort the whole
+ * scan, so resolution errors here are swallowed and treated as "not an LLM
+ * call" rather than propagated.
  */
 export function resolveLlmSink(node: Node): LlmSink | undefined {
+  try {
+    return resolveLlmSinkInner(node);
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveLlmSinkInner(node: Node): LlmSink | undefined {
   if (!Node.isCallExpression(node)) return undefined;
   const callText = node.getExpression().getText();
   const method = lastMethodName(callText);
