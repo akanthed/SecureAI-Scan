@@ -5,3 +5,4 @@ import "./new-ai-rules.test.js";
 import "./reporter-snippet.test.js";
 import "./mcp-config.test.js";
 import "./corpus.test.js";
+import "./false-positive-regressions.test.js";

@@ -44,3 +44,37 @@ test("dependency guard flags missing and suspicious dependency names", async () 
   assert.equal(ruleIds.includes("DEP001"), true);
   assert.equal(ruleIds.includes("DEP002"), true);
 });
+
+test("dependency guard fails open (and warns once) when the registry is unreachable", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-deps-offline-"));
+  fs.writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify({ name: "tmp", version: "1.0.0", dependencies: { openai: "1.0.0" } }, null, 2),
+  );
+
+  const originalFetch = global.fetch;
+  const originalStderrWrite = process.stderr.write;
+  let stderrOutput = "";
+  global.fetch = async () => {
+    throw new Error("simulated network failure");
+  };
+  process.stderr.write = (chunk) => {
+    stderrOutput += chunk;
+    return true;
+  };
+
+  let findings;
+  try {
+    // No injected checker: exercises the real RegistryExistenceChecker's
+    // fetch-failure path, not the FakeChecker used above.
+    findings = await scanDependencyFilesForRisks({ rootPath: dir });
+  } finally {
+    global.fetch = originalFetch;
+    process.stderr.write = originalStderrWrite;
+  }
+
+  // Fail-open: a network error must never manufacture a false "package not
+  // found" finding.
+  assert.equal(findings.some((f) => f.rule_id === "DEP001"), false);
+  assert.match(stderrOutput, /could not reach package registry/i);
+});
