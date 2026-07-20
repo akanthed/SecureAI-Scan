@@ -13,7 +13,7 @@ import { AVAILABLE_RULE_IDS } from "./scanner/rules/index.js";
 import { StaticExplainer } from "./scanner/explainer.js";
 import { catalogFor } from "./scanner/catalog.js";
 import { applyBaseline } from "./scanner/baseline.js";
-import { scanDependencyFilesForRisks } from "./scanner/dependency-guard.js";
+import { scanDependencyFilesForRisks, scanKnownMaliciousPackages } from "./scanner/dependency-guard.js";
 import { loadPolicy, writeDefaultPolicy, writeGithubWorkflow } from "./scanner/policy.js";
 import { generateThreatModel } from "./scanner/threat-model.js";
 import { generateBom, formatBomMarkdown } from "./scanner/bom.js";
@@ -118,7 +118,7 @@ export async function runCli(argv: string[]): Promise<void> {
     .option("-s, --severity <level>", "Minimum severity: low | medium | high | critical", parseSeverity)
     .option("-r, --rules <list>", "Comma-separated rule IDs to run", parseRules)
     .option("--only-ai", "Run only AI/LLM rules (AI001–AI012)")
-    .option("--only-mcp", "Run only MCP rules (MCP001–MCP006)")
+    .option("--only-mcp", "Run only MCP rules (MCP001–MCP009)")
     .option("--only-vec", "Run only Vector/RAG rules (VEC001–VEC004)")
     .option("--paranoid", "Include heuristic-tier findings (hidden by default)")
     .option("--limit <number>", "Max rule groups shown in terminal (default: 10)", parseLimit)
@@ -177,6 +177,15 @@ export async function runCli(argv: string[]): Promise<void> {
           const depFindings = await scanDependencyFilesForRisks({ rootPath: targetPath });
           findings.push(...depFindings);
         }
+
+        // DEP003 uses the bundled advisory list — offline, so it runs on
+        // every scan rather than behind --check-dependencies.
+        const advisoryFindings = scanKnownMaliciousPackages(targetPath, activePolicy.skipPaths).filter(
+          (f) =>
+            (!selectedRules || selectedRules.includes(f.rule_id)) &&
+            !activePolicy.blockedRules?.includes(f.rule_id),
+        );
+        findings.push(...advisoryFindings);
 
         // Evidence filter: heuristic findings are hidden unless --paranoid.
         const paranoid = options.paranoid ?? false;

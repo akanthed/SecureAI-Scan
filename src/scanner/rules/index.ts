@@ -16,6 +16,11 @@ import { ruleUnvalidatedStructuredOutput } from "./unvalidated-structured-output
 import { ruleMcpToolDescInjection } from "./mcp-tool-desc-injection.js";
 import { ruleMcpDynamicServerUrl } from "./mcp-dynamic-server-url.js";
 import { ruleMcpUnvalidatedToolResult } from "./mcp-unvalidated-tool-result.js";
+import {
+  ruleMcpCrossToolShadowing,
+  ruleMcpInjectionPhrases,
+  ruleMcpInvisibleUnicode,
+} from "./mcp-tool-poisoning.js";
 // Vector/RAG rules
 import { ruleVecSearchNoAccessControl } from "./vec-search-no-access-control.js";
 import { ruleVecUnboundedSearch } from "./vec-unbounded-search.js";
@@ -41,6 +46,10 @@ export const RULES: Rule[] = [
   ruleMcpToolDescInjection,
   ruleMcpDynamicServerUrl,
   ruleMcpUnvalidatedToolResult,
+  // MCP tool-poisoning rules (MCP007–MCP009)
+  ruleMcpInvisibleUnicode,
+  ruleMcpInjectionPhrases,
+  ruleMcpCrossToolShadowing,
   // Vector/RAG rules (VEC001–VEC004)
   ruleVecSearchNoAccessControl,
   ruleVecUnboundedSearch,
@@ -51,4 +60,13 @@ export const RULES: Rule[] = [
 // Config-file rules implemented outside the AST rule engine (mcp-config-scanner).
 export const CONFIG_RULE_IDS = ["MCP004", "MCP005", "MCP006"];
 
-export const AVAILABLE_RULE_IDS = [...RULES.map((rule) => rule.id), ...CONFIG_RULE_IDS];
+// Dependency rules implemented in dependency-guard (DEP001/DEP002 are opt-in
+// via --check-dependencies; DEP003 runs on every scan from the offline
+// advisory list).
+export const DEPENDENCY_RULE_IDS = ["DEP001", "DEP002", "DEP003"];
+
+export const AVAILABLE_RULE_IDS = [
+  ...RULES.map((rule) => rule.id),
+  ...CONFIG_RULE_IDS,
+  ...DEPENDENCY_RULE_IDS,
+];

@@ -45,6 +45,10 @@ export interface ReportGroup {
   evidence: Evidence; // strongest across occurrences
   owasp?: string;
   owaspName?: string;
+  asi?: string;
+  asiName?: string;
+  mcpTop10?: string;
+  mcpTop10Name?: string;
   euAiAct?: string;
   impact?: string;
   shortFix?: string;
@@ -136,6 +140,10 @@ export function buildReport(
       evidence: strongest,
       owasp: cat?.owasp,
       owaspName: cat?.owaspName,
+      asi: cat?.asi,
+      asiName: cat?.asiName,
+      mcpTop10: cat?.mcpTop10,
+      mcpTop10Name: cat?.mcpTop10Name,
       euAiAct: cat?.euAiAct,
       impact: cat?.impact,
       shortFix: cat?.shortFix,
@@ -342,12 +350,20 @@ export function formatTerminalReport(report: ReportModel, limit = 10): string {
   const shown = report.groups.slice(0, Math.max(1, limit));
   for (const group of shown) {
     const tag = group.owasp ? `  ${tc.magenta(group.owasp)}` : "";
+    const extraFrameworks = [
+      group.asi ? `${group.asi} ${group.asiName ?? ""}`.trim() : "",
+      group.mcpTop10 ? `MCP-Top10 ${group.mcpTop10} ${group.mcpTop10Name ?? ""}`.trim() : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
     out.push("");
     out.push(`  ${divider}`);
     out.push(
       `  ${tc.severity(group.severity, "▌ " + group.severity.toUpperCase())}  ${tc.bold(group.ruleId)}  ${tc.bold(group.title)}`,
     );
-    out.push(`    ${tc.evidence(group.evidence)}${tag}${group.owaspName ? tc.dim(" " + group.owaspName) : ""}`);
+    out.push(
+      `    ${tc.evidence(group.evidence)}${tag}${group.owaspName ? tc.dim(" " + group.owaspName) : ""}${extraFrameworks ? tc.dim(" · " + extraFrameworks) : ""}`,
+    );
 
     const first = group.occurrences[0];
     if (first?.trace && first.trace.length > 0) {
@@ -431,7 +447,13 @@ function formatMarkdown(report: ReportModel): string {
   }
 
   for (const group of report.groups) {
-    const tags = [group.evidence.toUpperCase(), group.owasp ? `OWASP ${group.owasp} ${group.owaspName}` : "", group.euAiAct ?? ""]
+    const tags = [
+      group.evidence.toUpperCase(),
+      group.owasp ? `OWASP ${group.owasp} ${group.owaspName}` : "",
+      group.asi ? `OWASP ${group.asi} ${group.asiName}` : "",
+      group.mcpTop10 ? `OWASP MCP Top 10 ${group.mcpTop10} ${group.mcpTop10Name}` : "",
+      group.euAiAct ?? "",
+    ]
       .filter(Boolean)
       .join(" · ");
     lines.push(`## ${group.severity.toUpperCase()} — ${group.ruleId}: ${group.title}`);
@@ -511,7 +533,13 @@ export function formatSarif(report: ReportModel): string {
       defaultConfiguration: { level: sarifLevel(cat?.severity ?? group.severity) },
       properties: {
         "security-severity": sarifSecuritySeverity(cat?.severity ?? group.severity),
-        tags: ["security", "ai", cat?.owasp ? `owasp-llm-top10/${cat.owasp.toLowerCase()}` : ""].filter(Boolean),
+        tags: [
+          "security",
+          "ai",
+          cat?.owasp ? `owasp-llm-top10/${cat.owasp.toLowerCase()}` : "",
+          cat?.asi ? `owasp-asi-2026/${cat.asi.toLowerCase()}` : "",
+          cat?.mcpTop10 ? `owasp-mcp-top10/${cat.mcpTop10.toLowerCase()}` : "",
+        ].filter(Boolean),
       },
     };
   });
@@ -619,6 +647,8 @@ function formatHtml(report: ReportModel): string {
       const tags = [
         `<span class="tag ev-${group.evidence}">${group.evidence}</span>`,
         group.owasp ? `<span class="tag">OWASP ${group.owasp} · ${escapeHtml(group.owaspName ?? "")}</span>` : "",
+        group.asi ? `<span class="tag">OWASP ${group.asi} · ${escapeHtml(group.asiName ?? "")}</span>` : "",
+        group.mcpTop10 ? `<span class="tag">OWASP MCP Top 10 ${group.mcpTop10} · ${escapeHtml(group.mcpTop10Name ?? "")}</span>` : "",
         group.euAiAct ? `<span class="tag">EU AI Act ${escapeHtml(group.euAiAct)}</span>` : "",
       ].join("");
 

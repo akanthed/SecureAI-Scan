@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Finding } from "./types.js";
+import { findAdvisory, type PackageAdvisory } from "./advisories.js";
+import { findMcpConfigFiles, parseServers } from "./mcp-config-scanner.js";
 
 export interface DependencyGuardOptions {
   rootPath: string;
@@ -80,6 +82,78 @@ export async function scanDependencyFilesForRisks(
   }
 
   return findings;
+}
+
+/**
+ * DEP003: dependencies with a documented malicious release or critical CVE.
+ * Fully offline (curated list bundled with the scanner), so unlike the
+ * registry checks above this runs on every scan, and additionally covers
+ * packages launched from MCP configs (`npx -y some-server`).
+ */
+export function scanKnownMaliciousPackages(rootPath: string, skipPaths?: string[]): Finding[] {
+  const candidates = [
+    ...collectDependencyCandidates(rootPath),
+    ...collectMcpConfigPackages(rootPath, skipPaths),
+  ];
+
+  const findings: Finding[] = [];
+  for (const candidate of candidates) {
+    const advisory = findAdvisory(candidate.ecosystem, candidate.name);
+    if (!advisory) continue;
+    findings.push({
+      rule_id: "DEP003",
+      title: "Dependency has a known-malicious or critically vulnerable release",
+      severity: advisory.kind === "malicious" ? "critical" : "high",
+      file: candidate.file,
+      line: candidate.line,
+      summary: advisorySummary(candidate.name, advisory),
+      description: advisory.reason,
+      recommendation:
+        advisory.kind === "malicious"
+          ? `Remove ${candidate.name} immediately, rotate any credentials it could access, and review its activity. Reference: ${advisory.reference}`
+          : `Update ${candidate.name} to a patched version (affected: ${advisory.affectedVersions ?? "see reference"}). Reference: ${advisory.reference}`,
+      confidence: 0.9,
+      evidence: "proven",
+    });
+  }
+  return findings;
+}
+
+function advisorySummary(name: string, advisory: PackageAdvisory): string {
+  const range = advisory.affectedVersions ? ` (affected: ${advisory.affectedVersions})` : "";
+  return advisory.kind === "malicious"
+    ? `${name} has a documented malicious release${range}.`
+    : `${name} has a critical security advisory${range}.`;
+}
+
+/** Package names launched by MCP config servers via npx/uvx-style runners. */
+function collectMcpConfigPackages(rootPath: string, skipPaths?: string[]): PackageCandidate[] {
+  const resolvedRoot = path.resolve(rootPath);
+  const candidates: PackageCandidate[] = [];
+  for (const configPath of findMcpConfigFiles(resolvedRoot, skipPaths)) {
+    let raw: string;
+    try {
+      raw = fs.readFileSync(configPath, "utf-8");
+    } catch {
+      continue;
+    }
+    const { servers, lines } = parseServers(raw);
+    const fileRelative = path.relative(resolvedRoot, configPath);
+    for (const server of servers) {
+      const command = (server.command ?? "").toLowerCase();
+      const runner = command.split(/[\\/]/).pop() ?? "";
+      const ecosystem = runner === "uvx" ? "pypi" : runner === "npx" || runner === "pnpx" || runner === "bunx" ? "npm" : undefined;
+      if (!ecosystem) continue;
+      const pkg = (server.args ?? []).find((a) => !a.startsWith("-"));
+      if (!pkg) continue;
+      // Strip a version suffix: name@1.2.3 / @scope/name@1.2.3
+      const at = pkg.lastIndexOf("@");
+      const name = at > 0 ? pkg.slice(0, at) : pkg;
+      const lineIdx = lines.findIndex((l) => l.includes(pkg));
+      candidates.push({ ecosystem, name, file: fileRelative, line: lineIdx >= 0 ? lineIdx + 1 : 1 });
+    }
+  }
+  return dedupeCandidates(candidates);
 }
 
 let warnedNetworkFailure = false;

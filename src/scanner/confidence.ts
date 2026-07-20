@@ -48,11 +48,6 @@ export function identifierTokens(name: string): string[] {
     .map((t) => t.toLowerCase());
 }
 
-/** True when any token of the identifier is in the given token set. */
-export function hasToken(name: string, tokens: Set<string>): boolean {
-  return identifierTokens(name).some((t) => tokens.has(t));
-}
-
 const SANITIZER_TOKENS = new Set([
   "sanitize",
   "sanitized",

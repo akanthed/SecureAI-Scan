@@ -15,6 +15,12 @@ export interface RuleCatalogEntry {
   owaspName: string;
   /** EU AI Act article most relevant to the control. */
   euAiAct?: string;
+  /** OWASP Top 10 for Agentic Applications (2026) mapping, e.g. "ASI01". */
+  asi?: string;
+  asiName?: string;
+  /** OWASP MCP Top 10 (2025) mapping, e.g. "MCP03". */
+  mcpTop10?: string;
+  mcpTop10Name?: string;
   impact: string;
   shortFix: string;
 }
@@ -32,6 +38,62 @@ export const OWASP_LLM_TOP10: Record<string, string> = {
   LLM10: "Unbounded Consumption",
 };
 
+export const OWASP_ASI_2026: Record<string, string> = {
+  ASI01: "Agent Goal Hijack",
+  ASI02: "Tool Misuse & Exploitation",
+  ASI03: "Identity & Privilege Abuse",
+  ASI04: "Agentic Supply Chain Vulnerabilities",
+  ASI05: "Unexpected Code Execution",
+  ASI06: "Memory & Context Poisoning",
+  ASI07: "Insecure Inter-Agent Communication",
+  ASI08: "Cascading Failures",
+  ASI09: "Human-Agent Trust Exploitation",
+  ASI10: "Rogue Agents",
+};
+
+export const OWASP_MCP_TOP10: Record<string, string> = {
+  MCP01: "Token Mismanagement & Secret Exposure",
+  MCP02: "Privilege Escalation via Scope Creep",
+  MCP03: "Tool Poisoning",
+  MCP04: "Software Supply Chain Attacks",
+  MCP05: "Command Injection & Execution",
+  MCP06: "Intent Flow Subversion",
+  MCP07: "Insufficient Authentication & Authorization",
+  MCP08: "Lack of Audit and Telemetry",
+  MCP09: "Shadow MCP Servers",
+  MCP10: "Context Injection & Over-Sharing",
+};
+
+/**
+ * Per-rule mapping onto the two 2025/2026 OWASP frameworks. Kept separate from
+ * entry() so the positional call sites stay readable; merged into RULE_CATALOG
+ * below. A rule appears here only when the mapping is defensible — the
+ * coverage matrix reports unmapped risks as gaps rather than stretching.
+ */
+const FRAMEWORK_MAP: Record<string, { asi?: string; mcpTop10?: string }> = {
+  AI001: { asi: "ASI01" },
+  AI003: { asi: "ASI03" },
+  AI005: { asi: "ASI05" },
+  AI006: { asi: "ASI02" },
+  AI007: { asi: "ASI06" },
+  AI010: { asi: "ASI01" },
+  AI011: { asi: "ASI07" },
+  AI012: { asi: "ASI05" },
+  MCP001: { asi: "ASI01", mcpTop10: "MCP03" },
+  MCP002: { asi: "ASI04", mcpTop10: "MCP09" },
+  MCP003: { asi: "ASI02", mcpTop10: "MCP03" },
+  MCP004: { asi: "ASI04", mcpTop10: "MCP04" },
+  MCP005: { mcpTop10: "MCP01" },
+  MCP006: { mcpTop10: "MCP07" },
+  MCP007: { asi: "ASI01", mcpTop10: "MCP03" },
+  MCP008: { asi: "ASI01", mcpTop10: "MCP03" },
+  MCP009: { asi: "ASI02", mcpTop10: "MCP03" },
+  VEC003: { asi: "ASI06" },
+  DEP001: { asi: "ASI04" },
+  DEP002: { asi: "ASI04" },
+  DEP003: { asi: "ASI04", mcpTop10: "MCP04" },
+};
+
 function entry(
   id: string,
   title: string,
@@ -41,7 +103,21 @@ function entry(
   shortFix: string,
   euAiAct?: string,
 ): RuleCatalogEntry {
-  return { id, title, severity, owasp, owaspName: OWASP_LLM_TOP10[owasp] ?? "", impact, shortFix, euAiAct };
+  const frameworks = FRAMEWORK_MAP[id] ?? {};
+  return {
+    id,
+    title,
+    severity,
+    owasp,
+    owaspName: OWASP_LLM_TOP10[owasp] ?? "",
+    impact,
+    shortFix,
+    euAiAct,
+    asi: frameworks.asi,
+    asiName: frameworks.asi ? OWASP_ASI_2026[frameworks.asi] : undefined,
+    mcpTop10: frameworks.mcpTop10,
+    mcpTop10Name: frameworks.mcpTop10 ? OWASP_MCP_TOP10[frameworks.mcpTop10] : undefined,
+  };
 }
 
 export const RULE_CATALOG: Record<string, RuleCatalogEntry> = {
@@ -205,6 +281,33 @@ export const RULE_CATALOG: Record<string, RuleCatalogEntry> = {
     "Use https:// for all non-localhost MCP servers.",
     "Art. 15 (cybersecurity)",
   ),
+  MCP007: entry(
+    "MCP007",
+    "Invisible Unicode in MCP tool metadata",
+    "critical",
+    "LLM01",
+    "Invisible characters hide model-readable instructions from human review — the canonical tool-poisoning delivery mechanism.",
+    "Strip invisible/bidi characters from tool names and descriptions; treat the definition as compromised until reviewed.",
+    "Art. 15 (cybersecurity)",
+  ),
+  MCP008: entry(
+    "MCP008",
+    "Injection phrasing in MCP tool description",
+    "high",
+    "LLM01",
+    "Agent-directed instructions in a description execute with trusted context — how real tool-poisoning attacks steer agents.",
+    "Rewrite descriptions as plain documentation; audit third-party tool text before shipping.",
+    "Art. 15 (cybersecurity)",
+  ),
+  MCP009: entry(
+    "MCP009",
+    "MCP tool description steers another tool",
+    "medium",
+    "LLM01",
+    "Tool shadowing: one server's description manipulates calls that flow to legitimate tools it does not own.",
+    "Keep each description scoped to its own tool; put orchestration policy in your agent, not server metadata.",
+    "Art. 15 (cybersecurity)",
+  ),
   VEC001: entry(
     "VEC001",
     "Vector search without tenant/user access control filter",
@@ -256,6 +359,15 @@ export const RULE_CATALOG: Record<string, RuleCatalogEntry> = {
     "LLM03",
     "A one-character-off package name can indicate typosquatting or accidental confusion with a trusted package.",
     "Confirm package ownership and intended source before installing in production.",
+    "Art. 15 (cybersecurity)",
+  ),
+  DEP003: entry(
+    "DEP003",
+    "Dependency has a known-malicious or critically vulnerable release",
+    "critical",
+    "LLM03",
+    "A documented backdoor or critical CVE in a dependency executes with your application's permissions on install or launch.",
+    "Remove or update the package per the advisory; rotate credentials it could have accessed.",
     "Art. 15 (cybersecurity)",
   ),
 };
