@@ -2,6 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Finding, Severity } from "./types.js";
 import { evidenceConfidence, demoteEvidence } from "./confidence.js";
+import {
+  findCrossToolReference,
+  findInvisibleUnicode,
+  matchInjectionPhrases,
+} from "./tool-poisoning-checks.js";
 
 // ── Python LLM SDK call patterns ──────────────────────────────────────────
 const LLM_CALL_PATTERNS = [
@@ -87,6 +92,91 @@ const PY_LLM_IMPORT_PATTERNS = [
 
 function fileImportsLlmSdk(raw: string): boolean {
   return PY_LLM_IMPORT_PATTERNS.some((p) => p.test(raw));
+}
+
+// ── MCP server SDK import detection (FastMCP / official mcp package) ──────
+const PY_MCP_IMPORT_PATTERNS = [
+  /^\s*(?:import|from)\s+mcp\b/m,
+  /^\s*(?:import|from)\s+fastmcp\b/m,
+];
+
+function fileImportsMcpServerSdk(raw: string): boolean {
+  return PY_MCP_IMPORT_PATTERNS.some((p) => p.test(raw));
+}
+
+// ── MCP tool decorator extraction ─────────────────────────────────────────
+
+const PY_TOOL_DECORATOR_RE = /^\s*@[\w.]*\.tool\b/;
+
+interface PyToolDefinition {
+  name: string;
+  /** description= kwarg text and/or the decorated function's docstring. */
+  texts: Array<{ value: string; line: number }>;
+}
+
+/**
+ * If lines[i] is an @xxx.tool decorator, extract the tool's name and its
+ * descriptive text (a description="..." kwarg on the decorator, plus the
+ * docstring of the decorated def). Line numbers are 0-based indices.
+ */
+function extractPyToolAtLine(lines: string[], i: number): PyToolDefinition | undefined {
+  if (!PY_TOOL_DECORATOR_RE.test(lines[i])) return undefined;
+
+  const texts: PyToolDefinition["texts"] = [];
+  let name: string | undefined;
+
+  // description= / name= kwargs can span the decorator's argument lines.
+  for (let j = i; j < Math.min(lines.length, i + 6); j++) {
+    const descMatch = /description\s*=\s*(?:"""|''')?["']([^"']*)["']/.exec(lines[j]);
+    if (descMatch) texts.push({ value: descMatch[1], line: j });
+    const nameMatch = /\bname\s*=\s*["']([^"']*)["']/.exec(lines[j]);
+    if (nameMatch) name = nameMatch[1];
+    if (/^\s*def\s/.test(lines[j])) break;
+  }
+
+  // The decorated def: tool name defaults to the function name; docstring is
+  // the description FastMCP sends to clients.
+  for (let j = i + 1; j < Math.min(lines.length, i + 8); j++) {
+    const defMatch = /^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(lines[j]);
+    if (!defMatch) continue;
+    name = name ?? defMatch[1];
+    for (let k = j + 1; k < Math.min(lines.length, j + 4); k++) {
+      const open = /^\s*(?:[rbu]*)("""|''')/.exec(lines[k]);
+      if (!open) {
+        if (lines[k].trim() !== "" && !/^\s*#/.test(lines[k])) break;
+        continue;
+      }
+      const quote = open[1];
+      const docLines: string[] = [];
+      let closed = false;
+      for (let m = k; m < Math.min(lines.length, k + 40); m++) {
+        const content = m === k ? lines[m].slice(lines[m].indexOf(quote) + 3) : lines[m];
+        const endIdx = content.indexOf(quote);
+        if (endIdx >= 0) {
+          docLines.push(content.slice(0, endIdx));
+          closed = true;
+          break;
+        }
+        docLines.push(content);
+      }
+      if (closed || docLines.length > 0) texts.push({ value: docLines.join("\n"), line: k });
+      break;
+    }
+    break;
+  }
+
+  if (!name || texts.length === 0) return undefined;
+  return { name, texts };
+}
+
+/** All tool names defined in the file, for cross-tool shadowing detection. */
+function collectPyToolNames(lines: string[]): Set<string> {
+  const names = new Set<string>();
+  for (let i = 0; i < lines.length; i++) {
+    const def = extractPyToolAtLine(lines, i);
+    if (def) names.add(def.name);
+  }
+  return names;
 }
 
 /** Variable names assigned directly from an LLM call within the given lines. */
@@ -454,10 +544,92 @@ function checkMCP001(lines: string[], i: number, file: string): Finding | null {
   };
 }
 
+function checkMCP007(lines: string[], i: number, file: string, ctx: FileContext): Finding | null {
+  if (!ctx.fileHasMcpServer) return null;
+  const def = extractPyToolAtLine(lines, i);
+  if (!def) return null;
+
+  for (const text of [{ value: def.name, line: i }, ...def.texts]) {
+    const invisible = findInvisibleUnicode(text.value);
+    if (!invisible) continue;
+    return {
+      ...findingBase("MCP007", "Invisible Unicode in MCP tool metadata", "critical", file, text.line + 1),
+      summary: `Tool "${def.name}" metadata contains ${invisible.codePoint} (${invisible.label}).`,
+      description:
+        "Invisible or bidirectional Unicode in tool metadata hides content from human reviewers while the model still reads it — the canonical tool-poisoning delivery mechanism.",
+      recommendation:
+        "Remove the invisible characters and audit how they were introduced; treat the tool definition as compromised until reviewed.",
+      confidence: evidenceConfidence("proven"),
+      evidence: "proven",
+    };
+  }
+  return null;
+}
+
+function checkMCP008(lines: string[], i: number, file: string, ctx: FileContext): Finding | null {
+  if (!ctx.fileHasMcpServer) return null;
+  const def = extractPyToolAtLine(lines, i);
+  if (!def) return null;
+
+  for (const text of def.texts) {
+    const phrases = matchInjectionPhrases(text.value);
+    if (phrases.strong.length > 0) {
+      return {
+        ...findingBase("MCP008", "Injection phrasing in MCP tool description", "high", file, text.line + 1),
+        summary: `Tool "${def.name}" description contains ${phrases.strong[0]}.`,
+        description:
+          "The description contains instructions aimed at the agent rather than documentation for the user — the pattern used by real-world tool-poisoning attacks. Descriptions enter the model's context as trusted content.",
+        recommendation:
+          "Rewrite the description as plain documentation. If this text was not written by your team, treat the package as compromised.",
+        confidence: evidenceConfidence("likely"),
+        evidence: "likely",
+      };
+    }
+    if (phrases.weak.length >= 2) {
+      return {
+        ...findingBase("MCP008", "Injection phrasing in MCP tool description", "medium", file, text.line + 1),
+        summary: `Tool "${def.name}" description combines ${phrases.weak.length} agent-directive phrases (${phrases.weak.join("; ")}).`,
+        description:
+          "Multiple agent-directed phrases in one description suggest it is steering the model's behavior rather than documenting the tool.",
+        recommendation:
+          "Review whether these directives belong in tool metadata; move behavioral policy into your own system prompt.",
+        confidence: evidenceConfidence("heuristic"),
+        evidence: "heuristic",
+      };
+    }
+  }
+  return null;
+}
+
+function checkMCP009(lines: string[], i: number, file: string, ctx: FileContext): Finding | null {
+  if (!ctx.fileHasMcpServer || !ctx.mcpToolNames || ctx.mcpToolNames.size < 2) return null;
+  const def = extractPyToolAtLine(lines, i);
+  if (!def) return null;
+
+  for (const text of def.texts) {
+    const crossTool = findCrossToolReference(text.value, def.name, ctx.mcpToolNames);
+    if (!crossTool) continue;
+    return {
+      ...findingBase("MCP009", "MCP tool description steers another tool", "medium", file, text.line + 1),
+      summary: `Tool "${def.name}" description directs behavior around tool "${crossTool.referencedTool}" ("${crossTool.directive.trim()}…").`,
+      description:
+        "A tool description that dictates when or how a different tool is used is the tool-shadowing attack: a malicious server manipulates calls that flow to legitimate tools it does not own.",
+      recommendation:
+        "Tool descriptions should document only their own tool. Cross-tool orchestration belongs in your agent's own policy, not in server-supplied metadata.",
+      confidence: evidenceConfidence("likely"),
+      evidence: "likely",
+    };
+  }
+  return null;
+}
+
 // ── Registered rule functions ─────────────────────────────────────────────
 
 interface FileContext {
   fileHasLlm: boolean;
+  fileHasMcpServer: boolean;
+  /** Tool names defined in this file (only computed for MCP server files). */
+  mcpToolNames?: Set<string>;
 }
 
 type RuleChecker = (lines: string[], i: number, file: string, ctx: FileContext) => Finding | null;
@@ -474,6 +646,9 @@ const PYTHON_RULES: RuleChecker[] = [
   checkVEC001,
   checkVEC003,
   checkMCP001,
+  checkMCP007,
+  checkMCP008,
+  checkMCP009,
 ];
 
 // ── File discovery ────────────────────────────────────────────────────────
@@ -544,7 +719,12 @@ export function scanPythonFiles(
 
     const lines = raw.split(/\r?\n/);
     const relPath = path.relative(resolved, filePath);
-    const ctx: FileContext = { fileHasLlm: fileImportsLlmSdk(raw) };
+    const hasMcpServer = fileImportsMcpServerSdk(raw);
+    const ctx: FileContext = {
+      fileHasLlm: fileImportsLlmSdk(raw),
+      fileHasMcpServer: hasMcpServer,
+      mcpToolNames: hasMcpServer ? collectPyToolNames(lines) : undefined,
+    };
 
     for (let i = 0; i < lines.length; i++) {
       for (const rule of PYTHON_RULES) {

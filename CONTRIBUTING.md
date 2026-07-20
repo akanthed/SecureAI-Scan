@@ -19,5 +19,12 @@ Thanks for wanting to help. This project is early and moving fast, so small, foc
 - Prefer simple logic over cleverness
 - Keep rules isolated and testable
 
+## Package Advisories (DEP003)
+The curated advisory list lives in `src/scanner/advisories.ts` and produces `proven` findings, so the inclusion bar is high:
+- Only add a package with a **public incident report or CVE** as the reference — never on suspicion
+- Include the affected version range when the source documents one
+- `kind: "malicious"` is for documented backdoors/malware (reported critical); `kind: "vulnerable"` is for critical CVEs (reported high)
+- PRs adding advisories should link the reference and add a case to `test/dependency-guard.test.js`
+
 ## Reporting Issues
 For security issues, please follow `SECURITY.md`.

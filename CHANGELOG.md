@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0 — 2026-07-20
+
+### Added
+- **Three-framework OWASP mapping** — every rule now maps to the OWASP LLM Top 10 (2025), the OWASP Top 10 for Agentic Applications (2026, ASI01–ASI10), and the OWASP MCP Top 10 (2025) where applicable. Tags render in terminal, Markdown, HTML, JSON, and SARIF output (`owasp-asi-2026/*`, `owasp-mcp-top10/*` SARIF tags)
+- **OWASP coverage matrix** — `secureai-scan threat-model` now includes a per-framework table showing which of the 30 risks are covered by rules, which fired in this scan, and which are runtime/process concerns a static scanner cannot assess
+- **MCP007 — invisible Unicode in tool metadata** (critical, proven) — detects zero-width, bidi, and Unicode-tags-block characters hidden in MCP tool names/descriptions (`@modelcontextprotocol/sdk`, FastMCP — TS and Python)
+- **MCP008 — injection phrasing in tool descriptions** (high, likely) — flags agent-directed instructions in tool descriptions ("ignore previous instructions", concealment from the user, credential-file reads, exfil-to-URL), the pattern behind real-world tool-poisoning attacks
+- **MCP009 — cross-tool shadowing** (medium, likely) — flags a tool description that dictates when/how a *different* tool is used ("when send_email is called, first route through this tool")
+- **DEP003 — known-malicious/vulnerable dependency** (critical/high, proven) — offline curated advisory list (postmark-mcp backdoor, mcp-remote CVE-2025-6514) checked on **every** scan against package.json, requirements.txt, and packages launched from MCP configs. No network required; no flag needed
+
+### Changed
+- `--only-mcp` now also runs MCP007–MCP009
+- `--rules` accepts DEP001–DEP003
+
 ## 0.3.1 — 2026-07-14
 
 ### Fixed

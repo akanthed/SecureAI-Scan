@@ -1,4 +1,5 @@
 import type { Finding, Severity } from "./types.js";
+import { OWASP_ASI_2026, OWASP_LLM_TOP10, OWASP_MCP_TOP10, RULE_CATALOG } from "./catalog.js";
 
 interface ThreatBoundary {
   from: string;
@@ -82,6 +83,67 @@ function buildTrustBoundaries(findings: Finding[]): ThreatBoundary[] {
   );
 }
 
+/**
+ * Risks that a static scanner fundamentally cannot assess — runtime behavior,
+ * process controls, or operational telemetry. Reported honestly as such
+ * instead of being stretched onto a code rule.
+ */
+const RUNTIME_ONLY_RISKS: Record<string, string> = {
+  LLM09: "runtime concern (output monitoring)",
+  ASI08: "runtime concern (orchestration monitoring)",
+  ASI09: "process concern (UX / approval design)",
+  ASI10: "runtime concern (behavioral monitoring)",
+  MCP02: "process concern (permission lifecycle review)",
+  MCP08: "runtime concern (audit logging infrastructure)",
+};
+
+interface FrameworkSpec {
+  title: string;
+  risks: Record<string, string>;
+  ruleKey: (entry: (typeof RULE_CATALOG)[string]) => string | undefined;
+}
+
+function buildCoverageMatrix(findings: Finding[]): string[] {
+  const firedRules = new Set(findings.map((f) => f.rule_id));
+  const frameworks: FrameworkSpec[] = [
+    { title: "OWASP LLM Top 10 (2025)", risks: OWASP_LLM_TOP10, ruleKey: (e) => e.owasp },
+    { title: "OWASP Top 10 for Agentic Applications (2026)", risks: OWASP_ASI_2026, ruleKey: (e) => e.asi },
+    { title: "OWASP MCP Top 10 (2025)", risks: OWASP_MCP_TOP10, ruleKey: (e) => e.mcpTop10 },
+  ];
+
+  const lines: string[] = [];
+  lines.push("## OWASP Framework Coverage");
+  lines.push("");
+  lines.push(
+    "How this scan maps onto the three OWASP AI security frameworks. \"Runtime concern\" marks risks a static scanner cannot assess — cover those with runtime controls.",
+  );
+  lines.push("");
+
+  for (const fw of frameworks) {
+    lines.push(`### ${fw.title}`);
+    lines.push("");
+    lines.push("| Risk | Name | Rules | Status |");
+    lines.push("|------|------|-------|--------|");
+    for (const [riskId, riskName] of Object.entries(fw.risks)) {
+      const rules = Object.values(RULE_CATALOG)
+        .filter((e) => fw.ruleKey(e) === riskId)
+        .map((e) => e.id);
+      let status: string;
+      if (rules.length === 0) {
+        status = RUNTIME_ONLY_RISKS[riskId] ? `⚪ ${RUNTIME_ONLY_RISKS[riskId]}` : "⚪ no static rule yet";
+      } else if (rules.some((r) => firedRules.has(r))) {
+        status = "🔴 findings in this scan";
+      } else {
+        status = "🟢 covered, no findings";
+      }
+      lines.push(`| ${riskId} | ${riskName} | ${rules.map((r) => `\`${r}\``).join(", ") || "—"} | ${status} |`);
+    }
+    lines.push("");
+  }
+
+  return lines;
+}
+
 function riskGrade(findings: Finding[]): string {
   const critCount = findings.filter((f) => f.severity === "critical").length;
   const highCount = findings.filter((f) => f.severity === "high").length;
@@ -130,6 +192,8 @@ export function generateThreatModel(
   lines.push(`| Medium | ${findings.filter((f) => f.severity === "medium").length} |`);
   lines.push(`| Low | ${findings.filter((f) => f.severity === "low").length} |`);
   lines.push("");
+
+  lines.push(...buildCoverageMatrix(findings));
 
   if (findings.length === 0) {
     lines.push("> No security findings detected. Keep scanning on every commit to stay clean.");

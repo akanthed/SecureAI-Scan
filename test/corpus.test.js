@@ -36,6 +36,12 @@ const EXPECTED_VULNERABLE = [
   ["MCP004", "vulnerable/mcp/.mcp.json"],
   ["MCP005", "vulnerable/mcp/.mcp.json"],
   ["MCP006", "vulnerable/mcp/.mcp.json"],
+  ["MCP007", "vulnerable/tool_poisoning.ts"],
+  ["MCP008", "vulnerable/tool_poisoning.ts"],
+  ["MCP009", "vulnerable/tool_poisoning.ts"],
+  ["MCP007", "vulnerable/tool_poisoning.py"],
+  ["MCP008", "vulnerable/tool_poisoning.py"],
+  ["MCP009", "vulnerable/tool_poisoning.py"],
 ];
 
 for (const [ruleId, file] of EXPECTED_VULNERABLE) {

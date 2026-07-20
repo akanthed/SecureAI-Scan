@@ -1,6 +1,6 @@
 {
   "name": "secureai-scan",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "AI security scanner with dataflow evidence — prompt injection, MCP supply chain, RAG poisoning. Evidence-tiered findings (no false-positive noise by default), SARIF for GitHub code scanning, AI-BOM with OWASP LLM Top 10 mapping.",
   "author": "Akshay Kanthed",
   "license": "MIT",
@@ -53,7 +53,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "npm run build && node dist/index.js",
     "test": "npm run build && node test/run-tests.js"

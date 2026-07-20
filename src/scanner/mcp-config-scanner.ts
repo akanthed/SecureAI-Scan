@@ -36,7 +36,7 @@ const SKIP_DIRS = new Set([
   "__pycache__",
 ]);
 
-interface McpServerEntry {
+export interface McpServerEntry {
   name: string;
   command?: string;
   args?: string[];
@@ -44,7 +44,7 @@ interface McpServerEntry {
   url?: string;
 }
 
-function findMcpConfigFiles(rootPath: string, skipPaths?: string[]): string[] {
+export function findMcpConfigFiles(rootPath: string, skipPaths?: string[]): string[] {
   const results: string[] = [];
   const resolvedRoot = path.resolve(rootPath);
   const skips = (skipPaths ?? []).map((p) => path.resolve(resolvedRoot, p));
@@ -77,7 +77,7 @@ function findMcpConfigFiles(rootPath: string, skipPaths?: string[]): string[] {
   return results;
 }
 
-function parseServers(raw: string): { servers: McpServerEntry[]; lines: string[] } {
+export function parseServers(raw: string): { servers: McpServerEntry[]; lines: string[] } {
   const lines = raw.split(/\r?\n/);
   let parsed: unknown;
   try {

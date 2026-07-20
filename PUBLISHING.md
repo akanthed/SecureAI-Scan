@@ -293,7 +293,7 @@ Change from:
 
 To:
 ```
-"Find AI/LLM security vulnerabilities in your code — prompt injection, MCP tool poisoning, RAG data poisoning, agent trust violations. 19 rules. Local-first."
+"Find AI/LLM security vulnerabilities in your code — prompt injection, MCP tool poisoning, RAG data poisoning, agent trust violations. 28 rules mapped to the OWASP LLM/Agentic/MCP Top 10s. Local-first."
 ```
 
 ### README Shows on npm Page
