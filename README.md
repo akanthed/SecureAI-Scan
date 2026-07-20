@@ -47,6 +47,8 @@ TypeScript, JavaScript, Python, and MCP config files are scanned automatically.
 
 > Prefer to ask questions first? Try the free **[SecureAI-Scan AI Security Advisor on ChatGPT](https://chatgpt.com/g/g-6a25141758188191a764020c1ab6a226-secureai-scan-ai-security-advisor)**.
 
+> About to run an MCP server you found on GitHub or Twitter? Paste its tool description into **[MCP X-Ray](https://akanthed.github.io/SecureAI-Scan/)** first — checks it for hidden Unicode, injected instructions, and known-malicious packages in your browser, no install.
+
 ## Commands
 
 ```bash
