@@ -132,6 +132,92 @@ test("AI002 does not fire on logged fields when the file imports no LLM SDK", ()
   assert.equal(findings.some((f) => f.rule_id === "AI002"), false);
 });
 
+// ── Python false-negative fixes (litellm coverage + AI001 taint window) ────
+
+test("AI001/AI003/AI005 fire on a litellm app (previously undetected entirely)", () => {
+  const dir = tempDir("secureai-py-litellm-");
+  fs.writeFileSync(
+    path.join(dir, "app.py"),
+    [
+      "import litellm",
+      "from flask import Flask, request",
+      "",
+      "app = Flask(__name__)",
+      "",
+      '@app.route("/chat", methods=["POST"])',
+      "def chat():",
+      '    user_input = request.json["message"]',
+      '    system_prompt = "You are a helpful assistant. " + user_input',
+      "",
+      "    response = litellm.completion(",
+      '        model="gpt-4",',
+      "        messages=[",
+      '            {"role": "system", "content": system_prompt},',
+      '            {"role": "user", "content": user_input},',
+      "        ],",
+      "    )",
+      "",
+      '    reply = response["choices"][0]["message"]["content"]',
+      "    exec(reply)",
+      "    return reply",
+      "",
+    ].join("\n"),
+  );
+
+  const { findings } = scanPythonFiles(dir);
+  const ruleIds = findings.map((f) => f.rule_id);
+  assert.ok(ruleIds.includes("AI001"), "expected AI001 (prompt injection) to fire on litellm.completion");
+  assert.ok(ruleIds.includes("AI003"), "expected AI003 (unauthenticated LLM call) to fire on litellm.completion");
+  assert.ok(ruleIds.includes("AI005"), "expected AI005 (unsafe output handling) to fire on litellm.completion");
+});
+
+test("AI001 finds prompt injection when the LLM call is far from the tainted request read", () => {
+  const dir = tempDir("secureai-py-ai001-gap-");
+  fs.writeFileSync(
+    path.join(dir, "app.py"),
+    [
+      "import openai",
+      "from fastapi import FastAPI, Request",
+      "",
+      "app = FastAPI()",
+      "",
+      '@app.post("/chat")',
+      "async def chat(request: Request):",
+      "    body = await request.json()",
+      '    user_input = body["message"]',
+      "",
+      "    request_id = generate_request_id()",
+      "    log_incoming_request(request_id, user_input)",
+      "",
+      "    if is_rate_limited(request_id):",
+      '        return {"error": "rate limited"}',
+      "",
+      "    conversation = load_conversation_history(request_id)",
+      "    context_docs = retrieve_relevant_docs(user_input)",
+      "",
+      "    system_prompt = build_system_prompt(context_docs)",
+      '    full_prompt = system_prompt + "\\n\\nUser said: " + user_input',
+      "",
+      "    response = openai.chat.completions.create(",
+      '        model="gpt-4",',
+      "        messages=[",
+      '            {"role": "system", "content": full_prompt},',
+      '            {"role": "user", "content": user_input},',
+      "        ],",
+      "    )",
+      "",
+      "    return response.choices[0].message.content",
+      "",
+    ].join("\n"),
+  );
+
+  const { findings } = scanPythonFiles(dir);
+  assert.ok(
+    findings.some((f) => f.rule_id === "AI001"),
+    "expected AI001 to trace taint across ordinary business logic between the request read and the LLM call",
+  );
+});
+
 // ── BOM bare-identifier gating (bom.ts) ─────────────────────────────────────
 
 test("AI-BOM does not flag bare o1/o3 identifiers but still catches quoted model IDs", () => {

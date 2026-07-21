@@ -17,13 +17,22 @@ const LLM_CALL_PATTERNS = [
   /client\s*\.\s*messages\s*\.\s*create/,
   /genai\s*\.\s*generate_content/,
   /model\s*\.\s*generate_content/,
-  /bedrock\s*\.\s*invoke_model/,
+  /\.\s*invoke_model\s*\(/,
+  /\.\s*converse\s*\(/,
   /llm\s*\.\s*invoke\s*\(/,
   /llm\s*\.\s*predict\s*\(/,
   /chain\s*\.\s*invoke\s*\(/,
   /chain\s*\.\s*run\s*\(/,
   /ChatOpenAI|ChatAnthropic|ChatGoogleGenerativeAI/,
   /query_engine\s*\.\s*query\s*\(/,
+  // litellm: unified gateway, imported/detected separately but its own call
+  // syntax was previously absent here, causing a total detection blackout
+  // for every litellm-based app.
+  /litellm\s*\.\s*(completion|acompletion|text_completion)\s*\(/,
+  /co\s*\.\s*chat\s*\(/,
+  /cohere_client\s*\.\s*chat\s*\(/,
+  /\.\s*chat\s*\.\s*complete\s*\(/,
+  /ollama\s*\.\s*(chat|generate)\s*\(/,
 ];
 
 // ── User input taint sources ───────────────────────────────────────────────
@@ -269,16 +278,72 @@ function findingBase(
 
 // ── Rules ─────────────────────────────────────────────────────────────────
 
+/**
+ * Find the start of the function enclosing line `i`, by walking backward to
+ * the nearest `def` at a shallower indentation. Falls back to a fixed cap
+ * when no enclosing def is found (e.g. module-level code).
+ */
+function findEnclosingFunctionStart(lines: string[], i: number): number {
+  const FALLBACK_CAP = 60;
+  const indentOf = (l: string) => (/^(\s*)/.exec(l)?.[1].length ?? 0);
+  const callIndent = indentOf(lines[i]);
+  for (let j = i - 1; j >= 0 && j >= i - 400; j--) {
+    if (/^\s*(async\s+)?def\s+\w+\s*\(/.test(lines[j]) && indentOf(lines[j]) < callIndent) {
+      return j;
+    }
+  }
+  return Math.max(0, i - FALLBACK_CAP);
+}
+
+/**
+ * Collect variable names tainted by request data within [start, upTo],
+ * propagating through direct assignment and string composition (fixpoint,
+ * a few passes). This lets AI001 see taint that flows through ordinary
+ * business logic (logging, rate limiting, RAG lookups) between the request
+ * read and the LLM call — a fixed line-distance window missed this whenever
+ * a handler had more than a handful of lines in between.
+ */
+function collectRequestTaintedVars(lines: string[], start: number, upTo: number): Set<string> {
+  const tainted = new Set<string>();
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    for (let j = start; j <= upTo; j++) {
+      const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/.exec(lines[j]);
+      if (!m) continue;
+      const [, name, rhs] = m;
+      if (tainted.has(name)) continue;
+      const rhsIsTainted =
+        matchesAny(rhs, REQUEST_PATTERNS) ||
+        [...tainted].some((t) => new RegExp(`\\b${t}\\b`).test(rhs));
+      if (rhsIsTainted) {
+        tainted.add(name);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return tainted;
+}
+
 function checkAI001(lines: string[], i: number, file: string): Finding | null {
   const line = lines[i];
-  // Look for f-string or string concat with request data
-  const hasRequestSource = matchesAny(line, REQUEST_PATTERNS);
-  if (!hasRequestSource) return null;
+  if (!matchesAny(line, LLM_CALL_PATTERNS)) return null;
 
-  // Check if an LLM call happens within the next 10 lines
-  const ahead = windowText(lines, i, 0, 10);
-  if (!matchesAny(ahead, LLM_CALL_PATTERNS)) return null;
-  if (hasSanitization(ahead)) return null;
+  const start = findEnclosingFunctionStart(lines, i);
+  const promptWindow = windowText(lines, i, 30, 10);
+  if (hasSanitization(promptWindow)) return null;
+
+  const directRequest = matchesAny(promptWindow, REQUEST_PATTERNS);
+  const taintedVars = collectRequestTaintedVars(lines, start, i);
+  const taintedVarUsed = [...taintedVars].some((v) => new RegExp(`\\b${v}\\b`).test(promptWindow));
+
+  if (!directRequest && !taintedVarUsed) return null;
+
+  // Direct textual match on this call's own window is stronger evidence than
+  // a variable that was tainted several assignments earlier and carried
+  // forward — the latter has more room for an intervening sanitizer we
+  // didn't recognize.
+  const evidence = directRequest ? "likely" : "heuristic";
 
   return {
     ...findingBase("AI001", "Prompt injection via user input", "high", file, i + 1),
@@ -287,8 +352,8 @@ function checkAI001(lines: string[], i: number, file: string): Finding | null {
       "Request parameters (request.json, request.form, etc.) are used in an LLM call without role separation or encoding. An attacker can inject instructions that override your system prompt.",
     recommendation:
       'Use separate message roles: messages=[{"role":"system","content":system_prompt},{"role":"user","content":str(user_input)}]',
-    confidence: evidenceConfidence("likely"),
-    evidence: "likely",
+    confidence: evidenceConfidence(evidence),
+    evidence,
   };
 }
 

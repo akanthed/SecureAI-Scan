@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1 — 2026-07-21
+
+### Fixed
+- **Python LLM-call detection was missing entire SDKs** — `litellm.completion`/`acompletion`/`text_completion`, generic `.invoke_model(`/`.converse(` (Bedrock clients not literally named `bedrock`), Cohere `co.chat(`, Mistral `.chat.complete(`, and Ollama `.chat`/`.generate(` were recognized as LLM SDK imports but their actual call syntax wasn't in the call-pattern list. Every rule gated on that list (AI001, AI003, AI004, AI005, AI007, AI010) silently produced zero findings on apps using these SDKs, even with `--paranoid`
+- **AI001 (Python) missed prompt injection across ordinary handler code** — the rule only looked 10 lines ahead of a `request.*` read for an LLM call. Realistic handlers (logging, rate-limit checks, RAG retrieval between the request read and the model call) routinely exceed that window. AI001 now walks the enclosing function, tracks which variables are tainted by request data through reassignment (fixpoint propagation), and checks the LLM call site against that set instead of a fixed line distance. Direct textual matches still report at `likely`; taint carried through intermediate variables reports at `heuristic`
+
 ## 0.4.0 — 2026-07-20
 
 ### Added
