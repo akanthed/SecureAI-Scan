@@ -3,6 +3,8 @@ import path from "node:path";
 import type { Finding } from "./types.js";
 import { findAdvisory, type PackageAdvisory } from "./advisories.js";
 import { findMcpConfigFiles, parseServers } from "./mcp-config-scanner.js";
+import { parseExactVersion, versionSatisfiesRange } from "./semver.js";
+import { stripBom } from "../utils/text.js";
 
 export interface DependencyGuardOptions {
   rootPath: string;
@@ -14,6 +16,8 @@ interface PackageCandidate {
   name: string;
   file: string;
   line: number;
+  /** Raw declared version spec, if one was present (e.g. "1.0.16", "^1.0.0", ">=0.1.16"). */
+  version?: string;
 }
 
 export interface PackageExistenceChecker {
@@ -100,6 +104,20 @@ export function scanKnownMaliciousPackages(rootPath: string, skipPaths?: string[
   for (const candidate of candidates) {
     const advisory = findAdvisory(candidate.ecosystem, candidate.name);
     if (!advisory) continue;
+
+    // Only suppress when the declared version is an exact pin we can prove
+    // sits outside the affected range. Any ambiguity (a caret/tilde range,
+    // "latest", an unparseable spec) fails toward flagging — the whole
+    // point of this check is to never let a compromised install through
+    // silently, so "unsure" must mean "keep the finding," not "clear it."
+    if (advisory.affectedVersions && candidate.version) {
+      const exact = parseExactVersion(candidate.version);
+      if (exact) {
+        const satisfies = versionSatisfiesRange(exact, advisory.affectedVersions);
+        if (satisfies === false) continue;
+      }
+    }
+
     findings.push({
       rule_id: "DEP003",
       title: "Dependency has a known-malicious or critically vulnerable release",
@@ -146,11 +164,12 @@ function collectMcpConfigPackages(rootPath: string, skipPaths?: string[]): Packa
       if (!ecosystem) continue;
       const pkg = (server.args ?? []).find((a) => !a.startsWith("-"));
       if (!pkg) continue;
-      // Strip a version suffix: name@1.2.3 / @scope/name@1.2.3
+      // Split a version suffix: name@1.2.3 / @scope/name@1.2.3
       const at = pkg.lastIndexOf("@");
       const name = at > 0 ? pkg.slice(0, at) : pkg;
+      const version = at > 0 ? pkg.slice(at + 1) : undefined;
       const lineIdx = lines.findIndex((l) => l.includes(pkg));
-      candidates.push({ ecosystem, name, file: fileRelative, line: lineIdx >= 0 ? lineIdx + 1 : 1 });
+      candidates.push({ ecosystem, name, file: fileRelative, line: lineIdx >= 0 ? lineIdx + 1 : 1, version });
     }
   }
   return dedupeCandidates(candidates);
@@ -209,7 +228,7 @@ function collectDependencyCandidates(rootPath: string): PackageCandidate[] {
 
 function readNpmCandidates(packageJsonPath: string, rootPath: string): PackageCandidate[] {
   try {
-    const raw = fs.readFileSync(packageJsonPath, "utf-8");
+    const raw = stripBom(fs.readFileSync(packageJsonPath, "utf-8"));
     const parsed = JSON.parse(raw) as {
       dependencies?: Record<string, string>;
       devDependencies?: Record<string, string>;
@@ -226,12 +245,13 @@ function readNpmCandidates(packageJsonPath: string, rootPath: string): PackageCa
     const fileRelative = path.relative(rootPath, packageJsonPath);
     const candidates: PackageCandidate[] = [];
     for (const section of sections) {
-      for (const name of Object.keys(section)) {
+      for (const [name, version] of Object.entries(section)) {
         candidates.push({
           ecosystem: "npm",
           name,
           file: fileRelative,
           line: findLineNumber(fileText, `"${name}"`),
+          version,
         });
       }
     }
@@ -243,7 +263,7 @@ function readNpmCandidates(packageJsonPath: string, rootPath: string): PackageCa
 
 function readRequirementsCandidates(requirementsPath: string, rootPath: string): PackageCandidate[] {
   try {
-    const raw = fs.readFileSync(requirementsPath, "utf-8");
+    const raw = stripBom(fs.readFileSync(requirementsPath, "utf-8"));
     const lines = raw.split(/\r?\n/);
     const fileRelative = path.relative(rootPath, requirementsPath);
     const candidates: PackageCandidate[] = [];
@@ -262,11 +282,14 @@ function readRequirementsCandidates(requirementsPath: string, rootPath: string):
       if (!nameMatch) {
         continue;
       }
+      // requirements.txt pins: "pkg==1.2.3", "pkg>=1.2.3", "pkg~=1.2.3", ...
+      const versionMatch = line.match(/(==|>=|<=|~=|>|<)\s*([\w.]+)/);
       candidates.push({
         ecosystem: "pypi",
         name: nameMatch[1],
         file: fileRelative,
         line: index + 1,
+        version: versionMatch ? versionMatch[2] : undefined,
       });
     }
 

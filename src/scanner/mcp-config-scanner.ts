@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Finding } from "./types.js";
 import { evidenceConfidence } from "./confidence.js";
+import { stripBom } from "../utils/text.js";
 
 /**
  * Scans MCP client configuration files for supply-chain and secret-handling
@@ -141,7 +142,7 @@ export function scanMcpConfigs(rootPath: string, skipPaths?: string[]): Finding[
   for (const configPath of findMcpConfigFiles(resolvedRoot, skipPaths)) {
     let raw: string;
     try {
-      raw = fs.readFileSync(configPath, "utf-8");
+      raw = stripBom(fs.readFileSync(configPath, "utf-8"));
     } catch {
       continue;
     }

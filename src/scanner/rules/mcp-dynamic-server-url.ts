@@ -29,7 +29,7 @@ const MCP_CONFIG_CONTEXTS = [
 // Request-derived taint sources
 const REQUEST_SOURCES = ["req.", "request.", "ctx.", "body.", "query.", "params.", "headers."];
 
-function isMcpConfigContext(node: Node): boolean {
+export function isMcpConfigContext(node: Node): boolean {
   let current: Node | undefined = node.getParent();
   let depth = 0;
   while (current && depth < 6) {
@@ -45,7 +45,7 @@ function isMcpConfigContext(node: Node): boolean {
   return false;
 }
 
-function isUserControlledValue(valueNode: Node, taintedVars: Set<string>): boolean {
+export function isUserControlledValue(valueNode: Node, taintedVars: Set<string>): boolean {
   const text = valueNode.getText();
   if (REQUEST_SOURCES.some((src) => text.includes(src))) return true;
   if (Node.isIdentifier(valueNode) && taintedVars.has(valueNode.getText())) return true;
@@ -56,7 +56,7 @@ function isUserControlledValue(valueNode: Node, taintedVars: Set<string>): boole
   return false;
 }
 
-function collectRequestDerivedVars(fnNode: Node): Set<string> {
+export function collectRequestDerivedVars(fnNode: Node): Set<string> {
   const tainted = new Set<string>();
   for (const param of "getParameters" in fnNode ? (fnNode as any).getParameters() : []) {
     const nameNode = param.getNameNode?.();

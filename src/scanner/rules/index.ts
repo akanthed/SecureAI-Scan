@@ -15,6 +15,7 @@ import { ruleUnvalidatedStructuredOutput } from "./unvalidated-structured-output
 // MCP rules
 import { ruleMcpToolDescInjection } from "./mcp-tool-desc-injection.js";
 import { ruleMcpDynamicServerUrl } from "./mcp-dynamic-server-url.js";
+import { ruleMcpDynamicServerCommand } from "./mcp-dynamic-server-command.js";
 import { ruleMcpUnvalidatedToolResult } from "./mcp-unvalidated-tool-result.js";
 import {
   ruleMcpCrossToolShadowing,
@@ -45,6 +46,7 @@ export const RULES: Rule[] = [
   // MCP rules (MCP001–MCP003)
   ruleMcpToolDescInjection,
   ruleMcpDynamicServerUrl,
+  ruleMcpDynamicServerCommand,
   ruleMcpUnvalidatedToolResult,
   // MCP tool-poisoning rules (MCP007–MCP009)
   ruleMcpInvisibleUnicode,
@@ -60,6 +62,9 @@ export const RULES: Rule[] = [
 // Config-file rules implemented outside the AST rule engine (mcp-config-scanner).
 export const CONFIG_RULE_IDS = ["MCP004", "MCP005", "MCP006"];
 
+// Agent Skill (SKILL.md) rules implemented outside the AST rule engine (skill-scanner).
+export const SKILL_RULE_IDS = ["SKL001", "SKL002", "SKL003"];
+
 // Dependency rules implemented in dependency-guard (DEP001/DEP002 are opt-in
 // via --check-dependencies; DEP003 runs on every scan from the offline
 // advisory list).
@@ -68,5 +73,6 @@ export const DEPENDENCY_RULE_IDS = ["DEP001", "DEP002", "DEP003"];
 export const AVAILABLE_RULE_IDS = [
   ...RULES.map((rule) => rule.id),
   ...CONFIG_RULE_IDS,
+  ...SKILL_RULE_IDS,
   ...DEPENDENCY_RULE_IDS,
 ];

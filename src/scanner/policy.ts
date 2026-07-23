@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Severity } from "./types.js";
+import { stripBom } from "../utils/text.js";
 
 export interface SecureAiPolicy {
   minSeverity?: Severity;
@@ -27,7 +28,7 @@ export function loadPolicy(rootPath: string): PolicyResult | undefined {
 
     let raw: string;
     try {
-      raw = fs.readFileSync(candidate, "utf-8");
+      raw = stripBom(fs.readFileSync(candidate, "utf-8"));
     } catch {
       continue;
     }

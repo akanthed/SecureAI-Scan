@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Finding, Severity } from "./types.js";
+import { stripBom } from "../utils/text.js";
 
 export interface BaselineEntry {
   rule_id: string;
@@ -103,7 +104,7 @@ function isValidBaselineEntry(entry: unknown): entry is BaselineEntry {
 }
 
 function readBaseline(filePath: string): BaselineFile {
-  const raw = fs.readFileSync(filePath, "utf-8");
+  const raw = stripBom(fs.readFileSync(filePath, "utf-8"));
   const parsed = JSON.parse(raw) as Partial<BaselineFile>;
   if (parsed.schema !== "secureai-baseline/v1" || !Array.isArray(parsed.findings)) {
     throw new Error(

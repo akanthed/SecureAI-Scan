@@ -5,6 +5,7 @@ import { createScanProject } from "./project.js";
 import { selectRules } from "./filters.js";
 import { scanPythonFiles } from "./python-scanner.js";
 import { scanMcpConfigs } from "./mcp-config-scanner.js";
+import { scanSkillFiles } from "./skill-scanner.js";
 import type { SourceFile } from "ts-morph";
 
 export interface ScanResult {
@@ -55,6 +56,14 @@ export function scanRepositoryDetailed(
       !options?.blockedRules?.includes(f.rule_id),
   );
   findings.push(...mcpConfigFindings);
+
+  // Agent Skill files (SKILL.md)
+  const skillFindings = scanSkillFiles(rootPath, options?.skipPaths).filter(
+    (f) =>
+      (!options?.rules || options.rules.includes(f.rule_id)) &&
+      !options?.blockedRules?.includes(f.rule_id),
+  );
+  findings.push(...skillFindings);
 
   const deduped = dedupeFindings(findings);
   const { activeFindings, ignoredFindings } = applyIgnoreAnnotations(

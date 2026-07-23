@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { stripBom } from "../utils/text.js";
 
 /**
  * AI Bill of Materials — an inventory of every AI-related component in the
@@ -141,7 +142,7 @@ export function generateBom(rootPath: string): BomResult {
   for (const manifest of ["package.json"]) {
     const p = path.join(resolved, manifest);
     try {
-      const pkg = JSON.parse(fs.readFileSync(p, "utf-8")) as Record<string, unknown>;
+      const pkg = JSON.parse(stripBom(fs.readFileSync(p, "utf-8"))) as Record<string, unknown>;
       const deps = {
         ...(pkg.dependencies as Record<string, string> | undefined),
         ...(pkg.devDependencies as Record<string, string> | undefined),
@@ -220,7 +221,7 @@ export function generateBom(rootPath: string): BomResult {
         findConfigs(full, depth + 1);
       } else if (entry.isFile() && mcpConfigNames.includes(entry.name)) {
         try {
-          const parsed = JSON.parse(fs.readFileSync(full, "utf-8")) as Record<string, unknown>;
+          const parsed = JSON.parse(stripBom(fs.readFileSync(full, "utf-8"))) as Record<string, unknown>;
           const servers =
             (parsed.mcpServers as Record<string, unknown> | undefined) ??
             (parsed.servers as Record<string, unknown> | undefined) ??

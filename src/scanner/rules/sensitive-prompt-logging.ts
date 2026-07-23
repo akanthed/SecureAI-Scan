@@ -29,6 +29,21 @@ const LOGGER_CALLEES = new Set([
 // Always-sensitive: secrets. Exact-token match, never substring.
 const SECRET_TOKENS = new Set(["password", "passwd", "apikey", "secret", "token", "credentials"]);
 
+// "token" compounds that name metadata *about* tokens (a URL, a type, a
+// lifetime) rather than a token value itself — e.g. OAuth discovery fields
+// like `token_endpoint`/`tokenType`/`tokenUrl`. Logging these leaks nothing.
+const NON_SECRET_TOKEN_SUFFIXES = new Set([
+  "endpoint",
+  "url",
+  "uri",
+  "type",
+  "expiry",
+  "expires",
+  "ttl",
+  "issuer",
+  "length",
+]);
+
 // LLM-context-sensitive: only meaningful when the file actually talks to an LLM.
 const PROMPT_TOKENS = new Set(["prompt", "prompts", "messages", "completion", "systemprompt"]);
 
@@ -51,9 +66,21 @@ function classifyArg(arg: Node): "secret" | "prompt" | undefined {
   let promptHit = false;
   for (const name of names) {
     const tokens = identifierTokens(name);
-    // Include adjacent-pair joins so API_KEY / apiKey / OPENAI_API_KEY all
-    // produce "apikey".
-    const candidates = [...tokens];
+    // Single tokens, skipping "token"/"secret" etc. when immediately
+    // followed by a metadata suffix ("token_endpoint" describes a URL, not
+    // a credential value).
+    const candidates: string[] = [];
+    for (let i = 0; i < tokens.length; i += 1) {
+      if (
+        (tokens[i] === "token" || tokens[i] === "secret") &&
+        NON_SECRET_TOKEN_SUFFIXES.has(tokens[i + 1] ?? "")
+      ) {
+        continue;
+      }
+      candidates.push(tokens[i]);
+    }
+    // Adjacent-pair joins so API_KEY / apiKey / OPENAI_API_KEY all produce
+    // "apikey".
     for (let i = 0; i < tokens.length - 1; i += 1) {
       candidates.push(tokens[i] + tokens[i + 1]);
     }

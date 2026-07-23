@@ -1,13 +1,8 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Evidence, Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
-import { evidenceConfidence } from "../confidence.js";
-import {
-  containsIdentifierNamed,
-  getLlmPromptNodes,
-  getObjectProperty,
-  isLikelyLlmCall,
-} from "./llm-rule-utils.js";
+import { demoteEvidence, evidenceConfidence, isTestFilePath } from "../confidence.js";
+import { containsIdentifierNamed, getPromptParts, isLikelyLlmCall } from "./llm-rule-utils.js";
 
 // Unambiguous names — only plausible as retrieved RAG content.
 const RAG_NAMES_SPECIFIC = new Set([
@@ -15,16 +10,17 @@ const RAG_NAMES_SPECIFIC = new Set([
   "retrieveddocs",
   "documents",
   "docs",
-  "chunks",
   "searchresults",
 ]);
 
-// "context"/"contexts"/"results" are common names for unrelated values
-// (request context, React context, i18n context, arbitrary function
-// results). Only count them as RAG content when the enclosing function
-// also shows a retrieval call — bare-name matching alone was the same
-// false-positive class fixed in the Python scanner's AI005 rule.
-const RAG_NAMES_AMBIGUOUS = new Set(["context", "contexts", "results"]);
+// "context"/"contexts"/"results"/"chunks" are common names for unrelated
+// values (request context, React context, i18n context, arbitrary function
+// results, streaming response chunks — `for await (const chunk of stream)`
+// is a bread-and-butter LLM SDK pattern with nothing to do with RAG). Only
+// count them as RAG content when the enclosing function also shows a
+// retrieval call — bare-name matching alone was the same false-positive
+// class fixed in the Python scanner's AI005 rule.
+const RAG_NAMES_AMBIGUOUS = new Set(["context", "contexts", "results", "chunks"]);
 
 const RETRIEVAL_HINT =
   /similaritysearch|similarity_search|vectorstore|vector_store|retriever|\.query\(|pinecone|chroma|weaviate|qdrant|milvus|pgvector|embeddings?\.search/i;
@@ -40,34 +36,16 @@ function enclosingScopeText(node: Node): string {
   return (fn ?? node.getSourceFile()).getText();
 }
 
+// Only the system/developer-role prompt parts count as "privileged" — a bare
+// arg or a user-role message is not the injection surface this rule targets.
+// Reuses the same role classification AI001 relies on (getPromptParts),
+// rather than a separate ad hoc parser that used to fall back to *every*
+// call argument, unfiltered by role, whenever the first arg wasn't a plain
+// `{ messages: [...] }` object literal.
 function systemOrDeveloperMessageContent(call: Node): Node[] {
-  if (!Node.isCallExpression(call)) {
-    return [];
-  }
-  const firstArg = call.getArguments()[0];
-  if (!firstArg || !Node.isObjectLiteralExpression(firstArg)) {
-    return getLlmPromptNodes(call);
-  }
-  const messages = getObjectProperty(firstArg, "messages");
-  if (!messages || !Node.isArrayLiteralExpression(messages)) {
-    return getLlmPromptNodes(call);
-  }
-
-  const nodes: Node[] = [];
-  for (const element of messages.getElements()) {
-    if (!Node.isObjectLiteralExpression(element)) {
-      continue;
-    }
-    const role = getObjectProperty(element, "role")?.getText().replace(/['"`]/g, "").toLowerCase();
-    if (role !== "system" && role !== "developer") {
-      continue;
-    }
-    const content = getObjectProperty(element, "content");
-    if (content) {
-      nodes.push(content);
-    }
-  }
-  return nodes;
+  return getPromptParts(call)
+    .filter((part) => part.role === "system" || part.role === "developer")
+    .map((part) => part.node);
 }
 
 export const ruleRagContextInjection: Rule = {
@@ -78,6 +56,9 @@ export const ruleRagContextInjection: Rule = {
     const findings: Finding[] = [];
 
     for (const sourceFile of context.sourceFiles) {
+      const relFile = getRelativeFilePath(context.rootPath, sourceFile);
+      const testFile = isTestFilePath(relFile);
+
       for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
         if (!isLikelyLlmCall(call)) {
           continue;
@@ -96,11 +77,12 @@ export const ruleRagContextInjection: Rule = {
           if (!evidence) {
             continue;
           }
+          if (testFile) evidence = demoteEvidence(evidence);
           findings.push({
             rule_id: "AI007",
             title: "RAG context injected into privileged prompt",
             severity: "high",
-            file: getRelativeFilePath(context.rootPath, sourceFile),
+            file: relFile,
             line: getNodeLine(promptNode),
             summary: "Retrieved content is mixed into a system/developer prompt.",
             description:

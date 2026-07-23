@@ -17,6 +17,7 @@ const SEVERITY_ORDER: Record<Severity, number> = {
 const CATEGORY_LABELS: Record<string, string> = {
   AI: "AI / LLM Security",
   MCP: "MCP (Model Context Protocol)",
+  SKL: "Agent Skills",
   VEC: "Vector / RAG Pipeline",
   LLM: "LLM SDK Usage",
 };
@@ -52,6 +53,9 @@ function buildTrustBoundaries(findings: Finding[]): ThreatBoundary[] {
     if (f.rule_id.startsWith("MCP")) {
       from = "MCP Server (External Tool)";
       to = "LLM Agent";
+    } else if (f.rule_id.startsWith("SKL")) {
+      from = "Skill File (Local/Untrusted)";
+      to = "LLM Agent Context";
     } else if (f.rule_id.startsWith("VEC")) {
       from = "Vector Store / Document Pipeline";
       to = "LLM Context / RAG";

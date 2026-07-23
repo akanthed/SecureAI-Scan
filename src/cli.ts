@@ -115,19 +115,27 @@ export async function runCli(argv: string[]): Promise<void> {
   program
     .command("scan")
     .argument("<path>", "Path to the repository to scan")
+    // Everyday flags
     .option("-s, --severity <level>", "Minimum severity: low | medium | high | critical", parseSeverity)
-    .option("-r, --rules <list>", "Comma-separated rule IDs to run", parseRules)
-    .option("--only-ai", "Run only AI/LLM rules (AI001–AI012)")
-    .option("--only-mcp", "Run only MCP rules (MCP001–MCP009)")
-    .option("--only-vec", "Run only Vector/RAG rules (VEC001–VEC004)")
     .option("--paranoid", "Include heuristic-tier findings (hidden by default)")
-    .option("--limit <number>", "Max rule groups shown in terminal (default: 10)", parseLimit)
     .option("--output <file>", "Save a full report as .sarif, .json, .md, or .html")
+    .option("--fail-on <severity>", "Exit 1 if findings at/above this severity exist", parseSeverity)
+    // Scope which rules run
+    .option("-r, --rules <list>", "Comma-separated rule IDs to run, e.g. AI001,MCP007", parseRules)
+    .option("--only-ai", "Run only AI/LLM rules (AI001–AI012)")
+    .option("--only-mcp", "Run only MCP rules (MCP001–MCP010)")
+    .option("--only-vec", "Run only Vector/RAG rules (VEC001–VEC004)")
+    .option("--only-skl", "Run only Agent Skill rules (SKL001–SKL003)")
+    .option(
+      "--check-dependencies",
+      "Also check package.json/requirements.txt against the npm/PyPI registry for typos and hallucinated packages (DEP001/DEP002). Not required for DEP003 (known-malicious packages) — that runs offline on every scan",
+    )
+    // CI / workflow
     .option("--baseline <file>", "Track only new/changed issues using a baseline file")
     .option("--policy <file>", "Path to a .secureai-policy.json file (auto-detected if omitted)")
-    .option("--fail-on <severity>", "Exit 1 if findings at/above this severity exist", parseSeverity)
-    .option("--min-confidence <0-1>", "Additionally hide findings below this confidence score", parseConfidence)
-    .option("--check-dependencies", "Scan package.json and requirements.txt for suspicious packages")
+    // Advanced / debugging
+    .option("--min-confidence <0-1>", "Advanced: hide findings below this exact confidence score (0.9 proven / 0.65 likely / 0.35 heuristic) — for finer control than --paranoid alone", parseConfidence)
+    .option("--limit <number>", "Max rule groups shown in terminal (default: 10)", parseLimit)
     .option("--debug", "Show scanned files and rule metadata")
     .action(
       async (
@@ -138,6 +146,7 @@ export async function runCli(argv: string[]): Promise<void> {
           onlyAi?: boolean;
           onlyMcp?: boolean;
           onlyVec?: boolean;
+          onlySkl?: boolean;
           paranoid?: boolean;
           limit?: number;
           output?: string;
@@ -164,7 +173,17 @@ export async function runCli(argv: string[]): Promise<void> {
           options.onlyAi ?? false,
           options.onlyMcp ?? false,
           options.onlyVec ?? false,
+          options.onlySkl ?? false,
         );
+
+        // Requesting DEP001/DEP002 explicitly via --rules is a clear signal
+        // to run the registry check they depend on — requiring a second,
+        // separate --check-dependencies flag on top of an explicit --rules
+        // selection was a silent no-op trap (the rule ID validated fine,
+        // then produced zero output with no indication why).
+        const checkDependencies =
+          (options.checkDependencies ?? false) ||
+          (selectedRules?.some((id) => id === "DEP001" || id === "DEP002") ?? false);
 
         const scanResult = scanRepositoryDetailed(targetPath, {
           rules: selectedRules,
@@ -173,7 +192,7 @@ export async function runCli(argv: string[]): Promise<void> {
         });
         const findings: Finding[] = [...scanResult.findings];
 
-        if (options.checkDependencies) {
+        if (checkDependencies) {
           const depFindings = await scanDependencyFilesForRisks({ rootPath: targetPath });
           findings.push(...depFindings);
         }
@@ -404,11 +423,13 @@ function resolveRuleSelection(
   onlyAi: boolean,
   onlyMcp: boolean,
   onlyVec: boolean,
+  onlySkl: boolean,
 ): string[] | undefined {
   const prefixFilters: string[] = [];
   if (onlyAi) prefixFilters.push("AI");
   if (onlyMcp) prefixFilters.push("MCP");
   if (onlyVec) prefixFilters.push("VEC");
+  if (onlySkl) prefixFilters.push("SKL");
 
   if (prefixFilters.length > 0) {
     const filtered = AVAILABLE_RULE_IDS.filter((id) =>

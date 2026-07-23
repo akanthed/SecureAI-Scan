@@ -79,6 +79,10 @@ const STRONG_PATTERNS: Array<{ re: RegExp; label: string }> = [
     re: /\byou\s+(?:must|should)\s+(?:first\s+)?(?:always\s+)?(?:run|execute|call)\b[^.]{0,60}\bbefore\s+(?:responding|answering|any)/i,
     label: "mandatory pre-action injected into the agent loop",
   },
+  {
+    re: /ignore\s+(?:all\s+|any\s+)?(?:future|subsequent|upcoming|later)\s+(?:instructions?|messages?|rules?|guardrails?|safety\s+(?:instructions?|guidelines?))/i,
+    label: "forward-looking instruction override (\"ignore future/subsequent instructions\")",
+  },
 ];
 
 const WEAK_PATTERNS: Array<{ re: RegExp; label: string }> = [
@@ -87,6 +91,10 @@ const WEAK_PATTERNS: Array<{ re: RegExp; label: string }> = [
   { re: /\bdo\s+not\s+mention\b/i, label: "\"do not mention\" directive" },
   { re: /\balways\s+include\b[^.]{0,40}\bin\s+(?:your|the)\s+(?:response|output|prompt)/i, label: "forced response content" },
   { re: /\bthis\s+is\s+a\s+(?:system|developer)\s+(?:message|instruction)\b/i, label: "role-claim in description" },
+  {
+    re: /\b(?:once|after|when)\s+(?:this\s+is\s+|you(?:'re| are)\s+)?(?:triggered|activated)\b|\b(?:the\s+)?trigger\s+(?:word|phrase)\s+(?:is\s+)?(?:seen|used|given|detected)\b|\bcondition\s+is\s+met\b/i,
+    label: "delayed/conditional activation phrasing",
+  },
 ];
 
 export function matchInjectionPhrases(text: string): InjectionPhraseResult {

@@ -21,17 +21,21 @@ export function demoteEvidence(evidence: Evidence): Evidence {
   return "heuristic";
 }
 
+// Whole path segments that indicate test/example/demo/fixture code rather
+// than production logic. Matched per-segment (not substring) so a real
+// production directory like "attestation" or "protest-bot" never collides,
+// while hyphenated conventions real repos actually use — "ecosystem-tests",
+// "integration-tests" — and top-level dirs (no leading "/" in a relative
+// path, e.g. "tests/foo.ts") are still caught.
+const NON_PRODUCTION_SEGMENT =
+  /^(tests?|__tests__|e2e|examples?|demos?|samples?|fixtures?|__fixtures__|playground|.*[-_](?:tests?|e2e))$/;
+
 export function isTestFilePath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, "/").toLowerCase();
-  return (
-    normalized.includes(".test.") ||
-    normalized.includes(".spec.") ||
-    normalized.includes("/__tests__/") ||
-    normalized.includes("/test/") ||
-    normalized.includes("/tests/") ||
-    normalized.endsWith(".test.ts") ||
-    normalized.endsWith(".spec.ts")
-  );
+  if (normalized.includes(".test.") || normalized.includes(".spec.")) {
+    return true;
+  }
+  return normalized.split("/").some((segment) => NON_PRODUCTION_SEGMENT.test(segment));
 }
 
 /**

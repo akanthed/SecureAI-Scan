@@ -1,7 +1,7 @@
 {
   "name": "secureai-scan",
   "version": "0.4.1",
-  "description": "AI security scanner with dataflow evidence — prompt injection, MCP supply chain, RAG poisoning. Evidence-tiered findings (no false-positive noise by default), SARIF for GitHub code scanning, AI-BOM with OWASP LLM Top 10 mapping.",
+  "description": "AI security scanner with dataflow evidence — prompt injection, MCP tool poisoning, Agent Skill poisoning, RAG poisoning. Evidence-tiered findings (no false-positive noise by default), SARIF for GitHub code scanning, AI-BOM with OWASP LLM/ASI/MCP Top 10 mapping.",
   "author": "Akshay Kanthed",
   "license": "MIT",
   "repository": {
@@ -34,7 +34,12 @@
     "langchain",
     "openai",
     "agent-security",
-    "ai-security"
+    "ai-security",
+    "claude",
+    "claude-skills",
+    "model-context-protocol",
+    "tool-poisoning",
+    "vulnerability-scanner"
   ],
   "engines": {
     "node": ">=20"
@@ -49,6 +54,7 @@
   "files": [
     "dist",
     "mcp-server",
+    "skills",
     "README.md",
     "LICENSE"
   ],
@@ -57,7 +63,8 @@
     "build": "npm run clean && tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "dev": "npm run build && node dist/index.js",
-    "test": "npm run build && node test/run-tests.js"
+    "test": "npm run build && node test/run-tests.js",
+    "regression": "npm run build && node scripts/regression-scan.js"
   },
   "dependencies": {
     "commander": "^14.0.3",

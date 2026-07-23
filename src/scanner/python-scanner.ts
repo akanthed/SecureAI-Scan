@@ -588,6 +588,12 @@ function checkVEC003(lines: string[], i: number, file: string): Finding | null {
   };
 }
 
+// Evidence this `description=`/`"description":` field is actually MCP tool
+// metadata (arriving from a listing/discovery call), not an unrelated
+// config or dataclass field that happens to describe something LLM-shaped
+// (e.g. a `system_prompt: str` constructor parameter's docstring).
+const MCP_LISTING_HINT = /list_tools|listtools|list_mcp_tools|mcp_tools|tools_result|available_tools/i;
+
 function checkMCP001(lines: string[], i: number, file: string): Finding | null {
   const line = lines[i];
   // Look for description field in a dict-like context
@@ -597,15 +603,18 @@ function checkMCP001(lines: string[], i: number, file: string): Finding | null {
   const matched = INJECTION_PHRASES.find((phrase) => lower.includes(phrase));
   if (!matched) return null;
 
+  const ctx = windowText(lines, i, 8, 2);
+  if (!MCP_LISTING_HINT.test(ctx)) return null;
+
   return {
-    ...findingBase("MCP001", "MCP tool description contains injection language", "critical", file, i + 1),
+    ...findingBase("MCP001", "MCP tool description contains injection language", "high", file, i + 1),
     summary: `Tool description contains injection phrase: "${matched}".`,
     description:
       "Tool descriptions are sent to the LLM as part of its context. A malicious or compromised MCP server can include override instructions in a description field, hijacking model behavior for the entire session.",
     recommendation:
       "Validate all tool descriptions against an injection-phrase blocklist before registering. Pin third-party MCP servers to known-good versions.",
-    confidence: evidenceConfidence("proven"),
-    evidence: "proven",
+    confidence: evidenceConfidence("likely"),
+    evidence: "likely",
   };
 }
 
