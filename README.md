@@ -151,7 +151,7 @@ Scanning clean? Add the badge to your own README:
 
 ## Rules
 
-**32 rules**, every one mapped to the OWASP LLM Top 10 (2025) — plus, where applicable, the OWASP Top 10 for Agentic Applications (2026, ASI) and the OWASP MCP Top 10 (2025) — and, where relevant, an EU AI Act article. `threat-model` output includes a full coverage matrix across all three frameworks.
+**33 rules**, every one mapped to the OWASP LLM Top 10 (2025) — plus, where applicable, the OWASP Top 10 for Agentic Applications (2026, ASI) and the OWASP MCP Top 10 (2025) — and, where relevant, an EU AI Act article. `threat-model` output includes a full coverage matrix across all three frameworks.
 
 | Rule | What it proves | OWASP |
 |------|----------------|-------|

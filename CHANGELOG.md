@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.0 — 2026-07-23
+
+### Added
+- **Agent Skill scanning (SKILL.md)** — new `skill-scanner.ts` walks the repo for `SKILL.md` files (Claude Skills and equivalents) and reuses the same tool-poisoning checks already applied to MCP tool metadata:
+  - **SKL001** — invisible/bidi Unicode hidden in a skill's frontmatter or body
+  - **SKL002** — agent-directed injection phrasing in a skill's frontmatter or body
+  - **SKL003** — a skill's content steers when/how a *different* skill is invoked (cross-skill shadowing)
+- **MCP010 — dynamic MCP server command from untrusted input** (critical, proven/likely) — flags a stdio transport's `command`/`args` built from request-derived data. The MCP stdio transport executes that command as a real OS process, so this is architecturally the same risk class as passing user input to `child_process.exec`
+- **DEP003 now compares actual declared versions against advisory ranges** — previously `affectedVersions` was display-only text; an exact pinned version (`package.json`, `requirements.txt`, or an MCP config server spec) is now parsed and checked against the advisory's range via a new minimal semver utility (`src/scanner/semver.ts`). Any ambiguity (a caret/tilde range, an unparseable spec) still fails toward flagging, never toward silently clearing a finding
+- `test/cli.test.js` and `test/dependency-guard.test.js` — new CLI-layer and version-gating regression tests (see hard requirements #2 and #4 in `CLAUDE.md`)
+
+### Fixed
+- **AI002 (sensitive prompt/response logging) false-positived on OAuth metadata fields** — `token_endpoint`, `tokenType`, `tokenUrl`, `tokenExpiry`, and similar `token`/`secret` compounds followed by a metadata suffix (`endpoint`, `url`, `uri`, `type`, `expiry`, `expires`, `ttl`, `issuer`, `length`) are no longer classified as leaked secret values
+- **AI007 (RAG context injection) treated `chunks` as unambiguous RAG evidence** — `chunks` is an extremely common LLM streaming-response variable name (`for await (const chunk of stream)`) with nothing to do with retrieval. It's now grouped with the other ambiguous names (`context`, `contexts`, `results`) and only counts as RAG content when the enclosing function also shows an actual retrieval call
+- **AI007 prompt-part extraction now reuses `getPromptParts`** instead of a rule-local ad hoc parser, and demotes evidence in matched test/example paths — consistent with the shared-helper convention the rest of the rules follow
+- **AI008 (system prompt leakage)** — narrowed to multi-word phrases specific enough that ordinary prose can't collide, plus a regex for labeled secret values, instead of a raw substring search on words like "secret"/"token"
+- **Windows/BOM safety** — `dependency-guard.ts`'s `package.json`/`requirements.txt` reads now go through `stripBom` before `JSON.parse`, matching the fix already applied elsewhere for DEP001–DEP003
+
 ## 0.4.1 — 2026-07-21
 
 ### Fixed
