@@ -5,7 +5,7 @@ Thanks for taking a look. We take security issues seriously, even in an early-st
 ## Reporting a Vulnerability
 If you find a security issue:
 - Please do not open a public GitHub issue.
-- Email us at `security@example.com` with:
+- Email us at `akshay.kanthed007@gmail.com` with:
   - A clear description of the issue
   - Steps to reproduce
   - Impact assessment (best effort)
