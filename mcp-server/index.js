@@ -2,10 +2,17 @@
 /**
  * SecureAI-Scan MCP Server
  *
- * Exposes three tools to Claude (and any MCP-compatible LLM host):
- *   - scan_repository — scan a local path, return findings with evidence tiers
- *   - explain_rule    — return rule explanation with OWASP mapping
- *   - generate_bom    — AI Bill of Materials for a repository
+ * Exposes four tools to Claude (and any MCP-compatible LLM host):
+ *   - scan_repository       — scan a local path, return findings with evidence tiers
+ *   - explain_rule          — return rule explanation with OWASP mapping
+ *   - generate_bom          — AI Bill of Materials for a repository
+ *   - scan_untrusted_target — fetch and scan a skill/MCP server BEFORE installing it
+ *
+ * scan_untrusted_target is the pre-install wedge from inside the agent
+ * itself: when Claude is about to recommend or install a skill or MCP
+ * server, it can scan the target first — no clone, no config, nothing
+ * fetched is ever executed. Same fetch-target.ts used by the `secureai-scan
+ * skill`/`secureai-scan mcp` CLI commands.
  *
  * Register in claude_desktop_config.json:
  *   {
@@ -23,18 +30,28 @@
 import fs from "node:fs";
 import readline from "node:readline";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distRoot = path.resolve(__dirname, "..", "dist");
 
-// Dynamic imports from compiled dist
-const { scanRepositoryDetailed } = await import(`${distRoot}/scanner/scan.js`);
-const { filterFindingsBySeverity } = await import(`${distRoot}/scanner/filters.js`);
-const { StaticExplainer } = await import(`${distRoot}/scanner/explainer.js`);
-const { catalogFor } = await import(`${distRoot}/scanner/catalog.js`);
-const { generateBom } = await import(`${distRoot}/scanner/bom.js`);
-const { AVAILABLE_RULE_IDS } = await import(`${distRoot}/scanner/rules/index.js`);
+// Dynamic imports from compiled dist. A raw Windows path ("D:\...") is not a
+// valid specifier for import() — Node's ESM loader requires a file:// URL
+// for absolute paths, and throws ERR_UNSUPPORTED_ESM_URL_SCHEME otherwise.
+// Wrapping every dist import in pathToFileURL is what makes this server
+// startable on Windows at all (it previously failed on the very first
+// import, before any tool could run).
+const distImport = (relPath) => import(pathToFileURL(path.join(distRoot, relPath)).href);
+
+const { scanRepositoryDetailed } = await distImport("scanner/scan.js");
+const { filterFindingsBySeverity } = await distImport("scanner/filters.js");
+const { StaticExplainer } = await distImport("scanner/explainer.js");
+const { catalogFor } = await distImport("scanner/catalog.js");
+const { generateBom } = await distImport("scanner/bom.js");
+const { AVAILABLE_RULE_IDS } = await distImport("scanner/rules/index.js");
+const { resolveTarget } = await distImport("scanner/fetch-target.js");
+const { scanSkillFiles, findSkillFiles } = await distImport("scanner/skill-scanner.js");
+const { scanKnownMaliciousPackages } = await distImport("scanner/dependency-guard.js");
 
 const OWN_VERSION = (() => {
   try {
@@ -108,6 +125,30 @@ const TOOLS = [
         },
       },
       required: ["path"],
+    },
+  },
+  {
+    name: "scan_untrusted_target",
+    description:
+      "Fetch and scan a single Agent Skill or MCP server BEFORE it is trusted/installed — no repo, no config. Accepts a local path, a git URL, a GitHub \"owner/repo\" shorthand, or (for MCP servers) a bare npm package name. Nothing fetched is ever executed: npm targets are downloaded with 'npm pack' (tarball only, no install, no lifecycle scripts), git targets with 'git clone --depth 1'. Use this before recommending or installing any third-party skill or MCP server.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        target: {
+          type: "string",
+          description: "Local path, git URL, \"owner/repo\", or npm package name to fetch and scan.",
+        },
+        kind: {
+          type: "string",
+          enum: ["skill", "mcp"],
+          description: "'skill' scans only for Agent Skill poisoning/evasion (SKL001-005). 'mcp' runs the full rule set plus DEP003 advisories, appropriate for an MCP server package.",
+        },
+        paranoid: {
+          type: "boolean",
+          description: "Include heuristic-tier findings (default: false — only proven/likely).",
+        },
+      },
+      required: ["target", "kind"],
     },
   },
 ];
@@ -204,6 +245,59 @@ function handleGenerateBom(args) {
   return generateBom(targetPath);
 }
 
+function handleScanUntrustedTarget(args) {
+  const target = args.target;
+  const kind = args.kind;
+  if (!target) throw new Error("'target' is required.");
+  if (kind !== "skill" && kind !== "mcp") throw new Error("'kind' must be 'skill' or 'mcp'.");
+  const paranoid = args.paranoid ?? false;
+
+  let resolved;
+  try {
+    resolved = resolveTarget(target);
+  } catch (err) {
+    throw new Error(`Could not fetch "${target}": ${err?.message ?? String(err)}`);
+  }
+
+  try {
+    let findings;
+    if (kind === "skill") {
+      if (findSkillFiles(resolved.dir).length === 0) {
+        return { target: resolved.label, kind, fetched_as: resolved.kind, note: "No SKILL.md found under this target — nothing to scan." };
+      }
+      findings = scanSkillFiles(resolved.dir);
+    } else {
+      const scanResult = scanRepositoryDetailed(resolved.dir);
+      findings = [...scanResult.findings, ...scanKnownMaliciousPackages(resolved.dir)];
+    }
+
+    const evidenceFiltered = paranoid ? findings : findings.filter((f) => f.evidence !== "heuristic");
+
+    return {
+      target: resolved.label,
+      kind,
+      fetched_as: resolved.kind,
+      executed_anything: false,
+      total_findings: evidenceFiltered.length,
+      hidden_heuristic: findings.length - evidenceFiltered.length,
+      findings: evidenceFiltered.map((f) => ({
+        rule_id: f.rule_id,
+        title: f.title,
+        severity: f.severity,
+        evidence: f.evidence,
+        owasp: catalogFor(f.rule_id)?.owasp,
+        file: f.file,
+        line: f.line,
+        summary: f.summary,
+        trace: f.trace,
+        recommendation: f.recommendation,
+      })),
+    };
+  } finally {
+    resolved.cleanup();
+  }
+}
+
 // ── JSON-RPC dispatcher ───────────────────────────────────────────────────
 
 function send(obj) {
@@ -244,6 +338,7 @@ function dispatch(req) {
       if (toolName === "scan_repository") result = handleScanRepository(args);
       else if (toolName === "explain_rule") result = handleExplainRule(args);
       else if (toolName === "generate_bom") result = handleGenerateBom(args);
+      else if (toolName === "scan_untrusted_target") result = handleScanUntrustedTarget(args);
       else { send(errResp(id, -32601, `Unknown tool: "${toolName}"`)); return; }
 
       send({

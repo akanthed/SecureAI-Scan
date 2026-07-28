@@ -68,7 +68,7 @@ node dist/index.js bom .
 
 - **TS/JS**: AST-based via `ts-morph` (`src/scanner/project.ts` builds the `Project`; rules in `src/scanner/rules/*.ts` walk the AST).
 - **Python**: regex-pattern based, not AST (`src/scanner/python-scanner.ts`). Patterns for LLM SDK calls, request-input taint sources, vector store calls, and exec sinks are matched line-by-line with a small taint-propagation pass. Being regex-based, it's more prone to context-free matches than the AST rules — see the MCP001 false-positive class above.
-- **Config/content files scanned off disk directly** (not via the ts-morph `Project`): `src/scanner/mcp-config-scanner.ts` (`.mcp.json`, `claude_desktop_config.json`, `.cursor/mcp.json` → `MCP004`–`MCP006`) and `src/scanner/skill-scanner.ts` (`SKILL.md` Agent Skill files → `SKL001`–`SKL003`, reusing the same invisible-Unicode/injection-phrase/cross-reference checks in `tool-poisoning-checks.ts` that the MCP tool-poisoning rules use).
+- **Config/content files scanned off disk directly** (not via the ts-morph `Project`): `src/scanner/mcp-config-scanner.ts` (`.mcp.json`, `claude_desktop_config.json`, `.cursor/mcp.json` → `MCP004`–`MCP006`) and `src/scanner/skill-scanner.ts` (Agent Skill bundles → `SKL001`–`SKL005`, reusing the same invisible-Unicode/injection-phrase/cross-reference checks in `tool-poisoning-checks.ts` that the MCP tool-poisoning rules use).
 - **Dependency advisories** (`DEP001`–`DEP003`) run out of `src/scanner/dependency-guard.ts` against a curated offline list in `src/scanner/advisories.ts`. DEP003 (documented malicious/CVE packages) always runs; DEP001/DEP002 (registry lookups, typosquat detection) are opt-in via `--check-dependencies` since they need network access.
 
 `src/scanner/scan.ts` (`scanRepositoryDetailed`) is the entry point that runs all of the above, merges findings, dedupes, and applies `// secureai-ignore RULE_ID: reason` suppression comments.
@@ -78,6 +78,15 @@ node dist/index.js bom .
 Every AST rule lives in `src/scanner/rules/` and exports a `Rule` object (`id`, `title`, `severity`, `run(context)`). New rules must be registered in `src/scanner/rules/index.ts`'s `RULES` array (or the adjacent `CONFIG_RULE_IDS`/`SKILL_RULE_IDS`/`DEPENDENCY_RULE_IDS` for the non-AST scanners) — this is also the source of truth for `AVAILABLE_RULE_IDS`.
 
 Shared helpers: `src/scanner/rules/llm-rule-utils.ts` (resolves whether a call is a real LLM SDK sink via import resolution, extracts prompt message parts *with role* via `getPromptParts` — always prefer this over writing a new ad hoc prompt-part extractor, since a rule-specific reimplementation is exactly what caused the AI007 false-positive class) and `src/utils/ast.ts` (node/line helpers, string-concat detection).
+
+### Evasion resistance (skill bundles)
+
+Two modules exist specifically to defeat the published scanner-evasion techniques in *Cloak and Detonate* (arXiv:2607.02357) and the Gecko Security test-file vector. Both invert conventions that hold everywhere else in this codebase, deliberately:
+
+- **`src/scanner/deobfuscate.ts`** — content checks match against normalized *variants* (invisible-stripped, homoglyph-folded, string-splice-joined, intra-word-break-joined) instead of one byte sequence. `matchAcrossVariants` compares against the *set* of raw hits, not "did the raw text match at all" — otherwise an attacker masks the evasion signal by leaving one benign phrase in the clear. **A hit found only after deobfuscation is promoted to `proven`, not demoted**: prose does not contain a zero-width joiner inside "ignore previous instructions". This is the one place where a heuristic transform *raises* evidence, and it is justified because the concealment is the evidence.
+- **`src/scanner/skill-bundle.ts`** — walks a skill's whole directory, ignoring the skip-lists used elsewhere (`build/`, `docs/`, `.git/`, renamed extensions, oversized files are head-read not skipped). Inside a bundle's `.git/`, any file that is not a git internal (see `GIT_INTERNAL_ENTRIES`) is `proven`-tier on its own — nothing else writes there. **SKL005 deliberately does not call `isTestFilePath`**: a payload in `*.test.ts` is the published attack precisely because every other scanner demotes or skips it, and test runners auto-execute those files. Do not "fix" that by adding the demotion back.
+
+Because a bundle can be an entire repository (when `SKILL.md` sits at a repo root), both bundle rules require a *linked* conjunction rather than co-occurrence: SKL004's unpack directive must name the blob, and SKL005's credential read and egress must be within `EXFIL_PROXIMITY_LINES` of each other in the same file. Loosening either is how these rules would start firing on ordinary monorepos.
 
 ### The evidence-tier contract (this is the core design principle)
 

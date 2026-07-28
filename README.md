@@ -50,6 +50,7 @@ It's the first scanner mapped to **all three** OWASP AI security frameworks — 
 - **MCP tool-poisoning detection.** Catches the pattern behind the WhatsApp MCP rug-pull and postmark-mcp backdoor — invisible Unicode, agent-directed injection phrases, and cross-tool shadowing in tool names/descriptions, statically, before you ever run the server.
 - **MCP command-injection detection.** Flags MCP stdio transport `command`/`args` built from request data — the pattern behind the 2026 MCP STDIO RCE disclosure.
 - **Agent Skill poisoning detection.** The same invisible-Unicode, injection-phrase, and shadowing checks applied to `SKILL.md` files — Agent Skills load into context wholesale, so a poisoned skill is a poisoned tool description by another name.
+- **Evasion-resistant skill scanning.** Skill bundles are scanned as *directories*, not just their `SKILL.md`, and every content check runs against deobfuscated variants of the text. This targets the published techniques — homoglyphs, zero-width splitting, payloads staged in `.git/` or `build/`, exfiltration hidden in a `*.test.ts` file — that bypassed **>90% of the nine scanners** surveyed in *Cloak and Detonate* (arXiv:2607.02357). See [Evasion resistance](#evasion-resistance).
 - **Known-malicious package advisories, version-aware.** Checks every dependency and every MCP-launched package against a curated advisory list (documented backdoors, critical CVEs) — offline, on every scan, no flag required. Clears a finding once you've actually upgraded past the affected range; stays flagged on any ambiguous or unpinned version, never silently.
 - **Local-first.** Nothing leaves your machine.
 
@@ -108,6 +109,18 @@ Everything else is there when you need it. `secureai-scan scan . --help` shows a
 | `--limit <n>` | max rule groups shown in the terminal (default `10`) — full detail always goes to `--output` |
 | `--debug` | print every file scanned and which rules ran |
 
+**Scan before you install — no clone, no config:**
+
+```bash
+secureai-scan skill anthropics/skills          # a GitHub "owner/repo" shorthand
+secureai-scan skill https://github.com/…       # or a full git URL
+secureai-scan skill ./some/local/skill-dir     # or a local path
+secureai-scan mcp some-mcp-server-package      # a bare npm package name
+secureai-scan mcp owner/mcp-server-repo        # or git, same as `skill`
+```
+
+`skill` and `mcp` fetch the target and scan it, then delete the fetched copy (`--keep` to inspect it instead). Nothing fetched is ever executed: an npm target is downloaded with `npm pack` — the tarball only, no `install`, no lifecycle scripts — and a git target is a plain `git clone --depth 1`. This is the moment that matters most: before a skill lands in `~/.claude/skills/` or a server lands in `.mcp.json`, not after.
+
 **Other commands:**
 
 ```bash
@@ -151,7 +164,7 @@ Scanning clean? Add the badge to your own README:
 
 ## Rules
 
-**33 rules**, every one mapped to the OWASP LLM Top 10 (2025) — plus, where applicable, the OWASP Top 10 for Agentic Applications (2026, ASI) and the OWASP MCP Top 10 (2025) — and, where relevant, an EU AI Act article. `threat-model` output includes a full coverage matrix across all three frameworks.
+**35 rules**, every one mapped to the OWASP LLM Top 10 (2025) — plus, where applicable, the OWASP Top 10 for Agentic Applications (2026, ASI) and the OWASP MCP Top 10 (2025) — and, where relevant, an EU AI Act article. `threat-model` output includes a full coverage matrix across all three frameworks.
 
 | Rule | What it proves | OWASP |
 |------|----------------|-------|
@@ -177,9 +190,11 @@ Scanning clean? Add the badge to your own README:
 | MCP008 | Agent-directed injection phrases in MCP tool descriptions | LLM01 · MCP03 |
 | MCP009 | A tool description that steers calls to a different tool (shadowing) | LLM01 · MCP03 |
 | MCP010 | MCP stdio server command/args constructed from user input (RCE) | LLM03 · MCP05 |
-| SKL001 | Invisible/bidi Unicode in an Agent Skill file (`SKILL.md`) | LLM01 |
-| SKL002 | Agent-directed injection phrasing in a skill's description or body | LLM01 |
+| SKL001 | Invisible/bidi Unicode anywhere in an Agent Skill bundle | LLM01 |
+| SKL002 | Agent-directed injection phrasing in a skill's description or body (matched through obfuscation) | LLM01 |
 | SKL003 | A skill's content steers when/how a different skill is used (shadowing) | LLM01 |
+| SKL004 | Staged/self-extracting payload: opaque blob + instructions to decode and run it | LLM03 · MCP04 |
+| SKL005 | Credential read + hardcoded external egress in a bundle companion file | LLM02 · MCP04 |
 | VEC001 | Vector search without a tenant/user filter | LLM08 |
 | VEC002 | Unbounded or user-controlled search limit | LLM10 |
 | VEC003 | User content ingested into a shared vector store | LLM04 |
@@ -192,7 +207,7 @@ Scanning clean? Add the badge to your own README:
 
 ## MCP server (use it from Claude)
 
-The package ships an MCP server exposing `scan_repository`, `explain_rule`, and `generate_bom`:
+The package ships an MCP server exposing `scan_repository`, `explain_rule`, `generate_bom`, and `scan_untrusted_target` (fetch and scan a skill or MCP server before Claude recommends installing it — same fetch-without-executing behavior as the `skill`/`mcp` CLI commands):
 
 ```json
 {
@@ -208,6 +223,50 @@ The package ships an MCP server exposing `scan_repository`, `explain_rule`, and 
 ## Claude Skill
 
 For Claude Code / Claude.ai users, [`skills/secureai-scan/SKILL.md`](skills/secureai-scan/SKILL.md) teaches Claude when to run a scan (reviewing AI/LLM code, or checking an MCP server/Agent Skill before you install it) and how to read the results — no separate process to run, unlike the MCP server above. Copy the `skills/secureai-scan/` directory into your `.claude/skills/` to use it.
+
+## Evasion resistance
+
+In July 2026, two pieces of public research showed that Agent Skill scanners are trivially bypassed.
+
+**[Cloak and Detonate](https://arxiv.org/abs/2607.02357)** (Ji, Xu, Li, Gao, Wei, Wang & Cheung — HKUST, arXiv:2607.02357) ran an adversarial study against **nine** published skill scanners using 1,613 in-the-wild malicious skills. Two attack families, both of which preserve the payload exactly:
+
+- **Reify** — rewrite the bytes a rule matches, while the agent still reassembles the original at runtime. **>80% bypass** on most static scanners.
+- **Disperse / SFS packing** — move the payload outside the rule's scope: into a directory the scanner skips, behind a renamed extension, or archived and encoded into `.git/`, with a benign cover `SKILL.md` that rebuilds it on first run. **≥90% bypass on every scanner tested**, ≥96% on most. One hybrid scanner's detection rate fell from ~99% to ~10%.
+
+Separately, **Gecko Security** ([VentureBeat](https://venturebeat.com/security/anthropic-skill-scanners-passed-every-check-malicious-code-test-file)) shipped a payload in a `*.test.ts` file. Every public scanner skipped it — but Jest and Vitest auto-discover and execute those files on the next `npm test`.
+
+SecureAI-Scan handles each published technique. Every row below has a corresponding test in [`test/deobfuscate.test.js`](test/deobfuscate.test.js) or a fixture in [`test-fixtures/vulnerable/skills/`](test-fixtures/vulnerable/skills):
+
+| Technique (paper's name) | Example | How it's handled |
+|---|---|---|
+| Zero-width insertion | `Ign‍ore all pre‍vious…` | Text is matched against invisible-stripped variants |
+| Confusable glyphs | `сurl` (Cyrillic `с`) | Homoglyph folding to ASCII before matching |
+| Case flip | `EvAl` | All content patterns are case-insensitive |
+| Variable splicing | `'cu' + 'rl'` | Adjacent string literals joined before matching |
+| Per-line splitting | `ev`⏎`al(x)` | Intra-word line breaks joined as an extra variant |
+| Per-file extraction | payload in a sourced helper | Whole bundle is scanned, not just `SKILL.md` |
+| Directory relocation | `scripts/x.sh` → `build/x.sh` | No directory skip-list inside a bundle |
+| Extension renaming | `x.sh` → `x.txt` | Files are scanned by content, not extension |
+| Size padding | pad past the scanner's cap | Oversized files are head-read, never skipped |
+| SFS packing | payload in `.git/skillpack.dat` | Any non-git file under a bundle's `.git/` is `proven` (SKL004) |
+| Test-file staging | payload in `*.test.ts` | Bundle scanning deliberately does **not** demote test paths (SKL005) |
+
+### This does not weaken the precision contract
+
+Deobfuscation is usually a precision risk — more matches, more noise. Here the logic is inverted: **a match that appears only after deobfuscation is promoted to `proven`, not demoted.** Ordinary documentation does not contain a zero-width joiner inside "ignore previous instructions", nor a Cyrillic `с` inside `curl`. The concealment is itself affirmative evidence of intent.
+
+The comparison is against the *set* of raw matches, not merely "did the raw text match at all" — otherwise an attacker could mask the signal by leaving one innocuous phrase in the clear.
+
+The two new bundle rules fire only on conjunctions, never on a keyword:
+
+- **SKL004** needs an opaque blob **and** an unpack directive that *references that blob by name* — a README mentioning `tar -x` next to an unrelated binary asset is not enough. Real archives (gzip/zip/png/pdf/wasm — checked by magic bytes, not extension) are never "opaque" in the first place, however they're compressed.
+- **SKL005** needs a concrete credential *signal* — a path (`~/.aws/credentials`, not the word "token") or bulk environment-variable enumeration (`os.environ.items()`, not `os.environ["API_KEY"]`) — **and** egress to a hardcoded non-local host, **within 25 lines of each other in the same file**, or a remote fetch that gets executed after being reassigned through one or more renames. A publish helper that reads `~/.npmrc` in one function and calls a registry forty lines later stays clean, and reading one named env var for an API call is never flagged — both shapes are pinned as safe fixtures.
+
+Validated against two real-world corpora, not just fixtures we wrote ourselves: **0 findings across all 18 real skill bundles in [anthropics/skills](https://github.com/anthropics/skills)** and all 14 in vercel/ai, and **6/6 correct on [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner)'s labeled eval corpus** (20 skills, each with an `_expected.json` verdict) with zero false positives on anything labeled safe. See [Testing & benchmarking](#testing--benchmarking).
+
+### What this is not
+
+Honest limitation: the paper's conclusion is that runtime detonation beats static analysis, and that is correct. An adaptive adversary who knows these rules can write a transformation they don't cover. What changes here is the *cost* of evasion — the published, currently-circulating techniques no longer work, and the obfuscation needed to defeat them now itself raises the finding's severity. **Static scanning is a filter, not a security boundary.** Treat an untrusted skill as untrusted code regardless of what any scanner says.
 
 ## The precision contract
 
@@ -237,9 +296,11 @@ npm run regression -- --fresh     # re-clone everything first
 npm run regression -- openai-node # scan just one repo by name
 ```
 
-[`scripts/regression-scan.js`](scripts/regression-scan.js) clones a curated, diverse set of real public repos (OpenAI/Anthropic/Vercel AI SDKs, the official MCP servers and TypeScript SDK, LlamaIndex — spanning TS and Python, SDK-consumer example code and SDK-author source) and scans each with the built CLI. There's no fixed pass/fail threshold — upstream repos change — so every `proven`/`likely` finding gets read against its source line by hand. Anything that isn't a genuine issue is a rule bug, fixed at the root cause and locked in permanently as a new `test-fixtures/safe/` fixture.
+[`scripts/regression-scan.js`](scripts/regression-scan.js) clones a curated, diverse set of real public repos (OpenAI/Anthropic/Vercel AI SDKs, the official MCP servers and TypeScript SDK, LlamaIndex, plus [anthropics/skills](https://github.com/anthropics/skills) and [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) for skill-bundle coverage — spanning TS and Python, SDK-consumer example code and SDK-author source) and scans each with the built CLI. There's no fixed pass/fail threshold — upstream repos change — so every `proven`/`likely` finding gets read against its source line by hand. Anything that isn't a genuine issue is a rule bug, fixed at the root cause and locked in permanently as a new `test-fixtures/safe/` fixture.
 
-Real numbers from the last run (findings at default evidence level, no `--paranoid`):
+**Skill-bundle coverage gets its own line** because `cisco-ai-defense/skill-scanner`'s `evals/` corpus is labeled — each of its 20 fixtures ships an `_expected.json` verdict and sits under a directory literally named `malicious/` or `safe/`, so it doubles as a recall check, not just a precision one: **6/6 in-scope malicious fixtures fire, 0 findings on anything labeled safe**, and 0 findings across all 18 real bundles in `anthropics/skills` and all 14 in `vercel/ai`. (The remaining Cisco categories — SQL injection, path traversal, resource exhaustion, generic `eval()` of a function argument, a payload deliberately split across four files — are either out of the documented LLM/MCP/RAG scope or beyond same-file conjunction analysis; see the [0.6.0 changelog entry](CHANGELOG.md) for the specific reasoning on each.)
+
+Historical before/after from the run that drove the original precision fixes (findings at default evidence level, no `--paranoid`):
 
 | Repo | Before | After | What was wrong |
 |------|-------:|------:|-----------------|
@@ -249,7 +310,23 @@ Real numbers from the last run (findings at default evidence level, no `--parano
 | [modelcontextprotocol/typescript-sdk](https://github.com/modelcontextprotocol/typescript-sdk) | 3 | 0 | `token_endpoint`/`tokenType`-style OAuth metadata fields flagged as leaked secrets |
 | [run-llama/llama_index](https://github.com/run-llama/llama_index) | 18 | 15 | A Python check flagged any `description=` field containing "system prompt" as `proven` MCP tool poisoning, regardless of context. The remaining 15 are `VEC001` hits on the library's own generic retriever definitions — scanning a vector-DB SDK's own source, not application code, so a filter can't exist to check; an honest, inherent limit, not a bug |
 
-The single remaining `vercel/ai` finding, and all `modelcontextprotocol/servers` / `anthropics/anthropic-sdk-python` results (zero, even at `--paranoid`), are genuine — reviewed by hand, not assumed.
+**Current run (v0.6.0, 2026-07-28)** — upstream repos have grown substantially since the table above, so the counts have moved:
+
+| Repo | Findings | Rules | Status |
+|------|---------:|-------|--------|
+| openai-node, anthropic-sdk-typescript, anthropic-sdk-python, modelcontextprotocol/typescript-sdk, modelcontextprotocol/servers | 0 | — | clean |
+| [anthropics/skills](https://github.com/anthropics/skills) (18 real skill bundles) | 0 | — | clean — pure precision check for SKL001–005 |
+| [vercel/ai](https://github.com/vercel/ai) (5,511 files) | 0 | — | **was 40** (AI001, AI003, AI005, AI010, MCP002) before triage — every one hand-reviewed against source and confirmed a false positive, traced to 3 independent root-cause bugs (see below), fixed, and re-confirmed clean on a full re-scan |
+| [run-llama/llama_index](https://github.com/run-llama/llama_index) | 46 | VEC001 | inherent limit, not a bug — the library's own generic retriever definitions, where no tenant filter can exist to find |
+| [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | 7 | SKL001, SKL002, SKL005 | **all on fixtures labeled `malicious/`** — 6/6 in-scope, 0 on anything labeled `safe/` |
+
+The `vercel/ai` triage found three real, root-caused bugs — none specific to the v0.6.0 skill rules, all in shared logic used across many rules:
+
+1. **`resolveLlmSink` treated any call resolved to an LLM SDK module as a model invocation, regardless of method name** — flagging `isToolUIPart` (a type guard the `ai` package exports right alongside `generateText`) as an LLM call. This alone caused 3 of the 5 finding groups (AI001, AI003, AI010).
+2. **`DANGEROUS_CALLEES` in AI005 includes `"query"` for SQL-injection-style sinks, but `"query"` is also a legitimate LLM/agent invocation verb** — `claudeSdk.query({ prompt, options })`, the Claude Agent SDK's own model call, was flagged as "LLM output passed to a dangerous sink" purely because of the shared method name.
+3. **`REQUEST_SOURCES` (duplicated identically across MCP002, MCP010, VEC003) matched a bare `"params."`** — any function parameter conventionally named `params`, not necessarily HTTP request data. A URL-scheme validator (`assertOpenLinkParams(params: unknown)`) got flagged as "MCP server URL from user input."
+
+All three fixed at the root cause (not the specific call site) and pinned as permanent fixtures under `test-fixtures/`. Full details in `CHANGELOG.md`.
 
 **3. Vulnerable-vs-patched validation — proves recall, not just precision.**
 

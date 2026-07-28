@@ -26,8 +26,18 @@ const MCP_CONFIG_CONTEXTS = [
   "toolconfig",
 ];
 
-// Request-derived taint sources
-const REQUEST_SOURCES = ["req.", "request.", "ctx.", "body.", "query.", "params.", "headers."];
+// Request-derived taint sources. "req."/"request."/"ctx." are specific
+// enough to stand alone (an object actually named that is overwhelmingly an
+// HTTP request/context in practice), and already cover genuine chained
+// access like "req.body.serverUrl" or "ctx.request.query.url" via substring
+// matching. Bare "body."/"query."/"params."/"headers." are deliberately NOT
+// included: found via a false positive on `assertOpenLinkParams(params:
+// unknown) { ... return { url: params.url } }` in vercel/ai, a URL-scheme
+// validator whose parameter happens to be named "params" — an extremely
+// common convention for "this function's arguments", unrelated to an actual
+// HTTP request. Matching that bare name treated any function taking a
+// "params"/"body"/"query"/"headers"-named argument as request-tainted.
+const REQUEST_SOURCES = ["req.", "request.", "ctx."];
 
 export function isMcpConfigContext(node: Node): boolean {
   let current: Node | undefined = node.getParent();

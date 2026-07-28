@@ -68,7 +68,12 @@ const STRONG_PATTERNS: Array<{ re: RegExp; label: string }> = [
     label: "pseudo-system tag in description",
   },
   {
-    re: /\b(?:read|cat|open|access|fetch|load)\b[^.]{0,60}(?:~\/\.ssh|id_rsa|id_ed25519|\.env\b|\.aws\/credentials|\.netrc|private[_ ]key|api[_ ]?keys?\b)/i,
+    // Every alternative must be a concrete credential *location* — a path or
+    // a filename. A bare "API keys" is ordinary English: the AI SDK's own
+    // skill documentation says "Load API keys securely using loadApiKey",
+    // which is security advice, not an exfiltration directive. Requiring a
+    // path/extension shape is what separates the two.
+    re: /\b(?:read|cat|open|access|fetch|load)\b[^.]{0,60}(?:~\/\.ssh|id_rsa|id_ed25519|\.env\b|\.aws\/credentials|\.netrc|private[_ ]key(?:\.[a-z0-9]+|\s+file)|api[_ ]?keys?\.(?:json|txt|ya?ml|env|ini|cfg)|(?:the\s+)?api[_ ]?keys?\s+file)/i,
     label: "instruction to read credential files",
   },
   {
@@ -117,19 +122,52 @@ const DIRECTIVE_RE = /\b(when|whenever|before|after|instead\s+of|prior\s+to)\b[^
  * behavioral directive ("when X is called, first…") — the tool-shadowing
  * attack. Tool names shorter than 4 chars are skipped: they collide with
  * ordinary words far too often.
+ *
+ * Two precision constraints, both added after the AI SDK's own skill
+ * documentation tripped this rule three times:
+ *
+ *  1. The directive and the tool name must appear in the *same sentence*.
+ *     Scanning a whole multi-page skill body for "a directive somewhere and a
+ *     sibling skill's name somewhere" matches almost any long document that
+ *     mentions its neighbours — "Reuse tools when appropriate" 200 lines away
+ *     from a reference to another skill is not shadowing.
+ *
+ *  2. The name must not be part of a package specifier or path. `\b` does not
+ *     help here because "-" and "/" are already non-word characters, so a
+ *     skill named "ai-sdk" matched inside every "@ai-sdk/provider-utils" in
+ *     the file.
  */
+function referencesToolName(segment: string, toolName: string): boolean {
+  const escaped = toolName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Reject when preceded by @ or /, or followed by / — i.e. it is a package
+  // or path component rather than a standalone reference to the tool.
+  const re = new RegExp(`(^|[^\\w@/-])${escaped}(?![\\w/-])`, "i");
+  return re.test(segment);
+}
+
+/** Split into sentences, also breaking on newlines and list markers. */
+function sentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?:])\s+|\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
 export function findCrossToolReference(
   text: string,
   ownName: string,
   allToolNames: Iterable<string>,
 ): CrossToolHit | undefined {
-  const directive = DIRECTIVE_RE.exec(text);
-  if (!directive) return undefined;
-  for (const other of allToolNames) {
-    if (other === ownName || other.length < 4) continue;
-    const escaped = other.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    if (new RegExp(`\\b${escaped}\\b`, "i").test(text)) {
-      return { referencedTool: other, directive: directive[0] };
+  const names = [...allToolNames].filter((n) => n !== ownName && n.length >= 4);
+  if (names.length === 0) return undefined;
+
+  for (const segment of sentences(text)) {
+    const directive = DIRECTIVE_RE.exec(segment);
+    if (!directive) continue;
+    for (const other of names) {
+      if (referencesToolName(segment, other)) {
+        return { referencedTool: other, directive: directive[0] };
+      }
     }
   }
   return undefined;

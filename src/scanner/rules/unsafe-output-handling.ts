@@ -2,7 +2,7 @@ import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { evidenceConfidence } from "../confidence.js";
-import { isLikelyLlmCall } from "./llm-rule-utils.js";
+import { isLikelyLlmCall, resolveLlmSink } from "./llm-rule-utils.js";
 
 // Note: JSON.parse is intentionally NOT here — parsing structured output is
 // normal and is covered by AI012 (unvalidated structured output) instead.
@@ -78,7 +78,23 @@ function isDangerousSink(call: Node): boolean {
     return false;
   }
   const callee = call.getExpression().getText().toLowerCase();
-  return DANGEROUS_CALLEES.some((dangerous) => callee === dangerous || callee.endsWith(`.${dangerous}`));
+  if (!DANGEROUS_CALLEES.some((dangerous) => callee === dangerous || callee.endsWith(`.${dangerous}`))) {
+    return false;
+  }
+  // "query" name-matches a real SQL sink (db.query(sql), pool.query(...))
+  // but is also a legitimate LLM/agent invocation verb (claudeSdk.query(...))
+  // — found via a false positive on the Claude Agent SDK's own
+  // claudeSdk.query() call, which shares the bare verb "query" with
+  // GENERATION_METHODS in llm-rule-utils.ts. A call that is
+  // import-resolved (or name-hinted) as an LLM invocation in its own right
+  // cannot simultaneously be the dangerous sink receiving that LLM's output —
+  // reusing the existing resolver here, rather than adding a second
+  // independent name heuristic, keeps the exclusion consistent with how the
+  // rest of the ruleset already decides what counts as "an LLM call".
+  if (resolveLlmSink(call)) {
+    return false;
+  }
+  return true;
 }
 
 function isInnerHtmlAssignment(node: Node, llmOutputs: Set<string>): boolean {

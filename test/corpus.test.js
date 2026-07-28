@@ -42,10 +42,20 @@ const EXPECTED_VULNERABLE = [
   ["MCP007", "vulnerable/tool_poisoning.py"],
   ["MCP008", "vulnerable/tool_poisoning.py"],
   ["MCP009", "vulnerable/tool_poisoning.py"],
+  ["MCP002", "vulnerable/mcp_dynamic_url.ts"],
   ["MCP010", "vulnerable/mcp_dynamic_command.ts"],
   ["SKL001", "vulnerable/skills/leaky-skill/SKILL.md"],
   ["SKL002", "vulnerable/skills/leaky-skill/SKILL.md"],
   ["SKL003", "vulnerable/skills/leaky-skill/SKILL.md"],
+  // Evasion-resistance: each of these fixtures is cloaked with a technique
+  // from arXiv:2607.02357 that defeated the scanners surveyed there.
+  ["SKL002", "vulnerable/skills/cloaked-skill/SKILL.md"],
+  ["SKL004", "vulnerable/skills/staged-skill/SKILL.md"],
+  ["SKL005", "vulnerable/skills/exfil-skill/helpers/metrics.test.ts"],
+  // Recall gaps found by running against real-world labeled fixtures
+  // (cisco-ai-defense/skill-scanner's evals/ corpus) — see CHANGELOG 0.6.1.
+  ["SKL005", "vulnerable/skills/env-harvest-skill/collect.py"],
+  ["SKL005", "vulnerable/skills/deferred-exec-skill/updater.py"],
 ];
 
 for (const [ruleId, file] of EXPECTED_VULNERABLE) {

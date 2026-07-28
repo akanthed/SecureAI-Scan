@@ -27,13 +27,16 @@ Prints the exploit scenario and a before/after code fix for that specific rule.
 
 ## Reviewing an MCP server or Agent Skill before installing it
 
-If the user is about to install an MCP server or a Claude Skill (`SKILL.md`) from GitHub, a registry, or a link someone sent them, scan the directory it lives in before they use it:
+If the user is about to install an MCP server or a Claude Skill from GitHub, npm, or a link someone sent them, scan it *before* cloning or installing anything — `skill`/`mcp` fetch the target themselves and never execute anything they fetch (npm packages via `npm pack`, tarball only; git targets via `git clone --depth 1`):
 
 ```bash
-npx --yes secureai-scan@latest scan <path-to-the-mcp-server-or-skill>
+npx --yes secureai-scan@latest skill <owner/repo-or-url-or-local-path>   # Agent Skill
+npx --yes secureai-scan@latest mcp <npm-package-or-url-or-local-path>    # MCP server
 ```
 
-This checks for invisible/bidirectional Unicode hidden in tool or skill descriptions, agent-directed injection phrasing, cross-tool/cross-skill shadowing, unpinned package launches, and known-malicious packages — the patterns behind real incidents like the postmark-mcp backdoor and the WhatsApp MCP rug-pull.
+If the target is already cloned locally, `scan <path>` works the same way and covers the whole repo, not just the skill/MCP-specific rules.
+
+This checks for invisible/bidirectional Unicode hidden in tool or skill descriptions, agent-directed injection phrasing, cross-tool/cross-skill shadowing, unpinned package launches, known-malicious packages, and — for skills specifically — evasion techniques like homoglyph/zero-width obfuscation and payloads staged in `.git/` or a `*.test.ts` file. These are the patterns behind real incidents like the postmark-mcp backdoor, the WhatsApp MCP rug-pull, and the SkillCloak scanner-evasion research (arXiv:2607.02357).
 
 ## Interpreting results
 

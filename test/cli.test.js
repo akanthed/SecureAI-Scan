@@ -37,6 +37,45 @@ test("scan --only-skl scopes to SKL rules only", () => {
   const { stdout, status } = run(["scan", "test-fixtures/vulnerable/skills", "--only-skl", "--limit", "20"]);
   assert.equal(status, 0);
   assert.match(stdout, /SKL00/);
+  assert.doesNotMatch(stdout, /\b(?:AI|MCP|VEC|DEP)\d{3}\b/, "expected only SKL rule IDs to appear");
+});
+
+test("scan --only-mcp scopes to MCP rules only", () => {
+  const { stdout, status } = run(["scan", "test-fixtures/vulnerable", "--only-mcp", "--limit", "20"]);
+  assert.equal(status, 0);
+  assert.match(stdout, /MCP00/);
+  assert.doesNotMatch(stdout, /\b(?:AI|SKL|VEC|DEP)\d{3}\b/, "expected only MCP rule IDs to appear");
+});
+
+test("skill <local-path> scans a fetched target without cloning (local path shortcut)", () => {
+  const { stdout, status } = run(["skill", "test-fixtures/vulnerable/skills/leaky-skill", "--limit", "20"]);
+  assert.equal(status, 0);
+  assert.match(stdout, /SKL00/);
+});
+
+test("skill <path-with-no-SKILL.md> reports nothing to scan instead of a silent empty report", () => {
+  const { stdout, status } = run(["skill", "test-fixtures/safe/env_config.py", "--limit", "20"]);
+  assert.equal(status, 0);
+  assert.match(stdout, /No SKILL\.md found/);
+});
+
+test("mcp <local-path> runs the full rule set plus DEP003 advisories", () => {
+  const { stdout, status } = run(["mcp", "test-fixtures/vulnerable", "--limit", "40"]);
+  assert.equal(status, 0);
+  assert.match(stdout, /MCP00/);
+});
+
+test("skill/mcp --fail-on actually exits non-zero when findings meet the threshold", () => {
+  const { status } = run(["skill", "test-fixtures/vulnerable/skills/leaky-skill", "--fail-on", "critical"]);
+  assert.equal(status, 1);
+});
+
+test("scan --only-mcp and --only-skl combine to scope both categories", () => {
+  const { stdout, status } = run(["scan", "test-fixtures/vulnerable", "--only-mcp", "--only-skl", "--limit", "40"]);
+  assert.equal(status, 0);
+  assert.match(stdout, /MCP00/);
+  assert.match(stdout, /SKL00/);
+  assert.doesNotMatch(stdout, /\b(?:AI|VEC|DEP)\d{3}\b/, "expected AI/VEC/DEP rule IDs to be filtered out");
 });
 
 test("scan -r DEP001 auto-enables the registry check it depends on (no separate --check-dependencies needed)", () => {
@@ -63,7 +102,24 @@ test("scan rejects an unknown rule ID with a clean error", () => {
   assert.match(stderr, /Unknown rule ID/i);
 });
 
-for (const ruleId of ["AI001", "MCP010", "SKL001", "DEP003"]) {
+test("scan -r SKL004 reaches the new bundle rules through the CLI", () => {
+  // The bundle rules run outside the AST engine, so a wiring regression in
+  // SKILL_RULE_IDS would silently drop them from -r/--only-skl with every
+  // other test still green.
+  const { stdout, status } = run(["scan", "test-fixtures/vulnerable/skills", "-r", "SKL004", "--limit", "20"]);
+  assert.equal(status, 0);
+  assert.match(stdout, /SKL004/);
+  assert.doesNotMatch(stdout, /SKL001|SKL002|SKL003|SKL005/);
+});
+
+test("scan -r SKL005 reports the payload staged in a test file", () => {
+  const { stdout, status } = run(["scan", "test-fixtures/vulnerable/skills", "-r", "SKL005", "--limit", "20"]);
+  assert.equal(status, 0);
+  assert.match(stdout, /SKL005/);
+  assert.match(stdout, /metrics\.test\.ts/);
+});
+
+for (const ruleId of ["AI001", "MCP010", "SKL001", "SKL004", "SKL005", "DEP003"]) {
   test(`explain ${ruleId} renders without throwing`, () => {
     const { stdout, status } = run(["explain", ruleId]);
     assert.equal(status, 0);

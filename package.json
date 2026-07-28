@@ -1,6 +1,6 @@
 {
   "name": "secureai-scan",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "AI security scanner with dataflow evidence — prompt injection, MCP tool poisoning, Agent Skill poisoning, RAG poisoning. Evidence-tiered findings (no false-positive noise by default), SARIF for GitHub code scanning, AI-BOM with OWASP LLM/ASI/MCP Top 10 mapping.",
   "author": "Akshay Kanthed",
   "license": "MIT",
@@ -72,6 +72,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.19.17",
-    "typescript": "^6.0.3"
+    "tree-sitter-python": "^0.25.0",
+    "typescript": "^6.0.3",
+    "web-tree-sitter": "^0.26.11"
   }
 }

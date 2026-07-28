@@ -193,10 +193,23 @@ function resolveLlmSinkInner(node: Node): LlmSink | undefined {
     if (spec) {
       const provider = moduleProvider(spec);
       if (provider) {
-        // Any call on a client resolved to an LLM SDK counts as LLM
-        // interaction (covers both client.method chains and bare functions
-        // like generateText() from the Vercel AI SDK).
-        return { provider, resolved: true, callText };
+        // Import resolution proves the call reaches an LLM SDK module, but
+        // that module is not exclusively model-invocation functions — the
+        // Vercel AI SDK, for instance, exports type guards (isToolUIPart),
+        // formatters, and schema helpers from the same "ai" package right
+        // alongside generateText/streamText. Resolution alone previously
+        // treated every one of those as an LLM call (found via a false
+        // positive on isToolUIPart() in vercel/ai's own TUI harness — see
+        // CHANGELOG). GENERATION_METHODS is the same generation-shaped-verb
+        // check already applied on the unresolved fallback path below;
+        // requiring it here too closes that gap without weakening the
+        // resolved case, since every real SDK entry point (generateText,
+        // streamText, chat.completions.create, embeddings.create, …) is
+        // already in that set.
+        if (GENERATION_METHODS.has(method)) {
+          return { provider, resolved: true, callText };
+        }
+        return undefined;
       }
       // Resolved to a known non-LLM module: definitively not an LLM call.
       return undefined;

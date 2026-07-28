@@ -104,8 +104,11 @@ export const ruleMcpDynamicServerCommand: Rule = {
 
 // Request-derived taint sources (mirrors the private array in
 // mcp-dynamic-server-url.ts — kept local since it's only used to distinguish
-// evidence tiers here, not to redo the taint pass).
-const DIRECT_REQUEST_SOURCES = ["req.", "request.", "ctx.", "body.", "query.", "params.", "headers."];
+// evidence tiers here, not to redo the taint pass). Bare "body."/"query."/
+// "params."/"headers." deliberately excluded — see the comment on
+// REQUEST_SOURCES in mcp-dynamic-server-url.ts for the false-positive class
+// this caused (any function parameter conventionally named "params").
+const DIRECT_REQUEST_SOURCES = ["req.", "request.", "ctx."];
 
 function isDirectRequestSource(node: Node): boolean {
   return DIRECT_REQUEST_SOURCES.some((src) => node.getText().includes(src));

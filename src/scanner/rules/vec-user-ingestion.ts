@@ -36,8 +36,12 @@ const VECTOR_STORE_CLIENTS = [
   "documentstore",
 ];
 
-// Taint sources — request/user-derived data
-const REQUEST_SOURCES = ["req.", "request.", "ctx.", "body.", "query.", "params."];
+// Taint sources — request/user-derived data. Bare "body."/"query."/"params."
+// deliberately excluded — see the comment on REQUEST_SOURCES in
+// mcp-dynamic-server-url.ts for the false-positive class this caused (any
+// function parameter conventionally named "params", not necessarily an HTTP
+// request).
+const REQUEST_SOURCES = ["req.", "request.", "ctx."];
 
 function isVectorIngestionCall(node: Node): boolean {
   if (!Node.isCallExpression(node)) return false;

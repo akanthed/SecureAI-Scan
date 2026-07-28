@@ -18,6 +18,8 @@ import { loadPolicy, writeDefaultPolicy, writeGithubWorkflow } from "./scanner/p
 import { generateThreatModel } from "./scanner/threat-model.js";
 import { generateBom, formatBomMarkdown } from "./scanner/bom.js";
 import { getOwnVersion } from "./utils/version.js";
+import { scanSkillFiles, findSkillFiles } from "./scanner/skill-scanner.js";
+import { resolveTarget } from "./scanner/fetch-target.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -104,6 +106,10 @@ export async function runCli(argv: string[]): Promise<void> {
         "  secureai-scan explain AI001           Fix guide for a rule",
         "  secureai-scan init                    Policy file + CI workflow",
         "",
+        "Scan before you install (no clone, no config — nothing fetched is ever executed):",
+        "  secureai-scan skill anthropics/skills     Scan an Agent Skill by owner/repo, URL, or local path",
+        "  secureai-scan mcp some-mcp-server-package Scan an MCP server by npm name, git URL, or local path",
+        "",
         "Suppress a reviewed finding in code:",
         "  // secureai-ignore AI001: reviewed, sanitized via allowlist",
         "",
@@ -125,7 +131,7 @@ export async function runCli(argv: string[]): Promise<void> {
     .option("--only-ai", "Run only AI/LLM rules (AI001–AI012)")
     .option("--only-mcp", "Run only MCP rules (MCP001–MCP010)")
     .option("--only-vec", "Run only Vector/RAG rules (VEC001–VEC004)")
-    .option("--only-skl", "Run only Agent Skill rules (SKL001–SKL003)")
+    .option("--only-skl", "Run only Agent Skill rules (SKL001–SKL005)")
     .option(
       "--check-dependencies",
       "Also check package.json/requirements.txt against the npm/PyPI registry for typos and hallucinated packages (DEP001/DEP002). Not required for DEP003 (known-malicious packages) — that runs offline on every scan",
@@ -295,6 +301,44 @@ export async function runCli(argv: string[]): Promise<void> {
       },
     );
 
+  // ── skill ────────────────────────────────────────────────────────────────
+  // The pre-install wedge: scan a single Agent Skill before you trust it —
+  // no clone, no repo, no config. `target` is a local path, a full git URL,
+  // or a GitHub "owner/repo" shorthand (a subdirectory containing SKILL.md
+  // works too, since scanSkillFiles walks the whole fetched tree).
+  program
+    .command("skill")
+    .argument("<target>", "Local path, git URL, or \"owner/repo\" of an Agent Skill to scan before installing")
+    .option("-s, --severity <level>", "Minimum severity: low | medium | high | critical", parseSeverity)
+    .option("--paranoid", "Include heuristic-tier findings (hidden by default)")
+    .option("--output <file>", "Save a full report as .sarif, .json, .md, or .html")
+    .option("--fail-on <severity>", "Exit 1 if findings at/above this severity exist", parseSeverity)
+    .option("--limit <number>", "Max rule groups shown in terminal (default: 10)", parseLimit)
+    .option("--keep", "Do not delete the fetched copy after scanning (prints its path)")
+    .description("Fetch and scan a single Agent Skill for poisoning/evasion before you install it (SKL001–SKL005)")
+    .action(async (target: string, options: SkillOrMcpOptions) => {
+      await runFetchAndScan(target, "skill", options);
+    });
+
+  // ── mcp ──────────────────────────────────────────────────────────────────
+  // Same wedge, for an MCP server: a bare npm package name, a git URL, or a
+  // local path. Runs the full rule set (not just MCP*) since a server
+  // package can carry any in-scope risk — an LLM call, a leaked secret, a
+  // known-malicious dependency — not only tool-poisoning.
+  program
+    .command("mcp")
+    .argument("<target>", "npm package name, git URL, or local path of an MCP server to scan before installing")
+    .option("-s, --severity <level>", "Minimum severity: low | medium | high | critical", parseSeverity)
+    .option("--paranoid", "Include heuristic-tier findings (hidden by default)")
+    .option("--output <file>", "Save a full report as .sarif, .json, .md, or .html")
+    .option("--fail-on <severity>", "Exit 1 if findings at/above this severity exist", parseSeverity)
+    .option("--limit <number>", "Max rule groups shown in terminal (default: 10)", parseLimit)
+    .option("--keep", "Do not delete the fetched copy after scanning (prints its path)")
+    .description("Fetch and scan an MCP server package before you install it (full rule set + DEP003 advisories)")
+    .action(async (target: string, options: SkillOrMcpOptions) => {
+      await runFetchAndScan(target, "mcp", options);
+    });
+
   // ── explain ──────────────────────────────────────────────────────────────
   program
     .command("explain")
@@ -448,6 +492,98 @@ function resolveRuleSelection(
   }
 
   return rules;
+}
+
+interface SkillOrMcpOptions {
+  severity?: Severity;
+  paranoid?: boolean;
+  output?: string;
+  failOn?: Severity;
+  limit?: number;
+  keep?: boolean;
+}
+
+/**
+ * Shared implementation for `skill` and `mcp`: fetch the target without
+ * executing anything it contains, scan it, report, then clean up. The two
+ * commands differ only in which scan function runs and what "nothing found"
+ * means for that target type.
+ */
+async function runFetchAndScan(
+  target: string,
+  mode: "skill" | "mcp",
+  options: SkillOrMcpOptions,
+): Promise<void> {
+  const startedAt = Date.now();
+  process.stdout.write(`Fetching ${target}...\n`);
+
+  let resolved: ReturnType<typeof resolveTarget>;
+  try {
+    resolved = resolveTarget(target);
+  } catch (err) {
+    process.stderr.write(`\n${(err as Error).message}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    process.stdout.write(`Scanning ${resolved.label}${resolved.kind !== "local" ? " (fetched, not installed)" : ""}...\n`);
+
+    let findings: Finding[];
+    let filesScanned: number;
+    if (mode === "skill") {
+      const bundleCount = findSkillFiles(resolved.dir).length;
+      if (bundleCount === 0) {
+        process.stdout.write("\nNo SKILL.md found under this target — nothing to scan.\n");
+        return;
+      }
+      findings = scanSkillFiles(resolved.dir);
+      filesScanned = bundleCount;
+    } else {
+      const scanResult = scanRepositoryDetailed(resolved.dir);
+      findings = [...scanResult.findings];
+      // DEP003 is the single most relevant check for "should I install this
+      // package" — it runs unconditionally here, same as in `scan`.
+      findings.push(...scanKnownMaliciousPackages(resolved.dir));
+      filesScanned = scanResult.scannedFiles.length + (scanResult.pythonFiles?.length ?? 0);
+    }
+
+    const paranoid = options.paranoid ?? false;
+    const evidenceFiltered = paranoid ? findings : findings.filter((f) => f.evidence !== "heuristic");
+    const hiddenHeuristic = findings.length - evidenceFiltered.length;
+    const filtered = filterFindingsBySeverity(evidenceFiltered, options.severity);
+
+    const report = buildReport(
+      filtered,
+      { tool: "SecureAI-Scan", version: getOwnVersion(), scannedAt: new Date().toISOString() },
+      {
+        rootPath: resolved.dir,
+        ignoredFindings: [],
+        hiddenHeuristic,
+        filesScanned,
+        durationMs: Date.now() - startedAt,
+      },
+    );
+
+    if (options.output) {
+      writeFullReport(report, options.output);
+    }
+    process.stdout.write(`${formatTerminalReport(report, options.limit ?? 10)}\n`);
+
+    if (options.failOn) {
+      const failing = filtered.filter((f) => severityValue(f.severity) >= severityValue(options.failOn!));
+      if (failing.length > 0) {
+        process.stderr.write(`\nFailing: ${failing.length} finding(s) at or above "${options.failOn}" severity.\n`);
+        process.exitCode = 1;
+      }
+    }
+  } finally {
+    if (options.keep) {
+      process.stdout.write(`\nKept fetched copy at: ${resolved.dir}\n`);
+    } else {
+      resolved.cleanup();
+    }
+  }
 }
 
 function writeFullReport(report: ReportModel, outputPath: string): void {
