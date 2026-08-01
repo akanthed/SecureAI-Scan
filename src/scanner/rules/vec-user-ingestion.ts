@@ -1,5 +1,5 @@
 import { Node, SyntaxKind } from "ts-morph";
-import type { Finding, Rule, RuleContext } from "../types.js";
+import type { Finding, Rule, RuleContext, TraceStep } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
 
@@ -56,8 +56,13 @@ function isVectorIngestionCall(node: Node): boolean {
 // object (matches the REQUEST_SOURCES prefixes above, minus the dot).
 const REQUEST_PARAM_NAMES = new Set(["req", "request", "ctx"]);
 
-function collectTaintedVars(fnNode: Node): Set<string> {
-  const tainted = new Set<string>();
+interface TaintOrigin {
+  line: number;
+  note: string;
+}
+
+function collectTaintedVars(fnNode: Node): Map<string, TaintOrigin> {
+  const tainted = new Map<string, TaintOrigin>();
 
   if ("getParameters" in fnNode) {
     for (const param of (fnNode as any).getParameters()) {
@@ -70,7 +75,10 @@ function collectTaintedVars(fnNode: Node): Set<string> {
       // link. Real request-derived taint is still caught below via
       // REQUEST_SOURCES member-access on the initializer.
       if (nameNode && Node.isIdentifier(nameNode) && REQUEST_PARAM_NAMES.has(nameNode.getText().toLowerCase())) {
-        tainted.add(nameNode.getText());
+        tainted.set(nameNode.getText(), {
+          line: getNodeLine(param),
+          note: `request data \`${nameNode.getText()}\``,
+        });
       }
     }
   }
@@ -80,23 +88,31 @@ function collectTaintedVars(fnNode: Node): Set<string> {
     if (!init) continue;
     const initText = init.getText();
     if (REQUEST_SOURCES.some((src) => initText.includes(src))) {
-      tainted.add(decl.getName());
-    }
-    if (Node.isIdentifier(init) && tainted.has(init.getText())) {
-      tainted.add(decl.getName());
+      tainted.set(decl.getName(), { line: getNodeLine(decl), note: `request data \`${initText}\`` });
+    } else if (Node.isIdentifier(init) && tainted.has(init.getText())) {
+      tainted.set(decl.getName(), tainted.get(init.getText())!);
     }
   }
 
   return tainted;
 }
 
-function userInputFlowsToIngestion(call: Node, tainted: Set<string>): boolean {
-  if (!Node.isCallExpression(call)) return false;
+/**
+ * Matches the tainted argument reaching an ingestion call. Returns the
+ * tainted variable name when it flows through a tracked declaration (usable
+ * for a trace), or the sentinel below when the request object is read
+ * inline in the call itself — same location as the sink, so no meaningful
+ * two-hop trace exists.
+ */
+const INLINE_TAINT = Symbol("inline-taint");
+
+function taintedArgMatch(call: Node, tainted: Map<string, TaintOrigin>): string | typeof INLINE_TAINT | undefined {
+  if (!Node.isCallExpression(call)) return undefined;
   const argsText = call.getArguments().map((a) => a.getText()).join(" ");
-  return (
-    REQUEST_SOURCES.some((src) => argsText.includes(src)) ||
-    [...tainted].some((v) => argsText.includes(v))
-  );
+  const varMatch = [...tainted.keys()].find((v) => argsText.includes(v));
+  if (varMatch) return varMatch;
+  if (REQUEST_SOURCES.some((src) => argsText.includes(src))) return INLINE_TAINT;
+  return undefined;
 }
 
 export const ruleVecUserIngestion: Rule = {
@@ -123,15 +139,31 @@ export const ruleVecUserIngestion: Rule = {
 
         for (const call of fnNode.getDescendantsOfKind(SyntaxKind.CallExpression)) {
           if (!isVectorIngestionCall(call)) continue;
-          if (!userInputFlowsToIngestion(call, tainted)) continue;
+          const matched = taintedArgMatch(call, tainted);
+          if (!matched) continue;
           if (hasSanitization) continue;
+
+          const sinkLine = getNodeLine(call);
+          let trace: TraceStep[] | undefined;
+          if (matched !== INLINE_TAINT) {
+            const origin = tainted.get(matched)!;
+            trace = [
+              { kind: "source", file: relPath, line: origin.line, note: origin.note },
+              {
+                kind: "sink",
+                file: relPath,
+                line: sinkLine,
+                note: `ingested via \`${call.getExpression().getText()}\``,
+              },
+            ];
+          }
 
           findings.push({
             rule_id: "VEC003",
             title: "User-controlled content ingested into vector store",
             severity: "high",
             file: relPath,
-            line: getNodeLine(call),
+            line: sinkLine,
             summary: "User-supplied content is being stored in a vector database without sanitization.",
             description:
               "Allowing users to directly ingest content into a shared vector store is a training/retrieval data poisoning attack. A malicious user can plant documents containing prompt injection payloads. When those documents are later retrieved via similarity search, the injected instructions are silently executed by the LLM.",
@@ -139,6 +171,7 @@ export const ruleVecUserIngestion: Rule = {
               "Validate and sanitize all user-provided content before ingestion. Isolate user-submitted documents in a quarantine namespace pending review. Consider scanning ingested content for injection patterns before making it available to retrieval pipelines.",
             confidence: evidenceConfidence(isTest ? demoteEvidence("likely") : "likely"),
             evidence: isTest ? demoteEvidence("likely") : "likely",
+            ...(trace ? { trace } : {}),
           });
         }
       }

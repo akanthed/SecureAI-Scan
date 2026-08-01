@@ -605,6 +605,74 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
+function truncateText(value: string, maxChars: number): string {
+  return value.length > maxChars ? value.slice(0, maxChars - 1) + "…" : value;
+}
+
+function traceKindColorVar(kind: TraceStep["kind"]): string {
+  if (kind === "source") return "var(--high)";
+  if (kind === "sink") return "var(--critical)";
+  return "var(--accent)";
+}
+
+/**
+ * Renders a source→flow→sink trace as an inline SVG node-link diagram
+ * instead of a flat list, so a multi-hop finding reads as dataflow rather
+ * than a call stack. No charting dependency — hand-rolled SVG, consistent
+ * with the rest of this report being a single self-contained HTML file.
+ * `idKey` must be unique per occurrence: SVG <marker> ids are referenced via
+ * url(#id) and, while harmless when duplicated (same content), are only
+ * spec-valid when unique across the document.
+ */
+function renderTraceSvg(trace: TraceStep[], idKey: string): string {
+  if (trace.length === 0) return "";
+
+  const NODE_W = 200;
+  const NODE_H = 56;
+  const GAP = 56;
+  const TOP = 22;
+  const PAD = 12;
+  const markerId = `trace-arrow-${idKey}`;
+
+  const totalW = trace.length * NODE_W + (trace.length - 1) * GAP + PAD * 2;
+  const totalH = PAD + TOP + NODE_H + PAD;
+
+  let arrows = "";
+  let nodes = "";
+
+  trace.forEach((step, i) => {
+    const x = PAD + i * (NODE_W + GAP);
+    const y = PAD + TOP;
+    const color = traceKindColorVar(step.kind);
+    const loc = truncateText(`${step.file}:${step.line}`, 30);
+    const note = truncateText(step.note, 34);
+
+    if (i > 0) {
+      const prev = trace[i - 1];
+      const crossFile = prev.file !== step.file;
+      const x1 = PAD + (i - 1) * (NODE_W + GAP) + NODE_W;
+      const x2 = x;
+      const ay = y + NODE_H / 2;
+      arrows += `<line x1="${x1}" y1="${ay}" x2="${x2 - 8}" y2="${ay}" class="trace-arrow-line"${crossFile ? ' stroke-dasharray="5,4"' : ""} marker-end="url(#${markerId})" />`;
+      if (crossFile) {
+        arrows += `<text x="${(x1 + x2) / 2}" y="${ay - 8}" text-anchor="middle" class="trace-crossfile">cross-file</text>`;
+      }
+    }
+
+    nodes += `
+      <text x="${x + NODE_W / 2}" y="${PAD + 12}" text-anchor="middle" class="trace-kind-label" fill="${color}">${step.kind.toUpperCase()}</text>
+      <rect x="${x}" y="${y}" width="${NODE_W}" height="${NODE_H}" rx="8" class="trace-node" stroke="${color}" />
+      <text x="${x + NODE_W / 2}" y="${y + 21}" text-anchor="middle" class="trace-loc">${escapeHtml(loc)}</text>
+      <text x="${x + NODE_W / 2}" y="${y + 40}" text-anchor="middle" class="trace-note">${escapeHtml(note)}</text>`;
+  });
+
+  return `<div class="trace-diagram"><svg viewBox="0 0 ${totalW} ${totalH}" width="${totalW}" height="${totalH}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Dataflow trace: ${escapeHtml(trace.map((s) => `${s.kind} at ${s.file}:${s.line}`).join(" -> "))}">
+    <defs><marker id="${markerId}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="trace-arrow-head" /></marker></defs>
+    ${arrows}
+    ${nodes}
+  </svg></div>`;
+}
+
 function formatHtml(report: ReportModel): string {
   const { summary } = report;
 
@@ -621,17 +689,11 @@ function formatHtml(report: ReportModel): string {
   const groupsHtml = report.groups
     .map((group) => {
       const occs = group.occurrences
-        .map((occ) => {
-          const trace = occ.trace
-            ? `<div class="trace">${occ.trace
-                .map(
-                  (s) =>
-                    `<div class="trace-step"><span class="trace-kind ${s.kind}">${s.kind}</span><code>${escapeHtml(
-                      `${s.file}:${s.line}`,
-                    )}</code><span>${escapeHtml(s.note)}</span></div>`,
-                )
-                .join("")}</div>`
-            : "";
+        .map((occ, occIdx) => {
+          const trace =
+            occ.trace && occ.trace.length > 0
+              ? renderTraceSvg(occ.trace, `${group.ruleId}-${occIdx}`)
+              : "";
           const snippet = occ.snippet
             ? `<pre class="snippet">${occ.snippet
                 .map(
@@ -735,11 +797,15 @@ function formatHtml(report: ReportModel): string {
   .occurrences li { margin-bottom: 12px; }
   code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px;
     background: color-mix(in srgb, var(--border) 40%, transparent); border-radius: 4px; padding: 1px 5px; }
-  .trace { margin: 8px 0; border-left: 2px solid var(--border); padding-left: 12px; }
-  .trace-step { display: flex; gap: 10px; align-items: baseline; font-size: 13px; margin: 2px 0; }
-  .trace-kind { width: 52px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); }
-  .trace-kind.source { color: var(--high); }
-  .trace-kind.sink { color: var(--critical); }
+  .trace-diagram { margin: 10px 0; overflow-x: auto; }
+  .trace-diagram svg { display: block; }
+  .trace-node { fill: var(--card); stroke-width: 2; }
+  .trace-kind-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+  .trace-loc { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; fill: var(--text); }
+  .trace-note { font-size: 11px; fill: var(--muted); }
+  .trace-arrow-line { stroke: var(--muted); stroke-width: 2; }
+  .trace-arrow-head { fill: var(--muted); }
+  .trace-crossfile { font-size: 9px; fill: var(--accent); text-transform: uppercase; letter-spacing: 0.05em; }
   .snippet { background: color-mix(in srgb, var(--border) 25%, transparent); border: 1px solid var(--border);
     border-radius: 6px; padding: 8px 0; overflow-x: auto; margin: 8px 0 0; }
   .code-line { display: grid; grid-template-columns: 48px 1fr; gap: 10px; padding: 0 12px;

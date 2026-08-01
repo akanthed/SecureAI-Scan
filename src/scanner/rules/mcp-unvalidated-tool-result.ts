@@ -1,5 +1,5 @@
 import { Node, SyntaxKind } from "ts-morph";
-import type { Finding, Rule, RuleContext } from "../types.js";
+import type { Finding, Rule, RuleContext, TraceStep } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { isLikelyLlmCall } from "./llm-rule-utils.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
@@ -25,15 +25,19 @@ function isToolResultVar(name: string): boolean {
   return TOOL_RESULT_PATTERNS.some((p) => name.toLowerCase().includes(p));
 }
 
-function collectToolResultVars(fnNode: Node): Set<string> {
-  const vars = new Set<string>();
+interface ToolResultOrigin {
+  line: number;
+  note: string;
+}
+
+function collectToolResultVars(fnNode: Node): Map<string, ToolResultOrigin> {
+  const vars = new Map<string, ToolResultOrigin>();
   for (const decl of fnNode.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
     const name = decl.getName();
-    if (isToolResultVar(name)) vars.add(name);
     const init = decl.getInitializer();
-    if (init) {
-      const initText = init.getText().toLowerCase();
-      if (TOOL_RESULT_PATTERNS.some((p) => initText.includes(p))) vars.add(name);
+    const initText = init?.getText().toLowerCase() ?? "";
+    if (isToolResultVar(name) || TOOL_RESULT_PATTERNS.some((p) => initText.includes(p))) {
+      vars.set(name, { line: getNodeLine(decl), note: `MCP tool result \`${name}\`` });
     }
   }
 
@@ -42,15 +46,27 @@ function collectToolResultVars(fnNode: Node): Set<string> {
     for (const param of (fnNode as any).getParameters()) {
       const nameNode = param.getNameNode?.();
       if (nameNode && Node.isIdentifier(nameNode) && isToolResultVar(nameNode.getText())) {
-        vars.add(nameNode.getText());
+        vars.set(nameNode.getText(), {
+          line: getNodeLine(param),
+          note: `MCP tool result parameter \`${nameNode.getText()}\``,
+        });
       }
     }
   }
   return vars;
 }
 
-function toolResultElevatedToHighTrustRole(call: Node, toolVars: Set<string>): boolean {
-  if (!Node.isCallExpression(call)) return false;
+interface ElevationMatch {
+  varName: string;
+  role: string;
+  contentLine: number;
+}
+
+function findElevatedToolResultUsage(
+  call: Node,
+  toolVars: Map<string, ToolResultOrigin>,
+): ElevationMatch | undefined {
+  if (!Node.isCallExpression(call)) return undefined;
   for (const arg of call.getArguments()) {
     if (!Node.isObjectLiteralExpression(arg)) continue;
     const messagesNode = arg
@@ -76,11 +92,20 @@ function toolResultElevatedToHighTrustRole(call: Node, toolVars: Set<string>): b
 
       const roleVal = roleProp.getInitializer()?.getText().replace(/['"]/g, "").toLowerCase();
       if (!roleVal || !ELEVATED_ROLES.includes(roleVal)) continue;
-      const contentText = contentProp.getInitializer()?.getText() ?? "";
-      if ([...toolVars].some((v) => contentText.includes(v))) return true;
+      const contentInit = contentProp.getInitializer();
+      const contentText = contentInit?.getText() ?? "";
+      for (const varName of toolVars.keys()) {
+        if (contentText.includes(varName)) {
+          return {
+            varName,
+            role: roleVal,
+            contentLine: contentInit ? getNodeLine(contentInit) : getNodeLine(el),
+          };
+        }
+      }
     }
   }
-  return false;
+  return undefined;
 }
 
 export const ruleMcpUnvalidatedToolResult: Rule = {
@@ -109,9 +134,30 @@ export const ruleMcpUnvalidatedToolResult: Rule = {
 
         for (const call of fnNode.getDescendantsOfKind(SyntaxKind.CallExpression)) {
           if (!isLikelyLlmCall(call)) continue;
-          if (!toolResultElevatedToHighTrustRole(call, toolVars)) continue;
+          const match = findElevatedToolResultUsage(call, toolVars);
+          if (!match) continue;
 
           const evidence: Evidence = hasSanitization ? demoteEvidence("likely") : "likely";
+          const origin = toolVars.get(match.varName)!;
+          const sinkLine = getNodeLine(call);
+
+          const trace: TraceStep[] = [
+            { kind: "source", file: relPath, line: origin.line, note: origin.note },
+          ];
+          if (match.contentLine !== origin.line) {
+            trace.push({
+              kind: "flow",
+              file: relPath,
+              line: match.contentLine,
+              note: `placed in ${match.role}-role message content`,
+            });
+          }
+          trace.push({
+            kind: "sink",
+            file: relPath,
+            line: sinkLine,
+            note: `${call.getExpression().getText()} — ${match.role} role`,
+          });
 
           findings.push({
             rule_id: "MCP003",
@@ -126,6 +172,7 @@ export const ruleMcpUnvalidatedToolResult: Rule = {
               "Always place tool results in the 'tool' role (not 'system' or 'developer'). Validate and sanitize tool outputs before including them in any message context. Use output schemas to restrict the shape of tool responses.",
             confidence: evidenceConfidence(evidence),
             evidence,
+            trace,
           });
         }
       }
