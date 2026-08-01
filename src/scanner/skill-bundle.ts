@@ -170,10 +170,14 @@ function collectBundleFiles(bundleDir: string, rootPath: string, skillAbsPath: s
         if (HARD_SKIP_DIRS.has(entry.name)) continue;
         // A nested SKILL.md starts its own bundle; don't absorb it into this one.
         if (fs.existsSync(path.join(full, "SKILL.md"))) continue;
-        const nowInGit = insideGitDir || entry.name === ".git";
         // Inside .git, descend only into non-internal directories — walking
-        // objects/ or refs/ would be thousands of useless files.
-        if (nowInGit && isGitInternalName(entry.name)) continue;
+        // objects/ or refs/ would be thousands of useless files. This must not
+        // apply to the ".git" entry itself: GIT_TRANSIENT_FILE's `^\.` catch-all
+        // (meant for hidden files written inside .git) also matches the literal
+        // name ".git", which previously skipped the directory before ever
+        // descending into it.
+        if (insideGitDir && isGitInternalName(entry.name)) continue;
+        const nowInGit = insideGitDir || entry.name === ".git";
         walk(full, depth + 1, nowInGit);
         continue;
       }

@@ -1,4 +1,5 @@
 import "./baseline.test.js";
+import "./deobfuscate.test.js";
 import "./dependency-guard.test.js";
 import "./ignore-annotations.test.js";
 import "./new-ai-rules.test.js";
