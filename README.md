@@ -30,14 +30,19 @@ It's the first scanner mapped to **all three** OWASP AI security frameworks — 
 ## Contents
 
 - [Why this scanner is different](#why-this-scanner-is-different)
+- [How it compares](#how-it-compares)
 - [Get started in 30 seconds](#get-started-in-30-seconds)
+- [See it work](#see-it-work)
 - [Commands](#commands)
 - [GitHub Action](#github-action)
 - [Rules](#rules)
+- [Architecture](#architecture)
 - [MCP server (use it from Claude)](#mcp-server-use-it-from-claude)
 - [Claude Skill](#claude-skill)
 - [The precision contract](#the-precision-contract)
 - [Testing & benchmarking](#testing--benchmarking)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
 
 ## Why this scanner is different
 
@@ -54,6 +59,25 @@ It's the first scanner mapped to **all three** OWASP AI security frameworks — 
 - **Known-malicious package advisories, version-aware.** Checks every dependency and every MCP-launched package against a curated advisory list (documented backdoors, critical CVEs) — offline, on every scan, no flag required. Clears a finding once you've actually upgraded past the affected range; stays flagged on any ambiguous or unpinned version, never silently.
 - **Local-first.** Nothing leaves your machine.
 
+## How it compares
+
+SecureAI-Scan is not a replacement for a general SAST tool or a container/IaC scanner — run it alongside one, not instead of one. It's the only one of these purpose-built for the LLM/MCP/RAG attack surface with dataflow evidence, not keyword rules.
+
+| | SecureAI-Scan | Semgrep (OSS rules) | Trivy | GitHub Advanced Security |
+|---|---|---|---|---|
+| Prompt injection (source→sink traced) | ✅ import-resolved dataflow | ⚠️ pattern rules only, community-maintained | ❌ | ⚠️ CodeQL can, but no AI-specific ruleset |
+| MCP tool-poisoning / config risk | ✅ MCP007–010, config scanner | ❌ | ❌ | ❌ |
+| Agent Skill poisoning (`SKILL.md`) | ✅ evasion-resistant, bundle-aware | ❌ | ❌ | ❌ |
+| RAG / vector-store misconfig | ✅ VEC001–004 | ❌ | ❌ | ❌ |
+| Known-malicious AI package advisories | ✅ DEP003, offline, version-aware | ❌ | ⚠️ general CVE feed, not AI-specific | ⚠️ Dependabot, general CVE feed |
+| General SAST (SQLi, XSS, path traversal) | ❌ out of scope by design | ✅ | ❌ | ✅ |
+| Container / IaC scanning | ❌ | ❌ | ✅ | ⚠️ via CodeQL/Actions |
+| Evidence tiers (proven/likely/heuristic) | ✅ | ❌ findings are flat | ❌ | ⚠️ CodeQL has some, not AI-tuned |
+| SARIF output (GitHub code scanning) | ✅ | ✅ | ✅ | native |
+| Runs offline, no account | ✅ | ✅ (OSS rules) | ✅ | ❌ requires GitHub |
+
+If you already run Semgrep or GHAS, keep them — add SecureAI-Scan for the risk surface they don't model at all.
+
 ## Get started in 30 seconds
 
 ```bash
@@ -65,6 +89,19 @@ TypeScript, JavaScript, Python, MCP config files, and Agent Skill (`SKILL.md`) f
 > Prefer to ask questions first? Try the free **[SecureAI-Scan AI Security Advisor on ChatGPT](https://chatgpt.com/g/g-6a25141758188191a764020c1ab6a226-secureai-scan-ai-security-advisor)**.
 
 > About to run an MCP server you found on GitHub or Twitter? Paste its tool description into **[MCP X-Ray](https://akanthed.github.io/SecureAI-Scan/)** first — checks it for hidden Unicode, injected instructions, and known-malicious packages in your browser, no install.
+
+## See it work
+
+<!-- demo.gif: terminal recording of `secureai-scan scan .` end-to-end, from npx invocation to the evidence-tiered report. Compress before committing (see docs/PROJECT_AUDIT.md §2.4) or host as a GitHub release asset instead of committing raw. -->
+![SecureAI-Scan terminal demo](demo.gif)
+
+Attack shapes the scanner traces end to end:
+
+| MCP tool-poisoning dataflow | RAG context-injection dataflow |
+|---|---|
+| ![MCP attack trace](mcp-attack-diagram.png) | ![RAG poisoning trace](rag-poisoning-diagram.png) |
+
+<!-- Screenshots section: add a terminal screenshot of the SARIF-annotated GitHub PR view, and one of `--output report.html` rendered, once available. -->
 
 ## Commands
 
@@ -205,6 +242,34 @@ Scanning clean? Add the badge to your own README:
 
 `secureai-scan explain <RULE_ID>` gives the exploit walkthrough and a before/after code example for any rule.
 
+## Architecture
+
+Three independent scanning surfaces feed one merged, deduped finding list:
+
+```
+                    ┌─────────────────────┐
+  *.ts / *.js  ───▶ │  ts-morph AST rules │───┐
+                    │  (import-resolved   │   │
+                    │   sinks + dataflow) │   │
+                    └─────────────────────┘   │
+                                               │
+                    ┌─────────────────────┐   │      ┌──────────────┐      ┌─────────────────┐
+  *.py         ───▶ │  Python regex +     │───┼───▶  │  scan.ts     │───▶  │  evidence filter │
+                    │  taint-propagation  │   │      │  merge/dedupe│      │  → confidence    │
+                    └─────────────────────┘   │      │  + suppress  │      │  → severity      │
+                                               │      │  (// secure- │      │  → baseline diff │
+  .mcp.json,         ┌─────────────────────┐  │      │  ai-ignore)  │      │  → report        │
+  SKILL.md      ───▶ │  Config/bundle scan │──┘      └──────────────┘      └─────────────────┘
+                    │  (off-disk, evasion- │                                        │
+                    │   resistant)         │                                        ▼
+                    └─────────────────────┘                         terminal · sarif · json · md · html
+
+  package.json,
+  requirements.txt ─▶ dependency-guard.ts (advisories.ts, offline, version-aware)
+```
+
+Every AST rule only calls a function an "LLM call" if it resolves through real imports to a known SDK — never by name-matching alone. See [`docs/Architecture.md`](docs/Architecture.md) for the full breakdown of each surface, and [`docs/DetectionEngine.md`](docs/DetectionEngine.md) for how the evidence-tier contract works.
+
 ## MCP server (use it from Claude)
 
 The package ships an MCP server exposing `scan_repository`, `explain_rule`, `generate_bom`, and `scan_untrusted_target` (fetch and scan a skill or MCP server before Claude recommends installing it — same fetch-without-executing behavior as the `skill`/`mcp` CLI commands):
@@ -337,6 +402,14 @@ node --test test/dependency-guard.test.js
 ```
 
 covers: `mcp-remote@0.1.15` (CVE-2025-6514, vulnerable) flagged / `mcp-remote@0.1.16` (patched) clear; `postmark-mcp@1.0.15` (before the backdoor) clear / `postmark-mcp@1.0.20` (after — no legitimate patch exists for a malicious package) still flagged; an unpinned `^0.1.16` range still flagged despite being patchable, since we can't prove what actually resolves. Building this test caught a real gap: `DEP003` used to match advisories by package name only, never actually comparing the declared version against the advisory's affected range — fixed in [`src/scanner/semver.ts`](src/scanner/semver.ts), which clears a finding only when an exact version pin is provably outside the affected range, and fails toward flagging on anything ambiguous.
+
+## Roadmap
+
+See [`ROADMAP.md`](ROADMAP.md) for what's shipped and what's planned — the short version: the Python scanner is regex-based today (a documented, deliberate trade-off, not an oversight — see [`docs/DetectionEngine.md`](docs/DetectionEngine.md)), and moving it to full AST analysis is the largest planned change.
+
+## Contributing
+
+Contributions are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow, and [`docs/WritingRules.md`](docs/WritingRules.md) / [`docs/RuleDevelopment.md`](docs/RuleDevelopment.md) for how to add a detection rule that meets the precision bar above. Every new rule needs a fixture in both [`test-fixtures/vulnerable/`](test-fixtures/vulnerable) and [`test-fixtures/safe/`](test-fixtures/safe), an entry in `src/scanner/catalog.ts`, and a case in `test/corpus.test.js` — `npm test` enforces all three.
 
 ## License
 
