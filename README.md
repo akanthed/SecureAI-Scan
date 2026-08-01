@@ -92,8 +92,7 @@ TypeScript, JavaScript, Python, MCP config files, and Agent Skill (`SKILL.md`) f
 
 ## See it work
 
-<!-- demo.gif: terminal recording of `secureai-scan scan .` end-to-end, from npx invocation to the evidence-tiered report. Compress before committing (see docs/PROJECT_AUDIT.md §2.4) or host as a GitHub release asset instead of committing raw. -->
-![SecureAI-Scan terminal demo](demo.gif)
+<!-- TODO: terminal recording of `secureai-scan scan .` end-to-end, from npx invocation to the evidence-tiered report. Compress before committing, or host as a GitHub release asset rather than a raw repo file — see docs/PROJECT_AUDIT.md §2.4. No demo GIF exists yet; don't add an <img>/markdown reference here until one is actually committed or hosted, or it renders as a broken image on GitHub. -->
 
 Attack shapes the scanner traces end to end:
 
