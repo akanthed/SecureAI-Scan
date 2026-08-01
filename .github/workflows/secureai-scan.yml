@@ -23,7 +23,7 @@ jobs:
             --baseline secureai-baseline.json \
             --output report.md || true
       - name: Upload report artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: secureai-scan-report
           path: report.md
