@@ -26,6 +26,13 @@ function run(args, options = {}) {
   }
 }
 
+test("scan on a nonexistent path errors loudly instead of silently reporting 0 findings", () => {
+  const { stdout, stderr, status } = run(["scan", "/definitely/does/not/exist/xyz"]);
+  assert.equal(status, 1);
+  assert.match(stderr, /does not exist/);
+  assert.equal(stdout, "", "expected no report output for a path that was never scanned");
+});
+
 test("scan -r <RULE_ID> actually filters to that rule (not silently ignored)", () => {
   const { stdout, status } = run(["scan", "test-fixtures/vulnerable", "-r", "AI001", "--limit", "20"]);
   assert.equal(status, 0);

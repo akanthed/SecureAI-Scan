@@ -166,6 +166,11 @@ export async function runCli(argv: string[]): Promise<void> {
       ) => {
         const startedAt = Date.now();
 
+        if (!fs.existsSync(targetPath)) {
+          process.stderr.write(`Error: path does not exist: ${targetPath}\n`);
+          process.exit(1);
+        }
+
         const policyResult = options.policy
           ? loadPolicy(path.dirname(options.policy))
           : loadPolicy(targetPath);
