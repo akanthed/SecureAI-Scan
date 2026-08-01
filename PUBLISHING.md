@@ -192,7 +192,7 @@ Follow semantic versioning (semver). Users depend on this to know if an update i
 
 ## Automated Publishing with GitHub Actions
 
-Set this up once and every future release publishes automatically when you push a version tag.
+`.github/workflows/publish.yml` is now committed to the repo — it builds, tests, and publishes on any `v*` tag push. **It won't actually publish anything until the `NPM_TOKEN` secret below is added** (Step 1 and 2 are the remaining setup — Step 3 is done). Until then, publishing stays manual via the steps earlier in this doc.
 
 ### Step 1: Create an npm Access Token
 
