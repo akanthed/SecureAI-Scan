@@ -6,77 +6,85 @@ This audit is a snapshot, not a verdict on the team. The scanner's core detectio
 
 Each finding: **Severity** (Critical/High/Medium/Low) · **Effort** (S/M/L) · **Why it matters**.
 
+**Status key used below:** ✅ Resolved (fixed this sprint, see `docs/MASTER_REVIEW.md` for the commit-level writeup) · 🔧 Partially resolved (code landed, needs an action only the maintainer can take) · ⏳ Open (tracked, not started).
+
 ---
 
 ## 1. Critical
 
-### 1.1 `npm test` does not run in CI at all
+### 1.1 `npm test` does not run in CI at all — ✅ Resolved
 **Effort: S**
 `.github/workflows/secureai-scan.yml` is a self-scan/dogfood workflow — it runs `npx secureai-scan@latest scan .` against the repo and uploads a report, non-blocking (`|| true`). There is no workflow that runs `npm test`, `npm run build`, or `tsc --noEmit` on PRs. A PR can merge with a broken build or a failing test and nothing will catch it. This is the single highest-leverage fix in the whole audit — every other quality claim in this document (98%+ of the "hard requirements" in CLAUDE.md) is unenforced without it.
 
-### 1.2 `deobfuscate.test.js` isn't wired into `npm test`
+### 1.2 `deobfuscate.test.js` isn't wired into `npm test` — ✅ Resolved
 **Effort: S**
 `test/run-tests.js` imports 10 of the 11 test files as ESM side effects; `deobfuscate.test.js` (263 lines, covering the evasion-resistance module described as a deliberate, hard-won design decision in CLAUDE.md) is not among them. It only runs via a direct `node --test test/deobfuscate.test.js` invocation. Combined with 1.1, this means the evasion-resistance logic — the part of the codebase explicitly built to defeat published jailbreak/scanner-evasion techniques — currently has **zero** automated verification in any run path a contributor or CI would naturally trigger.
 
-### 1.3 Six registered rules have no fixture-corpus coverage
+Wiring it in immediately validated the concern: it surfaced a real, previously-shipping bug in `skill-bundle.ts`'s `.git/` traversal (SKL004 never actually detected payloads staged there). See `docs/MASTER_REVIEW.md` for the fix.
+
+### 1.3 Six registered rules have no fixture-corpus coverage — ✅ Resolved
 **Effort: M**
 AI011, MCP001, MCP003, VEC002, VEC003, VEC004 are registered in `rules/index.ts` and shipped, but have no `test-fixtures/vulnerable/` file and no `EXPECTED_VULNERABLE` entry in `test/corpus.test.js` proving they still fire. Several (AI006, AI007, AI008, AI009) are exercised only via inline strings in `test/new-ai-rules.test.js`, not the fixture corpus that the project's own CLAUDE.md calls the "precision gate." A rule with no corpus fixture can silently regress to zero findings (as literally happened once already, per CLAUDE.md's own account of the AI002/AI007/AI008 false-positive fixes) with nothing failing red. This directly undermines hard requirement #1 in CLAUDE.md ("zero tolerance for false positives... the corpus alone is not sufficient" — true, but right now it's also not complete).
+
+Fixtures added for all six (`test-fixtures/vulnerable/multiagent_trust.ts`, `mcp_tool_metadata.ts`, `mcp_tool_result.ts`, `vec_unbounded_search.ts`, `vec_user_ingestion.ts`, `vec_ingest_no_namespace.ts`), wired into `EXPECTED_VULNERABLE`. Writing the VEC003 fixture surfaced a second real bug in the same rule — `collectTaintedVars` treated *every* function parameter as user-tainted by presence alone, flagging any ordinary batch-ingestion function (`function importDocs(docs) { store.addDocuments(docs) }`) with no actual request-data link. Fixed to require the parameter name to actually look like a request object (`req`/`request`/`ctx`), and pinned with a new `test-fixtures/safe/vec_batch_ingestion.ts` fixture.
 
 ---
 
 ## 2. High
 
-### 2.1 No PR template, CODEOWNERS, or Dependabot config
+### 2.1 No PR template, CODEOWNERS, or Dependabot config — ✅ Resolved
 **Effort: S**
 `.github/` has issue templates (good — bug report, false positive, missed detection are well-chosen categories for this project) but no `PULL_REQUEST_TEMPLATE.md`, no `CODEOWNERS`, no `dependabot.yml`. For a security-tooling project specifically, an unmonitored dependency tree is an ironic look — the tool itself flags dependency risk (DEP001–003) but doesn't dogfood dependency update automation on itself.
 
-### 2.2 No automated npm publish workflow
+### 2.2 No automated npm publish workflow — 🔧 Partially resolved
 **Effort: M**
 `PUBLISHING.md` documents both a manual flow (currently what's used) and a `publish.yml` GitHub Actions workflow triggered on `v*` tags — but that workflow file was never actually committed. Manual publishing is a single-point-of-failure (one person's local npm token/2FA) and non-reproducible (no guarantee the published tarball matches what CI built and tested).
 
-### 2.3 Bad/nonexistent scan paths silently report "0 findings," not an error
+`.github/workflows/publish.yml` is now committed, matching the draft that was already in `PUBLISHING.md`. It will not actually publish anything until an `NPM_TOKEN` secret is added in repo settings — that step requires the maintainer's npm account and can't be done from a PR.
+
+### 2.3 Bad/nonexistent scan paths silently report "0 findings," not an error — ✅ Resolved
 **Effort: S**
 Verified: `secureai-scan scan /nonexistent/path` exits **0** with `0 files · 0.0s` and `✓ No findings at the current evidence level.` A typo'd path is indistinguishable from a genuinely clean 40-file repo. For a security tool, "clean" must never be reachable by accident — this is the most dangerous class of UX bug this audit found, because it fails silently in the exact direction (false confidence) the tool exists to prevent. Should be a distinct message + non-zero exit (or at minimum a loud warning) when 0 files are discovered.
 
-### 2.4 2.8 MB of PNGs committed to git history for content excluded from the npm tarball
+### 2.4 2.8 MB of PNGs committed to git history for content excluded from the npm tarball — ⏳ Open (needs a maintainer decision)
 **Effort: S**
-`mcp-attack-diagram.png` (1.36 MB) and `rag-poisoning-diagram.png` (1.48 MB) are tracked in git (currently staged per `git status`). They're correctly excluded from the npm package via `.npmignore`, so they don't bloat installs — but they permanently bloat `git clone` size and repo history for every future contributor. `demo.gif` (24.2 MB, currently untracked) would be far worse if committed as-is. Large binary assets like this belong either compressed, hosted externally (GitHub release assets, a CDN, or the repo's own GitHub Pages `docs/`), or added via Git LFS — not committed raw to the default branch.
+`mcp-attack-diagram.png` (1.36 MB) and `rag-poisoning-diagram.png` (1.48 MB) are tracked in git. They're correctly excluded from the npm package via `.npmignore`, so they don't bloat installs — but they permanently bloat `git clone` size and repo history for every future contributor. `demo.gif` (24.2 MB, currently untracked) would be far worse if committed as-is. Large binary assets like this belong either compressed, hosted externally (GitHub release assets, a CDN, or the repo's own GitHub Pages `docs/`), or added via Git LFS — not committed raw to the default branch. Left open deliberately: resolving it means either rewriting recent git history or standing up external hosting, both decisions for the maintainer, not something to do silently.
 
-### 2.5 CI runs on Ubuntu only, no Node version matrix
+### 2.5 CI runs on Ubuntu only, no Node version matrix — ✅ Resolved
 **Effort: S**
-The one existing workflow runs on `ubuntu-latest` / Node 20 only. Given `engines.node >= 20` and the project's Python-regex scanner and TS AST scanner both do path/glob handling that historically has Windows-vs-POSIX edge cases (path separators, case sensitivity), shipping with zero Windows/macOS CI coverage is a real gap — a contributor on Windows (as this very session is) has no CI signal that their environment matches what maintainers test.
+The one existing workflow runs on `ubuntu-latest` / Node 20 only. Given `engines.node >= 20` and the project's Python-regex scanner and TS AST scanner both do path/glob handling that historically has Windows-vs-POSIX edge cases (path separators, case sensitivity), shipping with zero Windows/macOS CI coverage is a real gap — a contributor on Windows (as this very session is) has no CI signal that their environment matches what maintainers test. `ci.yml` now runs on a 3-OS × 2-Node-version matrix; the Windows leg would have caught the `.git/`-traversal bug (see 1.2) immediately.
 
-### 2.6 No test/build/lint gate blocks merges to `main`
+### 2.6 No test/build/lint gate blocks merges to `main` — 🔧 Partially resolved
 **Effort: S** (config only, once 1.1 exists)
-Related to 1.1 but distinct: even after a CI test workflow exists, without branch protection requiring it to pass, it's advisory only. This is a repo-settings change, not code — flagging separately since it needs to be done in GitHub settings, not a PR.
+Related to 1.1 but distinct: even after a CI test workflow exists, without branch protection requiring it to pass, it's advisory only. `ci.yml` now exists (1.1); turning on branch protection to require it is a repo-settings change, not code, and still needs to be done directly by the maintainer.
 
 ---
 
 ## 3. Medium
 
-### 3.1 `docs/` is a single landing-page HTML file, not documentation
+### 3.1 `docs/` is a single landing-page HTML file, not documentation — ✅ Resolved
 **Effort: L**
 `docs/index.html` (30 KB) is a marketing/landing page. There is no `docs/Architecture.md`, `DetectionEngine.md`, `WritingRules.md`, etc. Everything a new contributor needs to understand the codebase currently lives entirely in `CLAUDE.md` (16 KB, genuinely excellent, but written for an AI coding agent, not indexed/discoverable the way a human contributor browsing GitHub would expect `docs/` to be). Addressed in Phase 5 of this sprint.
 
-### 3.2 `CONTRIBUTING.md` and `SECURITY.md` are thin stubs
+### 3.2 `CONTRIBUTING.md` and `SECURITY.md` are thin stubs — ✅ Resolved
 **Effort: M**
-`CONTRIBUTING.md` (30 lines) covers workflow but not the actual architecture knowledge a contributor needs (rule shape, evidence tiers, where to add fixtures) — that's all in CLAUDE.md instead, which is Claude-Code-specific framing and not obviously the "start here" doc a human contributor would find. `SECURITY.md` (16 lines) has no PGP key, no disclosure timeline commitment, no supported-versions table — reasonable for project size but worth strengthening given the project's own subject matter is security.
+`CONTRIBUTING.md` (30 lines) covers workflow but not the actual architecture knowledge a contributor needs (rule shape, evidence tiers, where to add fixtures) — that's all in CLAUDE.md instead, which is Claude-Code-specific framing and not obviously the "start here" doc a human contributor would find. `SECURITY.md` (16 lines) has no PGP key, no disclosure timeline commitment, no supported-versions table — reasonable for project size but worth strengthening given the project's own subject matter is security. Both now link to `docs/Contributing.md`, and `SECURITY.md` clarifies the distinction between a vulnerability in the scanner itself vs. a detection gap (the latter goes through the missed-detection issue template, not private disclosure).
 
-### 3.3 No coverage measurement
+### 3.3 No coverage measurement — ✅ Resolved
 **Effort: S**
-No `c8`/`nyc`/`istanbul` configured. 1,431 lines of test code exist across 11 files (reasonable volume) but there's no visibility into which rule branches, CLI flag combinations, or error paths are actually exercised. Given hard requirement #4 in CLAUDE.md calls out that CLI-flag-wiring bugs specifically evaded detection once already, coverage reporting would make that class of gap visible before it recurs.
+No `c8`/`nyc`/`istanbul` configured. 1,431 lines of test code exist across 11 files (reasonable volume) but there's no visibility into which rule branches, CLI flag combinations, or error paths are actually exercised. Given hard requirement #4 in CLAUDE.md calls out that CLI-flag-wiring bugs specifically evaded detection once already, coverage reporting would make that class of gap visible before it recurs. `npm run coverage` (c8, text + HTML reporters) is now wired in, plus a non-blocking CI job that uploads the HTML report as an artifact on every PR.
 
-### 3.4 Scanner has no caching or incremental-scan support
+### 3.4 Scanner has no caching or incremental-scan support — ⏳ Open (large effort, correctly deferred)
 **Effort: L**
 `src/scanner/project.ts` rebuilds the full `ts-morph` Project from scratch on every invocation; `--baseline` diffs *findings*, not files. Python scanning, MCP config scanning, and skill scanning each independently re-walk the filesystem rather than sharing one file-discovery pass. Not algorithmically pathological (no O(n²) found), but on large monorepos this means every CI run and every local re-scan pays full cost. Not urgent at current adoption scale, but worth a design note before it becomes a support complaint.
 
-### 3.5 No progress indicator on long scans
+### 3.5 No progress indicator on long scans — ✅ Resolved
 **Effort: S**
-Nothing prints between invocation and the final report on a large repo — a scan that takes 10+ seconds on a big monorepo looks hung. Low effort, meaningful perceived-quality improvement (Phase 7).
+Nothing prints between invocation and the final report on a large repo — a scan that takes 10+ seconds on a big monorepo looks hung. A single "Scanning `<path>`..." line now prints to stderr before the (synchronous, CPU-bound) scan starts, gated on `process.stderr.isTTY` so CI/piped logs aren't cluttered. An animated spinner isn't feasible without making the scan pipeline asynchronous, which is out of scope here.
 
-### 3.6 `init`'s CI-workflow-write failure is swallowed silently
+### 3.6 `init`'s CI-workflow-write failure is swallowed silently — ✅ Resolved
 **Effort: S**
-`src/cli.ts` ~line 448: bare `catch {}` around the GitHub Actions workflow scaffold write, surfaced only as "(Skipped...)" with no reason. If `init` fails to write `.github/workflows/`, a user has no way to know why without re-running with `--debug` (if that even covers this path).
+`src/cli.ts`'s `init` command had a bare `catch {}` around the GitHub Actions workflow scaffold write, surfaced only as "(Skipped...)" with no reason. Now includes the actual error message.
 
 ### 3.7 devDependencies include a tree-sitter Python toolchain used only by an unshipped spike
 **Effort: S**

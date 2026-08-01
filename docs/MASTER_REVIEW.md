@@ -1,23 +1,23 @@
 # Master Review — SecureAI-Scan Growth Sprint
 
-**Date:** 2026-08-01 · **Version:** 0.6.1 → work in this sprint applied on top
+**Date:** 2026-08-01 · **Version:** 0.6.1 → work across this sprint and a follow-up pass applied on top
 
-This is the final rollup: scores, what changed in this sprint, and the ranked backlog for what's next. See [`PROJECT_AUDIT.md`](PROJECT_AUDIT.md) for the detailed findings behind these scores.
+This is the rollup: scores, what changed, and the ranked backlog for what's next. See [`PROJECT_AUDIT.md`](PROJECT_AUDIT.md) for the detailed findings behind these scores — every finding there now carries a status marker (✅ resolved / 🔧 partial / ⏳ open) kept in sync with this document.
 
 ## Scores (/100)
 
 | Dimension | Score | Rationale |
 |---|--:|---|
-| **Detection quality** | 82 | Genuinely disciplined evidence-tier system, import-resolved sinks, and a real regression benchmark against public repos — better methodology than most commercial scanners in this space. Held back by 6 rules with no fixture-corpus recall proof (now documented in the audit appendix) and the Python surface being regex-based by design, not AST. |
-| **Architecture** | 78 | Clean separation of scanning surfaces, a well-justified reason each is architecturally distinct (see `docs/Architecture.md`), and a genuinely good "why" for every non-obvious design choice (evasion-resistance inverting the usual heuristic-lowers-evidence rule). Docked for zero caching/incremental-scan support and each surface doing its own file discovery independently. |
-| **Documentation** | 70 → improved this sprint | Was: excellent `CLAUDE.md` for an AI agent, near-nothing in `docs/` for a human contributor, thin `CONTRIBUTING.md`/`SECURITY.md`. This sprint added the missing `docs/` tree (Architecture, DetectionEngine, WritingRules, RuleDevelopment, ThreatModel, Performance, FAQ, Contributing) and wired it into the README. Still: root `CONTRIBUTING.md`/`SECURITY.md` remain thin stubs relative to the project's own subject matter. |
-| **Maintainability** | 75 | `tsc --strict` clean, zero TODO/FIXME/HACK in `src/`, 2 runtime dependencies total, consistent rule shape. Docked because — until this sprint — the deobfuscation test suite silently didn't run under `npm test`, which is exactly the kind of gap that erodes maintainability invisibly. Fixed this sprint (see below), and it immediately surfaced a real bug, which is the strongest possible argument that this was worth fixing. |
-| **DevEx** | 68 → improved this sprint | Command surface, flag validation messages, and `--help` quick-start examples are all above average. The silent-0-findings-on-a-bad-path bug (now fixed) was a real, dangerous gap for a security tool specifically. No progress indicator on long scans remains open. |
-| **OSS readiness** | 60 → improved this sprint | No CI test gate, no PR template, no CODEOWNERS, no dependabot config, no Windows/macOS CI coverage — all real gaps for attracting outside contributors, all addressed in this sprint except enabling GitHub Discussions and creating a labels taxonomy, which require live repo-settings changes rather than committed files (flagged, not done, pending confirmation — see "Not done" below). |
-| **Enterprise readiness** | 65 | SARIF output, baseline diffing, policy files, and an evidence-tier system that avoids alert fatigue are all enterprise-relevant strengths. Missing: no automated npm publish pipeline (currently a manual, single-point-of-failure process), no coverage measurement, no SLA-shaped security disclosure process beyond an email address. |
+| **Detection quality** | 85 | Genuinely disciplined evidence-tier system, import-resolved sinks, and a real regression benchmark against public repos — better methodology than most commercial scanners in this space. All 6 previously-unverified rules (AI011, MCP001, MCP003, VEC002–004) now have fixture-corpus recall proof; writing those fixtures also surfaced and fixed a real VEC003 false-positive class (see below). Still held back by the Python surface being regex-based by design, not AST. |
+| **Architecture** | 78 | Clean separation of scanning surfaces, a well-justified reason each is architecturally distinct (see `docs/Architecture.md`), and a genuinely good "why" for every non-obvious design choice (evasion-resistance inverting the usual heuristic-lowers-evidence rule). Docked for zero caching/incremental-scan support and each surface doing its own file discovery independently — both correctly deferred as large efforts, not ignored. |
+| **Documentation** | 82 | Was: excellent `CLAUDE.md` for an AI agent, near-nothing in `docs/` for a human contributor, thin `CONTRIBUTING.md`/`SECURITY.md`. Now: full `docs/` tree wired into the README, and root `CONTRIBUTING.md`/`SECURITY.md` both strengthened (technical setup links, precision-bar and scope-boundary callouts, a real vulnerability-disclosure policy distinguishing scanner bugs from detection gaps). |
+| **Maintainability** | 80 | `tsc --strict` clean, zero TODO/FIXME/HACK in `src/`, 2 runtime dependencies total, consistent rule shape, now with coverage measurement (`npm run coverage`, c8) visible in CI. The deobfuscation test suite silently not running under `npm test` — exactly the kind of gap that erodes maintainability invisibly — is fixed, and it immediately surfaced a real bug, the strongest possible argument that this was worth doing. |
+| **DevEx** | 74 | Command surface, flag validation messages, and `--help` quick-start examples are all above average. The silent-0-findings-on-a-bad-path bug (fixed) was a real, dangerous gap for a security tool specifically. A progress indicator on long scans is now in place; `init`'s silently-swallowed workflow-write error now surfaces its actual cause. |
+| **OSS readiness** | 68 | No CI test gate, no PR template, no CODEOWNERS, no dependabot config, no Windows/macOS CI coverage — all real gaps for attracting outside contributors, all addressed except enabling GitHub Discussions and creating a labels taxonomy, which require live repo-settings changes only the maintainer can make (see "Not done" below). |
+| **Enterprise readiness** | 70 | SARIF output, baseline diffing, policy files, and an evidence-tier system that avoids alert fatigue are all enterprise-relevant strengths. A `publish.yml` workflow now exists (needs an `NPM_TOKEN` secret to actually activate); coverage measurement is in place; `SECURITY.md` now has a real scope/response-expectation section rather than just an email address. |
 | **Performance** | 72 | No algorithmic problems found; the gap is entirely an absence of caching/incrementality, which is a real cost at scale but not urgent at current adoption size — correctly deferred, not ignored (see `docs/Performance.md`). |
 
-**Overall: 73/100.** The core product — the detection engine and its precision discipline — is genuinely strong, arguably the standout part of the project. The score is held down almost entirely by project-scaffolding gaps (CI, docs, GitHub hygiene) that are cheap to fix and mostly were fixed this sprint, not by anything wrong with the detection approach itself.
+**Overall: 76/100** (up from 73). The core product — the detection engine and its precision discipline — is genuinely strong, arguably the standout part of the project. Nearly every code-fixable gap identified in the audit has been closed; what's left is either a large, deliberately-deferred design effort (Python AST rewrite, caching, three new detection rules) or requires the maintainer directly (repo settings, publish credentials, the image/GIF hosting decision).
 
 ## What this sprint actually changed
 
@@ -30,35 +30,47 @@ This is the final rollup: scores, what changed in this sprint, and the ranked ba
 7. **README additions**: a comparison table against Semgrep/Trivy/GHAS, a "See it work" section wiring in the existing (previously unreferenced) demo GIF and attack-flow diagrams, an ASCII architecture diagram, and Roadmap/Contributing sections — added to, not replacing, the existing README, which was already strong (evidence tiers, precision contract, real before/after regression numbers) and didn't need a rewrite.
 8. **Wrote `docs/PROJECT_AUDIT.md`** (Phase 1) with severity-ranked findings and a rule-by-rule detection review appendix (Phase 4).
 
-Every change above was verified: `npm run build && npm test` is green (101/101 tests), and the skill-bundle fix was independently re-validated against real-world corpora via `npm run regression`.
+Every change above was verified: `npm run build && npm test` is green, and the skill-bundle fix was independently re-validated against real-world corpora via `npm run regression`.
 
-## Not done this sprint (explicitly, so it's not mistaken for "missed")
+## Follow-up pass: the rest of the code-fixable backlog
 
-- **GitHub repo settings** (branch protection requiring the new CI workflow, enabling Discussions, creating a labels taxonomy) — these are live account/repo-settings changes, not committed files. Not made autonomously; flagged for the maintainer to apply directly, since they affect repository configuration visible to and enforced against every future contributor.
-- **Automated npm publish workflow** — `PUBLISHING.md` documents one that was never committed. Deferred: publishing automation touches release credentials/secrets configuration, which is a higher-trust change than the rest of this sprint and deserves an explicit go-ahead.
-- **Backfilling fixture-corpus coverage for the 6 under-verified rules** (AI011, MCP001, MCP003, VEC002, VEC003, VEC004) — real work, correctly scoped as its own follow-up per rule (see `docs/PROJECT_AUDIT.md` §1.3 and the appendix), not attempted wholesale in this pass to avoid rushing fixture quality on the exact thing this audit is arguing needs rigor.
-- **Python AST rewrite, caching/incremental scanning** — both correctly identified as multi-week efforts in the audit; not attempted.
-- **Committing/compressing `demo.gif` and the two attack diagrams properly** — the README now references them, but the 2.8 MB of PNGs already in git history and the 24.2 MB untracked GIF (flagged in the audit, §2.4) still need a real decision: compress-and-commit, host externally, or Git LFS. Left to the maintainer since it involves either rewriting recent history or setting up external hosting.
+After the first pass, the remaining top-20 items were worked through directly (see the table below for full status). Highlights:
 
-## Top 20 improvements ranked by impact (done vs. remaining)
+9. **Backfilled fixture-corpus coverage for all 6 previously-unverified rules** (AI011, MCP001, MCP003, VEC002, VEC003, VEC004) — new fixtures in `test-fixtures/vulnerable/`, wired into `EXPECTED_VULNERABLE`. Writing the VEC003 fixture surfaced a second real bug: `collectTaintedVars` treated *every* function parameter as user-tainted by presence alone, so any ordinary batch-ingestion function (`function importDocs(docs) { store.addDocuments(docs) }`) — with no request data anywhere in it — got flagged as user-controlled ingestion. Fixed to require the parameter actually be a request-object name (`req`/`request`/`ctx`), and pinned with a new `test-fixtures/safe/vec_batch_ingestion.ts` fixture. Re-verified clean against `llama_index` and `vercel/ai` via `npm run regression`.
+10. **Added `.github/workflows/publish.yml`** matching the draft already documented in `PUBLISHING.md`. It will not publish anything until `NPM_TOKEN` is added as a repo secret — that step needs the maintainer's npm account.
+11. **Added a progress indicator**: a single "Scanning `<path>`..." line to stderr before the scan starts, gated on `isTTY` so CI/piped logs stay clean. The scan pipeline is synchronous/CPU-bound with no natural yield point, so an animated spinner isn't feasible without a larger async rework — this is the honest low-effort version.
+12. **Added coverage measurement**: `npm run coverage` (c8, text + HTML reporters) plus a non-blocking CI job uploading the HTML report as an artifact.
+13. **Strengthened `CONTRIBUTING.md` and `SECURITY.md`** at the repo root — both now link to the new `docs/` tree, state the precision bar and scope boundary explicitly, and `SECURITY.md` distinguishes a vulnerability in the scanner itself from a detection gap (the latter is public-by-design, routed to the missed-detection issue template instead of private disclosure).
+14. **Fixed `init`'s silently-swallowed CI-workflow-write error** — now surfaces the actual failure reason instead of a bare "(Skipped...)".
+
+## Not done (explicitly, so it's not mistaken for "missed")
+
+Only items that genuinely require the maintainer or a large, separately-scoped design effort remain open:
+
+- **GitHub repo settings** (branch protection requiring the CI workflow, enabling Discussions, creating a labels taxonomy) — live account/repo-settings changes, not committed files.
+- **The `NPM_TOKEN` secret** for `publish.yml` to actually activate — requires the maintainer's npm account.
+- **Committing/compressing `demo.gif` and the two attack diagrams properly** — the README references them, but the 2.8 MB of PNGs already in git history and the 24.2 MB untracked GIF (audit §2.4) need a maintainer decision: compress-and-commit, host externally, or Git LFS. Resolving this in either direction means either rewriting recent git history or standing up external hosting — not something to do silently.
+- **Python AST rewrite, caching/incremental scanning, shared file-discovery pass, and the three new detection rules** (model-configuration risk, agent-loop/iteration caps, MCP privilege-escalation/scope-creep) — all correctly identified as multi-week design efforts in the audit, not quick fixes. Attempting any of these without a dedicated design pass risks exactly the kind of premature-abstraction/rushed-evidence-tier work this project's own precision culture warns against.
+
+## Top 20 improvements ranked by impact (final status)
 
 | # | Improvement | Status |
 |--:|---|---|
-| 1 | CI runs build + tests on every PR | ✅ done this sprint |
+| 1 | CI runs build + tests on every PR | ✅ done |
 | 2 | Wire `deobfuscate.test.js` into `npm test` | ✅ done — surfaced and fixed a real bug |
-| 3 | Fix the `.git/` traversal bug in `skill-bundle.ts` | ✅ done this sprint |
-| 4 | Fix silent-0-findings on a bad/nonexistent scan path | ✅ done this sprint |
-| 5 | PR template, CODEOWNERS, dependabot.yml | ✅ done this sprint |
-| 6 | `docs/` tree (Architecture, DetectionEngine, WritingRules, etc.) | ✅ done this sprint |
-| 7 | README: comparison table, visuals section, architecture diagram | ✅ done this sprint |
-| 8 | Backfill fixture coverage for AI011/MCP001/MCP003/VEC002-004 | ⏳ scoped, not started |
+| 3 | Fix the `.git/` traversal bug in `skill-bundle.ts` | ✅ done |
+| 4 | Fix silent-0-findings on a bad/nonexistent scan path | ✅ done |
+| 5 | PR template, CODEOWNERS, dependabot.yml | ✅ done |
+| 6 | `docs/` tree (Architecture, DetectionEngine, WritingRules, etc.) | ✅ done |
+| 7 | README: comparison table, visuals section, architecture diagram | ✅ done |
+| 8 | Backfill fixture coverage for AI011/MCP001/MCP003/VEC002-004 | ✅ done — also fixed a real VEC003 false-positive bug |
 | 9 | Enable branch protection requiring the new CI workflow | ⏳ requires repo-settings access |
-| 10 | Automated npm publish workflow on tag | ⏳ requires publish credentials decision |
+| 10 | Automated npm publish workflow on tag | 🔧 workflow committed, needs `NPM_TOKEN` secret |
 | 11 | Resolve the 2.8 MB of committed PNGs / 24 MB untracked GIF | ⏳ requires a hosting decision |
-| 12 | Progress indicator on long scans | ⏳ open, low effort |
+| 12 | Progress indicator on long scans | ✅ done |
 | 13 | GitHub Discussions + labels taxonomy | ⏳ requires repo-settings access |
-| 14 | Coverage measurement (`c8`/`nyc`) | ⏳ open |
-| 15 | Strengthen `CONTRIBUTING.md`/`SECURITY.md` at repo root | ⏳ open |
+| 14 | Coverage measurement (`c8`/`nyc`) | ✅ done |
+| 15 | Strengthen `CONTRIBUTING.md`/`SECURITY.md` at repo root | ✅ done |
 | 16 | Model-configuration-risk rule (new detection capability) | ⏳ roadmap item, needs design pass |
 | 17 | Agent-loop / iteration-cap rule (new detection capability) | ⏳ roadmap item |
 | 18 | MCP privilege-escalation/scope-creep rule (MCP02 coverage gap) | ⏳ roadmap item |
