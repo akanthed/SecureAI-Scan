@@ -3,8 +3,14 @@ dist/
 .npm-cache/
 coverage/
 .env
+.env.local
+*.log
+npm-debug.log*
 .DS_Store
-secureai-scan-0.1.0.tgz
+Thumbs.db
+.vscode/
+.idea/
+*.tgz
 report.md
 report.html
 MARKETING.md
