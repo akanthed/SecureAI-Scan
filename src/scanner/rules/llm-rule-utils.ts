@@ -342,3 +342,50 @@ export function isRequestLikeNode(node: Node): boolean {
   const text = node.getText().toLowerCase();
   return /\b(req|request|ctx)\s*\./.test(text) || /\b(body|query|params)\b/.test(text);
 }
+
+/**
+ * Resolves a bare-identifier call (`buildPrompt(x)`) to the FunctionDeclaration
+ * it invokes, but only when the resolution is completely unambiguous and the
+ * declaration lives in a file this scan actually parsed. Used to follow
+ * tainted data across a function-call boundary in interprocedural taint
+ * tracing (AI001) — deliberately has no name-heuristic fallback path (unlike
+ * resolveLlmSink): a call this can't cleanly resolve is a call the caller
+ * must not follow, since trusting an unseen function's behavior sight-unseen
+ * is the riskiest step in that analysis. Covers both a same-file helper
+ * (symbol resolves straight to the FunctionDeclaration) and an imported one
+ * (symbol resolves to an ImportSpecifier/Clause/NamespaceImport, one more
+ * hop via getAliasedSymbol() reaches the real declaration). Anything else —
+ * a reassigned function reference, a method call, an overload set, an
+ * external/node_modules declaration — resolves to something other than a
+ * single FunctionDeclaration inside `projectFiles` and is rejected.
+ */
+export function resolveLocalCallTarget(
+  call: Node,
+  projectFiles: Set<SourceFile>,
+): Node | undefined {
+  if (!Node.isCallExpression(call)) return undefined;
+  const callee = call.getExpression();
+  if (!Node.isIdentifier(callee)) return undefined;
+
+  const symbol = callee.getSymbol();
+  if (!symbol) return undefined;
+
+  let targetDecls = symbol.getDeclarations();
+  if (
+    targetDecls.length === 1 &&
+    (Node.isImportSpecifier(targetDecls[0]) ||
+      Node.isImportClause(targetDecls[0]) ||
+      Node.isNamespaceImport(targetDecls[0]))
+  ) {
+    const aliased = symbol.getAliasedSymbol?.();
+    if (!aliased) return undefined;
+    targetDecls = aliased.getDeclarations();
+  }
+
+  if (targetDecls.length !== 1) return undefined;
+  const decl = targetDecls[0];
+  if (!Node.isFunctionDeclaration(decl)) return undefined;
+  if (!projectFiles.has(decl.getSourceFile())) return undefined;
+
+  return decl;
+}

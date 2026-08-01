@@ -61,9 +61,14 @@ const EXPECTED_VULNERABLE = [
   ["AI011", "vulnerable/multiagent_trust.ts"],
   ["MCP001", "vulnerable/mcp_tool_metadata.ts"],
   ["MCP003", "vulnerable/mcp_tool_result.ts"],
+  ["AI012", "vulnerable/unvalidated_structured_output.ts"],
   ["VEC002", "vulnerable/vec_unbounded_search.ts"],
   ["VEC003", "vulnerable/vec_user_ingestion.ts"],
   ["VEC004", "vulnerable/vec_ingest_no_namespace.ts"],
+  // Phase C — AI001 interprocedural (cross-function/cross-file) taint trace.
+  ["AI001", "vulnerable/multihop/two_file/lib/llmclient.ts"],
+  ["AI001", "vulnerable/multihop/three_file/lib/llmclient.ts"],
+  ["AI001", "vulnerable/multihop/mutual_recursion/b.ts"],
 ];
 
 for (const [ruleId, file] of EXPECTED_VULNERABLE) {
@@ -96,4 +101,31 @@ test("AI001 finding carries a source→sink trace", () => {
   assert.equal(ai001.trace[0].kind, "source");
   assert.equal(ai001.trace[ai001.trace.length - 1].kind, "sink");
   assert.equal(ai001.evidence, "proven");
+});
+
+test("AI001 interprocedural (2-file) finding has a multi-hop, cross-file trace capped below proven", () => {
+  const finding = defaultTier.find(
+    (f) => f.rule_id === "AI001" && norm(f.file).includes("vulnerable/multihop/two_file/lib/llmclient.ts"),
+  );
+  assert.ok(finding, "interprocedural AI001 finding expected");
+  assert.ok(finding.trace.length > 2, "expected more than a single-function 2-3 step trace");
+  const files = new Set(finding.trace.map((s) => norm(s.file)));
+  assert.ok(files.size > 1, "expected the trace to span more than one file");
+  assert.notEqual(finding.evidence, "proven", "interprocedural findings must never be proven");
+});
+
+test("AI001 interprocedural (3-file, 2-hop) finding still fires within the hop cap", () => {
+  const finding = defaultTier.find(
+    (f) => f.rule_id === "AI001" && norm(f.file).includes("vulnerable/multihop/three_file/lib/llmclient.ts"),
+  );
+  assert.ok(finding, "3-file interprocedural AI001 finding expected");
+  const files = new Set(finding.trace.map((s) => norm(s.file)));
+  assert.ok(files.size >= 3, "expected the trace to span all three files in the chain");
+});
+
+test("AI001 interprocedural walk is cycle-safe: mutual recursion yields exactly one finding", () => {
+  const hits = defaultTier.filter(
+    (f) => f.rule_id === "AI001" && norm(f.file).includes("vulnerable/multihop/mutual_recursion/"),
+  );
+  assert.equal(hits.length, 1, `expected exactly one finding, got ${JSON.stringify(hits.map((f) => `${f.file}:${f.line}`))}`);
 });

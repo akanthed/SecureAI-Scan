@@ -204,7 +204,7 @@ Scanning clean? Add the badge to your own README:
 
 | Rule | What it proves | OWASP |
 |------|----------------|-------|
-| AI001 | User input flows into a system/developer prompt (traced source → sink) | LLM01 |
+| AI001 | User input flows into a system/developer prompt (traced source → sink, including across function/file boundaries) | LLM01 |
 | AI002 | Prompt content or secrets written to logs (in files that use an LLM SDK) | LLM02 |
 | AI003 | LLM call in a request handler with no auth check before it | LLM10 |
 | AI004 | Whole user/session object serialized into a prompt (field-picking is not flagged) | LLM02 |

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.0 — 2026-08-01
+
+### Added
+- **SVG dataflow diagrams in HTML reports.** `--output report.html` now renders every finding's source→flow→sink trace as an inline node-link diagram instead of a flat text list, with a dashed arrow + "cross-file" label wherever a step crosses a file boundary.
+- **Trace coverage extended to four more rules** — MCP003 (tool result elevated to system-role), AI005 (unsafe output handling), AI012 (unvalidated structured output), and VEC003 (user content ingested into a vector store) now carry a full `source → sink` (or `source → flow → sink`) trace, matching AI001's existing dataflow evidence.
+- **AI001 now traces across function and file boundaries.** When a tainted parameter is passed into a locally-resolved helper function (same project, import-resolved, not a name guess), the scanner follows the call up to 2 hops and builds a multi-file trace through the real call graph, capped at `likely` evidence (never `proven`) and guarded against cycles (mutual recursion produces exactly one finding, not an infinite loop or duplicates).
+
+### Fixed
+- **AI012 could never fire.** `hasSchemaValidationNearby`'s pattern list included bare `.parse(`, which always matched the rule's own `JSON.parse(` detection target, making the rule permanently silent regardless of input. Fixed with a validator-specific pattern that excludes `JSON.parse` while still catching real schema calls (`mySchema.parse(...)`); locked in with a new vulnerable/safe fixture pair.
+
+### Notes
+- The interprocedural AI001 walker's main value is an accurate, honestly-capped cross-file trace and visualization — not new recall on its own. The rule's existing per-parameter taint fallback already flags the same callee sink locations in isolation (by design, since caller context can be internal); the walker's job is to prove and display the real path when one exists, not to catch cases the base rule was missing.
+
 ## 0.6.1 — 2026-08-01
 
 ### Fixed

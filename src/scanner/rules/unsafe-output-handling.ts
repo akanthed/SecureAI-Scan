@@ -1,5 +1,5 @@
 import { Node, SyntaxKind } from "ts-morph";
-import type { Finding, Rule, RuleContext } from "../types.js";
+import type { Finding, Rule, RuleContext, TraceStep } from "../types.js";
 import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { evidenceConfidence } from "../confidence.js";
 import { isLikelyLlmCall, resolveLlmSink } from "./llm-rule-utils.js";
@@ -16,8 +16,13 @@ const DANGEROUS_CALLEES = [
   "raw",
 ];
 
-function collectLlmOutputIdentifiers(functionNode: Node): Set<string> {
-  const outputs = new Set<string>();
+interface OutputOrigin {
+  line: number;
+  note: string;
+}
+
+function collectLlmOutputIdentifiers(functionNode: Node): Map<string, OutputOrigin> {
+  const outputs = new Map<string, OutputOrigin>();
 
   for (const declaration of functionNode.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
     const initializer = declaration.getInitializer();
@@ -30,11 +35,16 @@ function collectLlmOutputIdentifiers(functionNode: Node): Set<string> {
         .getDescendantsOfKind(SyntaxKind.CallExpression)
         .some(isLikelyLlmCall)
     ) {
-      outputs.add(declaration.getName().toLowerCase());
+      const name = declaration.getName();
+      outputs.set(name.toLowerCase(), {
+        line: getNodeLine(declaration),
+        note: `LLM response \`${name}\``,
+      });
     }
   }
 
   // Propagate through derivations: const code = completion.choices[0].message.content
+  // — the origin stays the earliest LLM-call assignment in the chain.
   let changed = true;
   let passes = 0;
   while (changed && passes < 4) {
@@ -45,12 +55,15 @@ function collectLlmOutputIdentifiers(functionNode: Node): Set<string> {
       if (outputs.has(name)) continue;
       const initializer = declaration.getInitializer();
       if (!initializer) continue;
-      const derived = initializer
+      const derivedFrom = initializer
         .getDescendantsOfKind(SyntaxKind.Identifier)
-        .some((id) => outputs.has(id.getText().toLowerCase()));
-      const direct = Node.isIdentifier(initializer) && outputs.has(initializer.getText().toLowerCase());
-      if (derived || direct) {
-        outputs.add(name);
+        .find((id) => outputs.has(id.getText().toLowerCase()));
+      const parentKey =
+        Node.isIdentifier(initializer) && outputs.has(initializer.getText().toLowerCase())
+          ? initializer.getText().toLowerCase()
+          : derivedFrom?.getText().toLowerCase();
+      if (parentKey) {
+        outputs.set(name, outputs.get(parentKey)!);
         changed = true;
       }
     }
@@ -59,18 +72,21 @@ function collectLlmOutputIdentifiers(functionNode: Node): Set<string> {
   return outputs;
 }
 
-function callUsesLlmOutput(call: Node, llmOutputs: Set<string>): boolean {
+/** First LLM-output identifier referenced in a call's arguments, if any. */
+function matchingLlmOutputArg(call: Node, llmOutputs: Map<string, OutputOrigin>): string | undefined {
   if (!Node.isCallExpression(call)) {
-    return false;
+    return undefined;
   }
-  return call
-    .getArguments()
-    .some((arg) =>
-      arg
-        .getDescendantsOfKind(SyntaxKind.Identifier)
-        .some((identifier) => llmOutputs.has(identifier.getText().toLowerCase())) ||
-      (Node.isIdentifier(arg) && llmOutputs.has(arg.getText().toLowerCase())),
-    );
+  for (const arg of call.getArguments()) {
+    if (Node.isIdentifier(arg) && llmOutputs.has(arg.getText().toLowerCase())) {
+      return arg.getText().toLowerCase();
+    }
+    const hit = arg
+      .getDescendantsOfKind(SyntaxKind.Identifier)
+      .find((identifier) => llmOutputs.has(identifier.getText().toLowerCase()));
+    if (hit) return hit.getText().toLowerCase();
+  }
+  return undefined;
 }
 
 function isDangerousSink(call: Node): boolean {
@@ -97,18 +113,21 @@ function isDangerousSink(call: Node): boolean {
   return true;
 }
 
-function isInnerHtmlAssignment(node: Node, llmOutputs: Set<string>): boolean {
+/** LLM-output identifier assigned into .innerHTML/.outerHTML, if any. */
+function innerHtmlLlmOutputMatch(node: Node, llmOutputs: Map<string, OutputOrigin>): string | undefined {
   if (!Node.isBinaryExpression(node)) {
-    return false;
+    return undefined;
   }
   const left = node.getLeft().getText().toLowerCase();
   if (!left.endsWith(".innerhtml") && !left.endsWith(".outerhtml")) {
-    return false;
+    return undefined;
   }
   return node
     .getRight()
     .getDescendantsOfKind(SyntaxKind.Identifier)
-    .some((identifier) => llmOutputs.has(identifier.getText().toLowerCase()));
+    .find((identifier) => llmOutputs.has(identifier.getText().toLowerCase()))
+    ?.getText()
+    .toLowerCase();
 }
 
 export const ruleUnsafeOutputHandling: Rule = {
@@ -119,6 +138,8 @@ export const ruleUnsafeOutputHandling: Rule = {
     const findings: Finding[] = [];
 
     for (const sourceFile of context.sourceFiles) {
+      const relFile = getRelativeFilePath(context.rootPath, sourceFile);
+
       for (const functionNode of sourceFile.getDescendants()) {
         if (
           !Node.isFunctionDeclaration(functionNode) &&
@@ -135,15 +156,28 @@ export const ruleUnsafeOutputHandling: Rule = {
         }
 
         for (const call of functionNode.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-          if (!isDangerousSink(call) || !callUsesLlmOutput(call, llmOutputs)) {
-            continue;
-          }
+          if (!isDangerousSink(call)) continue;
+          const matched = matchingLlmOutputArg(call, llmOutputs);
+          if (!matched) continue;
+          const origin = llmOutputs.get(matched)!;
+          const sinkLine = getNodeLine(call);
+
+          const trace: TraceStep[] = [
+            { kind: "source", file: relFile, line: origin.line, note: origin.note },
+            {
+              kind: "sink",
+              file: relFile,
+              line: sinkLine,
+              note: `passed to \`${call.getExpression().getText()}\``,
+            },
+          ];
+
           findings.push({
             rule_id: "AI005",
             title: "Unsafe LLM output handling",
             severity: "critical",
-            file: getRelativeFilePath(context.rootPath, sourceFile),
-            line: getNodeLine(call),
+            file: relFile,
+            line: sinkLine,
             summary: "LLM output is passed to a dangerous sink.",
             description:
               "Model output flows into code execution, command execution, database, HTML, or parser behavior without an obvious validation boundary.",
@@ -151,19 +185,32 @@ export const ruleUnsafeOutputHandling: Rule = {
               "Validate model output against a strict schema and keep it away from eval, shell, SQL, HTML, and dynamic execution sinks.",
             confidence: evidenceConfidence("likely"),
             evidence: "likely",
+            trace,
           });
         }
 
         for (const assignment of functionNode.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
-          if (!isInnerHtmlAssignment(assignment, llmOutputs)) {
-            continue;
-          }
+          const matched = innerHtmlLlmOutputMatch(assignment, llmOutputs);
+          if (!matched) continue;
+          const origin = llmOutputs.get(matched)!;
+          const sinkLine = getNodeLine(assignment);
+
+          const trace: TraceStep[] = [
+            { kind: "source", file: relFile, line: origin.line, note: origin.note },
+            {
+              kind: "sink",
+              file: relFile,
+              line: sinkLine,
+              note: `assigned to \`${assignment.getLeft().getText()}\``,
+            },
+          ];
+
           findings.push({
             rule_id: "AI005",
             title: "Unsafe LLM output handling",
             severity: "critical",
-            file: getRelativeFilePath(context.rootPath, sourceFile),
-            line: getNodeLine(assignment),
+            file: relFile,
+            line: sinkLine,
             summary: "LLM output is assigned to HTML.",
             description:
               "Model output is rendered as HTML without an obvious sanitizer, which can turn prompt output into script execution.",
@@ -171,6 +218,7 @@ export const ruleUnsafeOutputHandling: Rule = {
               "Render model output as text or sanitize it with a proven HTML sanitizer before assigning it to DOM HTML sinks.",
             confidence: evidenceConfidence("likely"),
             evidence: "likely",
+            trace,
           });
         }
       }
