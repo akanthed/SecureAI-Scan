@@ -196,6 +196,13 @@ export async function runCli(argv: string[]): Promise<void> {
           (options.checkDependencies ?? false) ||
           (selectedRules?.some((id) => id === "DEP001" || id === "DEP002") ?? false);
 
+        // The scan below is synchronous, CPU-bound work with no natural yield
+        // point for an animated spinner — but a single line up front is enough
+        // to stop a multi-second scan on a large repo from looking hung.
+        if (process.stderr.isTTY) {
+          process.stderr.write(`Scanning ${targetPath}...\n`);
+        }
+
         const scanResult = scanRepositoryDetailed(targetPath, {
           rules: selectedRules,
           skipPaths: activePolicy.skipPaths,
@@ -450,8 +457,9 @@ export async function runCli(argv: string[]): Promise<void> {
           const workflowPath = writeGithubWorkflow(resolved);
           process.stdout.write(`✓ CI workflow created: ${workflowPath}\n`);
           process.stdout.write("  Findings will appear in GitHub code scanning via SARIF upload.\n");
-        } catch {
-          process.stdout.write("  (Skipped CI workflow — could not write .github/workflows/)\n");
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          process.stdout.write(`  (Skipped CI workflow — could not write .github/workflows/: ${reason})\n`);
         }
       }
 
