@@ -47,7 +47,7 @@ Do not default to `likely` because it "feels about right." Trace back to an actu
 
 Extend `EXPECTED_VULNERABLE` in `test/corpus.test.js` to assert your vulnerable fixture actually fires.
 
-As of this writing, six shipped rules (AI011, MCP001, MCP003, VEC002, VEC003, VEC004 — see `docs/PROJECT_AUDIT.md`) don't have this coverage yet. Don't follow that as precedent — it's a known gap being backfilled, not the pattern to copy.
+Every shipped rule has this coverage as of the current corpus (`test/corpus.test.js`'s `EXPECTED_VULNERABLE` list) — treat any gap you find as a bug to fix, not a pattern to copy.
 
 ## 6. Build, test, regression-scan
 

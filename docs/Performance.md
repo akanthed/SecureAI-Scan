@@ -16,7 +16,7 @@ None of this is an algorithmic problem (no O(n²) pattern was found scanning the
 
 - **No worker-thread parallelism.** Rules currently run against ts-morph's in-memory `Project`, which isn't trivially thread-safe to share across workers without real design work. Given current scan times are seconds, not minutes, this hasn't been a reported pain point.
 - **No incremental scanning (only re-analyze changed files).** Would require tracking file hashes/mtimes and being careful that dataflow rules spanning multiple files still get correctly re-evaluated when an unrelated file in the flow changes. Worth doing once a large-monorepo user reports scan time as an actual blocker — not worth the complexity budget speculatively.
-- **No shared file-discovery pass across the four surfaces.** Lower effort than the above two, and the most likely first fix if this area gets prioritized — see `docs/PROJECT_AUDIT.md` §3.4.
+- **No shared file-discovery pass across the four surfaces.** Lower effort than the above two, and the most likely first fix if this area gets prioritized.
 
 ## What contributors should do today
 
@@ -24,4 +24,4 @@ If you're touching the scan pipeline (`scan.ts`, `project.ts`, or a rule that do
 
 ## Progress feedback
 
-There is currently no progress indicator during a scan — nothing prints between invocation and the final report. On a large repo this can look hung even though nothing is actually stuck. This is a UX gap tracked separately in `docs/PROJECT_AUDIT.md` §3.5, not a performance problem per se, but worth knowing if you're debugging a "the scanner seems frozen" report — check `--debug` output first to confirm it's making progress before assuming a real hang.
+A scan prints a single "Scanning `<path>`..." line to stderr before starting (gated on `isTTY`, so CI/piped logs stay clean), so a multi-second scan on a large repo doesn't look hung. There's no animated progress beyond that — the scan pipeline is synchronous, CPU-bound work with no natural yield point for a spinner, which would need a larger async rework to add. If you're debugging a "the scanner seems frozen" report, check `--debug` output first to confirm it's making progress before assuming a real hang.
