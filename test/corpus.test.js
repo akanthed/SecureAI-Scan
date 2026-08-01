@@ -56,6 +56,14 @@ const EXPECTED_VULNERABLE = [
   // (cisco-ai-defense/skill-scanner's evals/ corpus) — see CHANGELOG 0.6.1.
   ["SKL005", "vulnerable/skills/env-harvest-skill/collect.py"],
   ["SKL005", "vulnerable/skills/deferred-exec-skill/updater.py"],
+  // Backfilled recall coverage — these six rules were registered and shipping
+  // with no fixture-corpus proof they still fire (docs/PROJECT_AUDIT.md §1.3).
+  ["AI011", "vulnerable/multiagent_trust.ts"],
+  ["MCP001", "vulnerable/mcp_tool_metadata.ts"],
+  ["MCP003", "vulnerable/mcp_tool_result.ts"],
+  ["VEC002", "vulnerable/vec_unbounded_search.ts"],
+  ["VEC003", "vulnerable/vec_user_ingestion.ts"],
+  ["VEC004", "vulnerable/vec_ingest_no_namespace.ts"],
 ];
 
 for (const [ruleId, file] of EXPECTED_VULNERABLE) {

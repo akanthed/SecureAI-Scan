@@ -52,13 +52,26 @@ function isVectorIngestionCall(node: Node): boolean {
   );
 }
 
+// Bare parameter names that conventionally hold the whole request/context
+// object (matches the REQUEST_SOURCES prefixes above, minus the dot).
+const REQUEST_PARAM_NAMES = new Set(["req", "request", "ctx"]);
+
 function collectTaintedVars(fnNode: Node): Set<string> {
   const tainted = new Set<string>();
 
   if ("getParameters" in fnNode) {
     for (const param of (fnNode as any).getParameters()) {
       const nameNode = param.getNameNode?.();
-      if (nameNode && Node.isIdentifier(nameNode)) tainted.add(nameNode.getText());
+      // Only a parameter that IS the request object (req, request, ctx) is
+      // tainted by presence alone. Every other parameter used to be tainted
+      // unconditionally, which flagged any ordinary batch/admin ingestion
+      // function — e.g. `function importDocs(docs) { store.addDocuments(docs) }`
+      // — purely because "docs" is a parameter, with no actual request-data
+      // link. Real request-derived taint is still caught below via
+      // REQUEST_SOURCES member-access on the initializer.
+      if (nameNode && Node.isIdentifier(nameNode) && REQUEST_PARAM_NAMES.has(nameNode.getText().toLowerCase())) {
+        tainted.add(nameNode.getText());
+      }
     }
   }
 
