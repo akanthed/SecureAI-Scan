@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1 — 2026-08-01
+
+### Fixed
+- **DEP001 flagged every scoped npm package (`@types/node`, `@anthropic-ai/*`, `@vercel/*`, ...) as "not found in npm."** `isReasonablePackageName`'s sanity-check regex had no `/`, so any scoped name was rejected before the registry was ever queried, always resolving to a false "not found." Found by running the scanner against its own `package.json`. Fixed the regex to accept an optional `@scope/` prefix; added a permanent fixture in `test/dependency-guard.test.js`.
+
+### Added
+- Marketing/discoverability source assets (`mcp-attack-diagram.png`, `rag-poisoning-diagram.png`) for upcoming Dev.to articles on MCP tool poisoning and RAG data poisoning. The demo GIF and social preview card are staged but held back from this release pending compression/regeneration — see `MARKETING.md`.
+
 ## 0.6.0 — 2026-07-28
 
 Evasion-resistant Agent Skill scanning. In July 2026, [*Cloak and Detonate*](https://arxiv.org/abs/2607.02357) (arXiv:2607.02357) showed that nine published skill scanners could be bypassed by >80% (structural obfuscation) and ≥90% (self-extracting packing) using transformations that preserve the payload exactly; separately, Gecko Security demonstrated an exfiltration payload hidden in a `*.test.ts` file that every public scanner skipped. SecureAI-Scan v0.5.0 was vulnerable to all of these. This release closes each published technique, and was additionally validated against two real-world corpora added to `scripts/regression-scan.js`: the canonical [anthropics/skills](https://github.com/anthropics/skills) repo (18 real skill bundles, zero findings — a pure precision check) and [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner)'s own labeled eval corpus (20 skills under `evals/`, each with an `_expected.json` verdict and a directory literally named `malicious/` or `safe/`) — a rare case where a real-world repo doubles as a recall check, not just a precision one. Result: 6/6 in-scope malicious fixtures correctly flagged, zero findings on any fixture labeled safe.

@@ -45,6 +45,30 @@ test("dependency guard flags missing and suspicious dependency names", async () 
   assert.equal(ruleIds.includes("DEP002"), true);
 });
 
+test("DEP001 does not treat a scoped npm package name as unreasonable (found while scanning this repo's own package.json: @types/node was flagged 'not found' before ever reaching the registry)", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-deps-scoped-"));
+
+  fs.writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify(
+      { name: "tmp", version: "1.0.0", dependencies: { "@types/node": "^22.0.0" } },
+      null,
+      2,
+    ),
+  );
+
+  const findings = await scanDependencyFilesForRisks({
+    rootPath: dir,
+    checker: new FakeChecker(),
+  });
+
+  assert.equal(
+    findings.some((f) => f.rule_id === "DEP001"),
+    false,
+    "a well-formed scoped package name must not be rejected before the registry check runs",
+  );
+});
+
 test("DEP003 flags known-malicious packages in package.json and MCP configs, offline", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-advisories-"));
 

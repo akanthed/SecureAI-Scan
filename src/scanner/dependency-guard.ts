@@ -362,5 +362,9 @@ function editDistance(a: string, b: string): number {
 }
 
 function isReasonablePackageName(name: string): boolean {
-  return /^[a-zA-Z0-9@._-]{1,214}$/.test(name);
+  // Scoped npm packages ("@scope/name") legitimately contain a slash;
+  // rejecting it here previously short-circuited every scoped package
+  // (e.g. @types/node) straight to a false "not found" DEP001 finding
+  // before the registry was ever queried.
+  return /^(@[a-zA-Z0-9._-]{1,213}\/)?[a-zA-Z0-9._-]{1,214}$/.test(name);
 }
