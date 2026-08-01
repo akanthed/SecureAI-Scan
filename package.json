@@ -68,7 +68,7 @@
     "regression": "npm run build && node scripts/regression-scan.js"
   },
   "dependencies": {
-    "commander": "^14.0.3",
+    "commander": "^15.0.0",
     "ts-morph": "^28.0.0"
   },
   "devDependencies": {
