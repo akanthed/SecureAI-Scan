@@ -181,6 +181,64 @@ test("DEP003 stays silent on clean dependencies", () => {
   assert.deepEqual(scanKnownMaliciousPackages(dir), []);
 });
 
+// ── OSV snapshot (advisories-generated.ts) ─────────────────────────────────
+
+test("DEP003 fires on a pinned version inside an OSV advisory range, and clears on the patched pin", () => {
+  // llama-cpp-python CVE-2024-34359 (SSTI → RCE), affected ">=0.2.30 <0.2.72".
+  // Same both-ways proof as the curated mcp-remote case, but against an entry
+  // that came from the generated snapshot rather than the hand-written list.
+  const vulnDir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-osv-vuln-"));
+  fs.writeFileSync(path.join(vulnDir, "requirements.txt"), "llama-cpp-python==0.2.71\n");
+  const vuln = scanKnownMaliciousPackages(vulnDir).filter((f) => f.rule_id === "DEP003");
+  assert.equal(vuln.length, 1, `expected the vulnerable pin to fire: ${JSON.stringify(vuln)}`);
+  assert.equal(vuln[0].evidence, "proven");
+  assert.equal(vuln[0].severity, "high");
+
+  const patchedDir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-osv-patched-"));
+  fs.writeFileSync(path.join(patchedDir, "requirements.txt"), "llama-cpp-python==0.2.72\n");
+  assert.deepEqual(
+    scanKnownMaliciousPackages(patchedDir),
+    [],
+    "the patched pin must clear completely",
+  );
+});
+
+test("DEP003 normalizes PyPI names, so llama_cpp_python resolves to the same advisory", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-osv-normalize-"));
+  fs.writeFileSync(path.join(dir, "requirements.txt"), "llama_cpp_python==0.2.71\n");
+  assert.equal(scanKnownMaliciousPackages(dir).length, 1);
+});
+
+test("an unpinned CVE-bearing dependency never reaches the default report (precision contract)", () => {
+  // The OSV snapshot covers mainstream packages. If ambiguity flagged at
+  // proven tier the way it does for malicious packages, every repo with
+  // `langchain>=0.1.0` would get a critical finding it can't act on. Those
+  // must stay heuristic (--paranoid only).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-osv-unpinned-"));
+  fs.writeFileSync(
+    path.join(dir, "requirements.txt"),
+    ["langchain>=0.1.0", "llama-index", "gradio~=4.0", "transformers"].join("\n") + "\n",
+  );
+  const findings = scanKnownMaliciousPackages(dir);
+  assert.equal(
+    findings.some((f) => f.evidence !== "heuristic"),
+    false,
+    `unpinned deps must not produce proven/likely findings: ${JSON.stringify(findings.map((f) => [f.summary, f.evidence]))}`,
+  );
+});
+
+test("every generated advisory has a machine-comparable range (an always-on advisory is a false positive by construction)", async () => {
+  const { GENERATED_ADVISORIES } = await import("../dist/scanner/advisories-generated.js");
+  assert.ok(GENERATED_ADVISORIES.length > 50, "snapshot looks empty — did sync-advisories.js run?");
+  for (const advisory of GENERATED_ADVISORIES) {
+    assert.ok(
+      Array.isArray(advisory.ranges) && advisory.ranges.length > 0,
+      `${advisory.name} has no ranges: ${advisory.reason}`,
+    );
+    assert.match(advisory.reference, /^https:\/\/osv\.dev\/vulnerability\//);
+  }
+});
+
 test("dependency guard fails open (and warns once) when the registry is unreachable", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-deps-offline-"));
   fs.writeFileSync(

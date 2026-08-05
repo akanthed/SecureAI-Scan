@@ -1,27 +1,45 @@
 # Performance
 
-Current state, honestly, as of v0.6.1 — this is a snapshot for contributors thinking about scanning large repos, not a set of benchmarks to hit.
+Measured, not estimated. Numbers below come from `node --cpu-prof` runs against the regression corpus (`npm run regression`), largest repo `vercel/ai` at 5,691 files.
 
-## How a scan actually runs
+## Where the time actually goes
 
-- `src/scanner/project.ts` builds one `ts-morph` `Project` from the target path per invocation. There is no caching or incremental-scan support: every run parses every file from scratch, including in CI where the same repo is scanned on every PR.
-- `src/scanner/scan.ts` runs fully synchronously and serially. Each rule in `RULES` walks the *entire* set of source files independently (`RULES.map(rule => rule.run(context))`) — rules do not share a single traversal, so the cost is roughly O(rules × files × AST nodes), not O(files × AST nodes).
-- The four scanning surfaces (TS/JS, Python, MCP config, Agent Skill bundles — see [Architecture.md](Architecture.md)) each do their own file discovery / glob pass independently, rather than sharing one file list from a single walk of the repo.
-- `--baseline` diffs *findings* against a saved baseline, not files — it doesn't skip re-scanning unchanged files, it only filters which findings get reported afterward.
-- The only asynchronous I/O in the default scan path is `--check-dependencies`'s registry lookups (network calls to npm/PyPI); everything else is synchronous.
+The dominant cost in a scan is AST traversal — not type resolution, not I/O, not rule logic. A CPU profile attributed **~95s of a 150s** `vercel/ai` scan to ts-morph descendant iteration alone (`getCompilerDescendantsIterator`, `getCompilerForEachDescendantsIterator`, `getCompilerChildren` and their node-wrapper cache): more than everything else in the profile combined.
 
-None of this is an algorithmic problem (no O(n²) pattern was found scanning the codebase) — it's an absence of caching and sharing, which mainly matters as repo size grows. On the repos in the regression benchmark (`npm run regression` — up to `vercel/ai`'s 5,511 files), scan time in the multi-second range, reported in the terminal header (`v0.6.1 · N files · X.Xs`).
+The cause was structural. Each of ~20 rules ran its own `sourceFile.getDescendantsOfKind(CallExpression)` or `sourceFile.getDescendants()` per file, so every file's AST was walked ~20 times per scan — and nested functions were re-walked once per enclosing scope on top of that.
 
-## What's not done yet, and why it's not urgent
+Two fixes, both in [`src/utils/ast.ts`](../src/utils/ast.ts):
 
-- **No worker-thread parallelism.** Rules currently run against ts-morph's in-memory `Project`, which isn't trivially thread-safe to share across workers without real design work. Given current scan times are seconds, not minutes, this hasn't been a reported pain point.
-- **No incremental scanning (only re-analyze changed files).** Would require tracking file hashes/mtimes and being careful that dataflow rules spanning multiple files still get correctly re-evaluated when an unrelated file in the flow changes. Worth doing once a large-monorepo user reports scan time as an actual blocker — not worth the complexity budget speculatively.
-- **No shared file-discovery pass across the four surfaces.** Lower effort than the above two, and the most likely first fix if this area gets prioritized.
+- **One walk per file, shared.** `getFileCalls` / `getFileFunctions` build a per-file index in a single `forEachDescendant` pass, memoized in a `WeakMap`. Rules consume the index instead of walking.
+- **Containment by binary search.** `getCallsWithin(fn)` slices that index rather than walking the subtree — the index is in pre-order, so a node's descendants are a contiguous run of it. Spans come from `compilerNode.pos`/`.end`, captured during the indexing walk; an earlier version used `getStart()`, which rescans leading trivia on every probe and was *slower* than the walk it replaced.
 
-## What contributors should do today
+A third fix, in [`src/scanner/rules/llm-rule-utils.ts`](../src/scanner/rules/llm-rule-utils.ts): `resolveLlmSink` now checks the generation-shaped method name and the file's imports *before* asking the type checker anything. `resolveIdentifierModule` can only ever report a specifier the file itself imports, so a file with no LLM SDK import cannot produce a resolved sink — the type checker never needed consulting for the overwhelming majority of files.
 
-If you're touching the scan pipeline (`scan.ts`, `project.ts`, or a rule that does heavy work per file), the practical check is: run `npm run regression` and compare wall-clock time before/after on the two largest repos in the set (`vercel/ai`, `llama_index`) — there's no formal perf test, so this is a manual sanity check, not a gate. Flag a regression in your PR description if you see one; don't silently absorb it.
+### Result
+
+| | before | after |
+|---|---:|---:|
+| `vercel/ai` (5,691 files) | 217s | **62s** |
+| `npm test` (full suite) | 42s | **16s** |
+
+Findings are identical before and after across the full regression corpus. This was a cost change, not a behaviour change — and it is verified as such, not assumed.
+
+## Guarding the optimization
+
+`getCallsWithin`'s contiguity assumption is the kind that fails silently: if it broke, rules would stop seeing calls and the scanner would simply go quiet, which is the worst failure mode a scanner has. [`test/ast-index.test.js`](../test/ast-index.test.js) therefore asserts the index and the slice against ts-morph's *own* `getDescendantsOfKind` walk — exact membership and document order — over a fixture with nested arrows, class methods, and tagged templates.
+
+There is no wall-clock perf gate: timing tests are flaky on shared CI runners, and the correctness test above is what actually protects the behaviour.
+
+## What's still not done
+
+- **No incremental scanning.** Every run parses every file from scratch, including in CI on every PR. `--baseline` filters *findings* after the fact; it does not skip unchanged files. Real incremental support needs file hashing plus care that cross-file dataflow rules re-evaluate when any file in the flow changes.
+- **No worker-thread parallelism.** Rules run against a shared in-memory ts-morph `Project`, which is not trivially shareable across threads.
+- **No shared file-discovery pass.** The four scanning surfaces (TS/JS, Python, MCP config, Agent Skill bundles — see [Architecture.md](Architecture.md)) each glob the repo independently. Lowest-effort remaining win.
+
+## What contributors should do
+
+If you touch `scan.ts`, `project.ts`, `llm-rule-utils.ts`, or add per-file work to a rule: time `npm run regression` on `vercel/ai` and `llama_index` before and after, and say so in the PR. **Never reintroduce a whole-file `getDescendants*` call in a rule** — use the shared index. That single pattern cost 3.5× scan time.
 
 ## Progress feedback
 
-A scan prints a single "Scanning `<path>`..." line to stderr before starting (gated on `isTTY`, so CI/piped logs stay clean), so a multi-second scan on a large repo doesn't look hung. There's no animated progress beyond that — the scan pipeline is synchronous, CPU-bound work with no natural yield point for a spinner, which would need a larger async rework to add. If you're debugging a "the scanner seems frozen" report, check `--debug` output first to confirm it's making progress before assuming a real hang.
+A scan prints a single `Scanning <path>...` line to stderr before starting (gated on `isTTY`, so CI and piped logs stay clean). There's no spinner: the pipeline is synchronous CPU-bound work with no natural yield point. When triaging a "scanner seems frozen" report, check `--debug` first to confirm it's progressing.

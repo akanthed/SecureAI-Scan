@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://akanthed.github.io/SecureAI-Scan/sitemap.xml

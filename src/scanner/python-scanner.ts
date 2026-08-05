@@ -1,12 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Finding, Severity } from "./types.js";
-import { evidenceConfidence, demoteEvidence } from "./confidence.js";
+import { evidenceConfidence, demoteEvidence, isTestFilePath } from "./confidence.js";
 import {
   findCrossToolReference,
   findInvisibleUnicode,
   matchInjectionPhrases,
 } from "./tool-poisoning-checks.js";
+import {
+  analyzePythonSource,
+  type PythonSource,
+} from "./python-source.js";
+import {
+  pythonCallName,
+  pythonDescendants,
+  pythonNodeContainsText,
+  pythonTargetText,
+  type PythonCallNode,
+  type PythonNode,
+} from "./python-ast.js";
 
 // ── Python LLM SDK call patterns ──────────────────────────────────────────
 const LLM_CALL_PATTERNS = [
@@ -34,6 +46,66 @@ const LLM_CALL_PATTERNS = [
   /\.\s*chat\s*\.\s*complete\s*\(/,
   /ollama\s*\.\s*(chat|generate)\s*\(/,
 ];
+
+// ── Receiver-resolved LLM calls ───────────────────────────────────────────
+// The patterns above hardcode receiver names (`client`, `llm`, `chain`,
+// `model`), so renaming the variable silently disabled every Python rule.
+// These resolve the receiver instead: a variable bound to a known SDK
+// constructor in the same file makes any invocation-shaped method call on it
+// an LLM sink, whatever it is named. This is the Python analogue of the TS
+// scanner's import-resolved `resolveLlmSink`.
+const PY_LLM_CONSTRUCTORS = [
+  /\b(?:Async)?(?:Azure)?OpenAI\s*\(/,
+  /\b(?:Async)?Anthropic(?:Bedrock|Vertex)?\s*\(/,
+  /\bgenai\s*\.\s*(?:Client|GenerativeModel)\s*\(/,
+  /\bGenerativeModel\s*\(/,
+  /\bChat(?:OpenAI|Anthropic|GoogleGenerativeAI|VertexAI|Bedrock|BedrockConverse|MistralAI|Cohere|Ollama|Groq|Fireworks|Together|LiteLLM)\s*\(/,
+  /\b(?:LLMChain|ConversationChain|RetrievalQA|ConversationalRetrievalChain)\s*\.?\s*(?:from_\w+\s*)?\(/,
+  /\bboto3\s*\.\s*client\s*\(\s*["']bedrock[\w-]*["']/,
+  /\bcohere\s*\.\s*(?:Async)?Client(?:V2)?\s*\(/,
+  /\b(?:Mistral|MistralClient|MistralAsyncClient)\s*\(/,
+  /\b(?:ollama\s*\.\s*Client|Ollama|VertexAI|LlamaCPP|HuggingFacePipeline)\s*\(/,
+  /\.\s*as_(?:query_engine|chat_engine|retriever)\s*\(/,
+  /\|\s*(?:StrOutputParser\s*\(\s*\)|llm\b)/,
+];
+
+const MAX_TRACKED_RECEIVERS = 60;
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Variables (including `self.x` attributes) assigned from a known LLM SDK
+ * constructor anywhere in the file, compiled into call-site matchers.
+ */
+function collectLlmReceiverNames(src: PythonSource): Set<string> {
+  const names = new Set<string>();
+  for (const assignment of src.ast.assignments) {
+    if (!PY_LLM_CONSTRUCTORS.some((pattern) => pattern.test(assignment.value.text))) continue;
+    for (const targetNode of assignment.targets) {
+      const target = pythonTargetText(targetNode);
+      names.add(target);
+      const shortName = target.split(".").pop();
+      if (shortName) names.add(shortName);
+    }
+    if (names.size >= MAX_TRACKED_RECEIVERS) break;
+  }
+  return names;
+}
+
+const PY_LLM_METHOD_NAME = new RegExp(
+  String.raw`(?:^|\.)(?:create|parse|stream|completion|acompletion|text_completion|generate_content(?:_async)?|invoke_model|converse|ainvoke|invoke|astream|abatch|batch|predict|run|query|chat|complete|generate)$`,
+);
+
+function isLlmCallNode(call: PythonCallNode, receiverNames: Set<string>): boolean {
+  const name = pythonCallName(call);
+  if (!PY_LLM_METHOD_NAME.test(name)) return false;
+  if (matchesAny(`${call.node.text}(`, LLM_CALL_PATTERNS)) return true;
+  return [...receiverNames].some(
+    (receiver) => name === receiver || name.startsWith(`${receiver}.`) || name.startsWith(`self.${receiver}.`),
+  );
+}
 
 // ── User input taint sources ───────────────────────────────────────────────
 // NOTE: os.environ deliberately excluded — env vars are operator-controlled
@@ -99,8 +171,8 @@ const PY_LLM_IMPORT_PATTERNS = [
   /^\s*(?:import|from)\s+vertexai\b/m,
 ];
 
-function fileImportsLlmSdk(raw: string): boolean {
-  return PY_LLM_IMPORT_PATTERNS.some((p) => p.test(raw));
+function fileImportsLlmSdk(src: PythonSource): boolean {
+  return src.ast.imports.some((node) => PY_LLM_IMPORT_PATTERNS.some((pattern) => pattern.test(node.text)));
 }
 
 // ── MCP server SDK import detection (FastMCP / official mcp package) ──────
@@ -109,94 +181,86 @@ const PY_MCP_IMPORT_PATTERNS = [
   /^\s*(?:import|from)\s+fastmcp\b/m,
 ];
 
-function fileImportsMcpServerSdk(raw: string): boolean {
-  return PY_MCP_IMPORT_PATTERNS.some((p) => p.test(raw));
+function fileImportsMcpServerSdk(src: PythonSource): boolean {
+  return src.ast.imports.some((node) => PY_MCP_IMPORT_PATTERNS.some((pattern) => pattern.test(node.text)));
 }
 
 // ── MCP tool decorator extraction ─────────────────────────────────────────
 
-const PY_TOOL_DECORATOR_RE = /^\s*@[\w.]*\.tool\b/;
-
 interface PyToolDefinition {
   name: string;
+  decoratorLine: number;
   /** description= kwarg text and/or the decorated function's docstring. */
   texts: Array<{ value: string; line: number }>;
 }
 
-/**
- * If lines[i] is an @xxx.tool decorator, extract the tool's name and its
- * descriptive text (a description="..." kwarg on the decorator, plus the
- * docstring of the decorated def). Line numbers are 0-based indices.
- */
-function extractPyToolAtLine(lines: string[], i: number): PyToolDefinition | undefined {
-  if (!PY_TOOL_DECORATOR_RE.test(lines[i])) return undefined;
+function pythonStringValue(node: PythonNode): string {
+  const text = node.text;
+  const quote = text.match(/^(?:[rubfRUBF]*)("""|'''|"|')/)?.[1];
+  if (!quote) return text;
+  const start = text.indexOf(quote) + quote.length;
+  const end = text.endsWith(quote) ? text.length - quote.length : text.length;
+  return text.slice(start, end);
+}
 
-  const texts: PyToolDefinition["texts"] = [];
-  let name: string | undefined;
+function collectPyTools(src: PythonSource): PyToolDefinition[] {
+  const tools: PyToolDefinition[] = [];
+  for (const fn of src.ast.functions) {
+    const decorator = fn.decorators.find((candidate) =>
+      /@\s*[\w.]*\.?tool(?:\s*\(|\s*$)/.test(candidate.text),
+    );
+    if (!decorator) continue;
 
-  // description= / name= kwargs can span the decorator's argument lines.
-  for (let j = i; j < Math.min(lines.length, i + 6); j++) {
-    const descMatch = /description\s*=\s*(?:"""|''')?["']([^"']*)["']/.exec(lines[j]);
-    if (descMatch) texts.push({ value: descMatch[1], line: j });
-    const nameMatch = /\bname\s*=\s*["']([^"']*)["']/.exec(lines[j]);
-    if (nameMatch) name = nameMatch[1];
-    if (/^\s*def\s/.test(lines[j])) break;
-  }
-
-  // The decorated def: tool name defaults to the function name; docstring is
-  // the description FastMCP sends to clients.
-  for (let j = i + 1; j < Math.min(lines.length, i + 8); j++) {
-    const defMatch = /^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(lines[j]);
-    if (!defMatch) continue;
-    name = name ?? defMatch[1];
-    for (let k = j + 1; k < Math.min(lines.length, j + 4); k++) {
-      const open = /^\s*(?:[rbu]*)("""|''')/.exec(lines[k]);
-      if (!open) {
-        if (lines[k].trim() !== "" && !/^\s*#/.test(lines[k])) break;
-        continue;
+    let name = fn.name;
+    const texts: PyToolDefinition["texts"] = [];
+    for (const keyword of pythonDescendants(decorator, "keyword_argument")) {
+      const keywordName = keyword.childForFieldName("name")?.text;
+      const value = keyword.childForFieldName("value");
+      if (!value) continue;
+      if (keywordName === "name") name = pythonStringValue(value);
+      if (keywordName === "description") {
+        texts.push({ value: pythonStringValue(value), line: value.startPosition.row });
       }
-      const quote = open[1];
-      const docLines: string[] = [];
-      let closed = false;
-      for (let m = k; m < Math.min(lines.length, k + 40); m++) {
-        const content = m === k ? lines[m].slice(lines[m].indexOf(quote) + 3) : lines[m];
-        const endIdx = content.indexOf(quote);
-        if (endIdx >= 0) {
-          docLines.push(content.slice(0, endIdx));
-          closed = true;
-          break;
-        }
-        docLines.push(content);
-      }
-      if (closed || docLines.length > 0) texts.push({ value: docLines.join("\n"), line: k });
-      break;
     }
-    break;
-  }
 
-  if (!name || texts.length === 0) return undefined;
-  return { name, texts };
+    const firstStatement = fn.body.namedChildren[0];
+    const docstring = firstStatement
+      ? pythonDescendants(firstStatement, new Set(["string", "concatenated_string"]))[0]
+      : undefined;
+    if (docstring) {
+      texts.push({ value: pythonStringValue(docstring), line: docstring.startPosition.row });
+    }
+    if (texts.length > 0) {
+      tools.push({ name, decoratorLine: decorator.startPosition.row, texts });
+    }
+  }
+  return tools;
 }
 
-/** All tool names defined in the file, for cross-tool shadowing detection. */
-function collectPyToolNames(lines: string[]): Set<string> {
+function callsWithinNode(src: PythonSource, node: PythonNode): PythonCallNode[] {
+  return src.ast.calls.filter(
+    (call) => call.node.startIndex >= node.startIndex && call.node.endIndex <= node.endIndex,
+  );
+}
+
+/** Assignment targets whose value contains an import-resolved LLM call. */
+function assignedVarsFromLlmCalls(
+  src: PythonSource,
+  startLine: number,
+  endLine: number,
+  ctx: FileContext,
+): Set<string> {
   const names = new Set<string>();
-  for (let i = 0; i < lines.length; i++) {
-    const def = extractPyToolAtLine(lines, i);
-    if (def) names.add(def.name);
+  for (const assignment of src.ast.assignmentsBefore(endLine, startLine)) {
+    if (!callsWithinNode(src, assignment.value).some(ctx.isLlmCallNode)) continue;
+    for (const target of assignment.targets) names.add(pythonTargetText(target));
   }
   return names;
 }
 
-/** Variable names assigned directly from an LLM call within the given lines. */
-function assignedVarsFromLlmCalls(candidateLines: string[]): Set<string> {
-  const names = new Set<string>();
-  for (const l of candidateLines) {
-    if (!matchesAny(l, LLM_CALL_PATTERNS)) continue;
-    const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(l);
-    if (m) names.add(m[1]);
-  }
-  return names;
+/** `\bname\b`, with any attribute dots in `name` treated literally. */
+function wordRe(name: string): RegExp {
+  return new RegExp(String.raw`\b${escapeRe(name)}\b`);
 }
 
 // ── Auth decorator patterns ───────────────────────────────────────────────
@@ -238,12 +302,6 @@ const SANITIZATION_SIGNALS = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-function windowText(lines: string[], index: number, before = 0, after = 8): string {
-  const start = Math.max(0, index - before);
-  const end = Math.min(lines.length - 1, index + after);
-  return lines.slice(start, end + 1).join("\n");
-}
-
 function matchesAny(text: string, patterns: RegExp[]): boolean {
   return patterns.some((p) => p.test(text));
 }
@@ -256,10 +314,7 @@ function isTestFile(relPath: string): boolean {
   const normalized = relPath.toLowerCase().replace(/\\/g, "/");
   const base = normalized.split("/").pop() ?? "";
   return (
-    normalized.includes("/tests/") ||
-    normalized.startsWith("tests/") ||
-    normalized.includes("/test/") ||
-    normalized.startsWith("test/") ||
+    isTestFilePath(normalized) ||
     base.endsWith("_test.py") ||
     base.startsWith("test_") ||
     base === "conftest.py"
@@ -279,44 +334,47 @@ function findingBase(
 // ── Rules ─────────────────────────────────────────────────────────────────
 
 /**
- * Find the start of the function enclosing line `i`, by walking backward to
- * the nearest `def` at a shallower indentation. Falls back to a fixed cap
- * when no enclosing def is found (e.g. module-level code).
+ * Find the AST scope containing a call. Module-level calls use the module as
+ * their scope so the same dataflow engine handles scripts and handlers.
  */
-function findEnclosingFunctionStart(lines: string[], i: number): number {
-  const FALLBACK_CAP = 60;
-  const indentOf = (l: string) => (/^(\s*)/.exec(l)?.[1].length ?? 0);
-  const callIndent = indentOf(lines[i]);
-  for (let j = i - 1; j >= 0 && j >= i - 400; j--) {
-    if (/^\s*(async\s+)?def\s+\w+\s*\(/.test(lines[j]) && indentOf(lines[j]) < callIndent) {
-      return j;
-    }
-  }
-  return Math.max(0, i - FALLBACK_CAP);
+function pythonScope(src: PythonSource, node: PythonNode): PythonNode {
+  return src.ast.enclosingFunction(node)?.body ?? src.ast.root;
 }
 
 /**
- * Collect variable names tainted by request data within [start, upTo],
- * propagating through direct assignment and string composition (fixpoint,
- * a few passes). This lets AI001 see taint that flows through ordinary
- * business logic (logging, rate limiting, RAG lookups) between the request
- * read and the LLM call — a fixed line-distance window missed this whenever
- * a handler had more than a handful of lines in between.
+ * Collect names tainted by request data within [start, upTo], propagating
+ * through assignment and string composition (fixpoint, a few passes). This
+ * lets AI001 see taint that flows through ordinary business logic (logging,
+ * rate limiting, RAG lookups) between the request read and the LLM call — a
+ * fixed line-distance window missed this whenever a handler had more than a
+ * handful of lines in between.
+ *
+ * Operates on reassembled statements, so an assignment split across lines is
+ * one unit and a keyword argument on a continuation line is not mistaken for
+ * an assignment. Attribute targets are tracked too: `self.user_message =
+ * request.json[...]` is the ordinary shape of any class-based handler (Flask
+ * `MethodView`, FastAPI dependency classes, agent session state) and was
+ * previously invisible.
  */
-function collectRequestTaintedVars(lines: string[], start: number, upTo: number): Set<string> {
+function collectRequestTaintedVars(src: PythonSource, scope: PythonNode, upTo: number): Set<string> {
   const tainted = new Set<string>();
+  const assignments = src.ast.assignments.filter(
+    (assignment) =>
+      assignment.node.startIndex >= scope.startIndex &&
+      assignment.node.endIndex <= scope.endIndex &&
+      assignment.node.startPosition.row <= upTo,
+  );
   for (let pass = 0; pass < 4; pass++) {
     let changed = false;
-    for (let j = start; j <= upTo; j++) {
-      const m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/.exec(lines[j]);
-      if (!m) continue;
-      const [, name, rhs] = m;
-      if (tainted.has(name)) continue;
+    for (const assignment of assignments) {
       const rhsIsTainted =
-        matchesAny(rhs, REQUEST_PATTERNS) ||
-        [...tainted].some((t) => new RegExp(`\\b${t}\\b`).test(rhs));
-      if (rhsIsTainted) {
-        tainted.add(name);
+        matchesAny(assignment.value.text, REQUEST_PATTERNS) ||
+        [...tainted].some((target) => pythonNodeContainsText(assignment.value, target));
+      if (!rhsIsTainted) continue;
+      for (const targetNode of assignment.targets) {
+        const target = pythonTargetText(targetNode);
+        if (tainted.has(target)) continue;
+        tainted.add(target);
         changed = true;
       }
     }
@@ -325,28 +383,31 @@ function collectRequestTaintedVars(lines: string[], start: number, upTo: number)
   return tainted;
 }
 
-function checkAI001(lines: string[], i: number, file: string): Finding | null {
-  const line = lines[i];
-  if (!matchesAny(line, LLM_CALL_PATTERNS)) return null;
+function checkAI001(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
+  if (!ctx.fileHasLlm) return null;
+  const call = src.ast.callsAtLine(i).find(ctx.isLlmCallNode);
+  if (!call) return null;
 
-  const start = findEnclosingFunctionStart(lines, i);
-  const promptWindow = windowText(lines, i, 30, 10);
-  if (hasSanitization(promptWindow)) return null;
+  const scope = pythonScope(src, call.node);
+  if (hasSanitization(scope.text.slice(0, call.node.endIndex - scope.startIndex))) return null;
 
-  const directRequest = matchesAny(promptWindow, REQUEST_PATTERNS);
-  const taintedVars = collectRequestTaintedVars(lines, start, i);
-  const taintedVarUsed = [...taintedVars].some((v) => new RegExp(`\\b${v}\\b`).test(promptWindow));
-
+  const directRequest = matchesAny(call.node.text, REQUEST_PATTERNS);
+  const taintedVars = collectRequestTaintedVars(src, scope, i);
+  const taintedVarUsed = [...taintedVars].some((target) =>
+    pythonNodeContainsText(call.node, target),
+  );
   if (!directRequest && !taintedVarUsed) return null;
 
-  // Direct textual match on this call's own window is stronger evidence than
-  // a variable that was tainted several assignments earlier and carried
-  // forward — the latter has more room for an intervening sanitizer we
-  // didn't recognize.
-  const evidence = directRequest ? "likely" : "heuristic";
+  const evidence = "likely";
 
   return {
-    ...findingBase("AI001", "Prompt injection via user input", "high", file, i + 1),
+    ...findingBase(
+      "AI001",
+      "Prompt injection via user input",
+      "high",
+      file,
+      call.node.startPosition.row + 1,
+    ),
     summary: "User request data flows into an LLM call without sanitization.",
     description:
       "Request parameters (request.json, request.form, etc.) are used in an LLM call without role separation or encoding. An attacker can inject instructions that override your system prompt.",
@@ -357,17 +418,21 @@ function checkAI001(lines: string[], i: number, file: string): Finding | null {
   };
 }
 
-function checkAI002(lines: string[], i: number, file: string, ctx: FileContext): Finding | null {
+function checkAI002(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
   if (!ctx.fileHasLlm) return null;
-  const line = lines[i];
-  const isLogCall = /\b(logging\s*\.\s*(info|debug|warning|error|critical)|print\s*\(|logger\s*\.\s*(info|debug))/.test(line);
-  if (!isLogCall) return null;
-
-  const hasSensitiveField = /\b(prompt|response|completion|token|api_key|password|secret|email)\b/i.test(line);
+  const call = src.ast.callsAtLine(i).find((candidate) =>
+    /^(?:logging|logger)\.(?:info|debug|warning|error|critical)$|^print$/.test(
+      pythonCallName(candidate),
+    ),
+  );
+  if (!call) return null;
+  const hasSensitiveField = /\b(prompt|response|completion|token|api_key|password|secret|email)\b/i.test(
+    [...call.arguments, ...call.keywords.values()].map((argument) => argument.text).join(" "),
+  );
   if (!hasSensitiveField) return null;
 
   return {
-    ...findingBase("AI002", "Sensitive prompt or response data logged", "high", file, i + 1),
+    ...findingBase("AI002", "Sensitive prompt or response data logged", "high", file, call.node.startPosition.row + 1),
     summary: "Prompt or response content is being logged.",
     description:
       "Logging prompts or responses can expose user data, PII, and model outputs to log storage systems accessible by unintended parties.",
@@ -378,19 +443,22 @@ function checkAI002(lines: string[], i: number, file: string, ctx: FileContext):
   };
 }
 
-function checkAI003(lines: string[], i: number, file: string): Finding | null {
-  const line = lines[i];
-  const isRouteDecorator = /^\s*@\s*(app|router|blueprint)\s*\.\s*(route|get|post|put|delete|patch)\s*\(/.test(line);
-  if (!isRouteDecorator) return null;
-
-  // Collect the next 30 lines (the route handler body)
-  const handlerText = windowText(lines, i, 0, 30);
-  if (!matchesAny(handlerText, LLM_CALL_PATTERNS)) return null;
-
-  // If there's an auth decorator anywhere in the 4 lines before the route
-  const beforeRoute = windowText(lines, i, 4, 0);
-  if (matchesAny(beforeRoute, AUTH_DECORATORS)) return null;
-  if (matchesAny(handlerText, AUTH_DECORATORS)) return null;
+function checkAI003(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
+  if (!ctx.fileHasLlm) return null;
+  const fn = src.ast.functions.find((candidate) =>
+    candidate.decorators.some(
+      (decorator) =>
+        decorator.startPosition.row === i &&
+        /@\s*(?:app|router|blueprint)\s*\.\s*(?:route|get|post|put|delete|patch)\s*\(/.test(
+          decorator.text,
+        ),
+    ),
+  );
+  if (!fn) return null;
+  const handlerCalls = callsWithinNode(src, fn.body);
+  if (!handlerCalls.some(ctx.isLlmCallNode)) return null;
+  if (fn.decorators.some((decorator) => matchesAny(decorator.text, AUTH_DECORATORS))) return null;
+  if (matchesAny(fn.body.text, AUTH_DECORATORS)) return null;
 
   return {
     ...findingBase("AI003", "LLM call before authentication", "critical", file, i + 1),
@@ -404,14 +472,26 @@ function checkAI003(lines: string[], i: number, file: string): Finding | null {
   };
 }
 
-function checkAI004(lines: string[], i: number, file: string): Finding | null {
-  const line = lines[i];
-  // json.dumps(user) or json.dumps(session) → likely going to LLM
-  const hasSensitiveObj = /json\s*\.\s*dumps\s*\(\s*(user|session|profile|account|customer|member)\b/.test(line);
-  if (!hasSensitiveObj) return null;
-
-  const ctx = windowText(lines, i, 0, 8);
-  if (!matchesAny(ctx, LLM_CALL_PATTERNS)) return null;
+function checkAI004(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
+  if (!ctx.fileHasLlm) return null;
+  const dumpCall = src.ast.callsAtLine(i).find(
+    (call) =>
+      pythonCallName(call) === "json.dumps" &&
+      call.arguments.some((argument) =>
+        /^(?:user|session|profile|account|customer|member)$/.test(argument.text.trim()),
+      ),
+  );
+  if (!dumpCall) return null;
+  const scope = pythonScope(src, dumpCall.node);
+  const reachesLlm = src.ast.calls.some(
+    (call) =>
+      call.node.startPosition.row >= i &&
+      call.node.startPosition.row <= i + 8 &&
+      call.node.startIndex >= scope.startIndex &&
+      call.node.endIndex <= scope.endIndex &&
+      ctx.isLlmCallNode(call),
+  );
+  if (!reachesLlm) return null;
 
   return {
     ...findingBase("AI004", "Sensitive data sent to LLM", "high", file, i + 1),
@@ -425,27 +505,38 @@ function checkAI004(lines: string[], i: number, file: string): Finding | null {
   };
 }
 
-function checkAI005(lines: string[], i: number, file: string, ctx: FileContext): Finding | null {
+function checkAI005(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
   if (!ctx.fileHasLlm) return null;
-  const line = lines[i];
-  const matchedSink = EXEC_SINKS.find((s) => s.pattern.test(line));
+  const call = src.ast.callsAtLine(i).find((candidate) =>
+    EXEC_SINKS.some((sink) => sink.pattern.test(`${pythonCallName(candidate)}(`)),
+  );
+  if (!call) return null;
+  const matchedSink = EXEC_SINKS.find((sink) =>
+    sink.pattern.test(`${pythonCallName(call)}(`),
+  );
   if (!matchedSink) return null;
 
-  // Only inspect the sink's *arguments*, not the whole line — otherwise the
-  // assignment target of `result = subprocess.run(...)` (an LLM-shaped name
-  // that has nothing to do with the sink call) is mistaken for tainted input.
-  const sinkMatch = matchedSink.pattern.exec(line);
-  const parenIdx = sinkMatch ? line.indexOf("(", sinkMatch.index) : -1;
-  const argsFirstLine = parenIdx >= 0 ? line.slice(parenIdx + 1) : "";
-  const argsWindow = [argsFirstLine, ...windowText(lines, i, 0, 5).split("\n").slice(1)].join("\n");
-
-  const beforeLines = lines.slice(Math.max(0, i - 10), i);
-  const llmVars = assignedVarsFromLlmCalls(beforeLines);
-  const confirmedDataflow = [...llmVars].some((v) => new RegExp(`\\b${v}\\b`).test(argsWindow));
+  const scope = pythonScope(src, call.node);
+  const args = [...call.arguments, ...call.keywords.values()];
+  const llmVars = assignedVarsFromLlmCalls(
+    src,
+    scope.startPosition.row,
+    i - 1,
+    ctx,
+  );
+  const confirmedDataflow = [...llmVars].some((target) =>
+    args.some((argument) => pythonNodeContainsText(argument, target)),
+  );
 
   if (confirmedDataflow) {
     return {
-      ...findingBase("AI005", "Unsafe LLM output handling", "critical", file, i + 1),
+      ...findingBase(
+        "AI005",
+        "Unsafe LLM output handling",
+        "critical",
+        file,
+        call.node.startPosition.row + 1,
+      ),
       summary: `LLM output passed to ${matchedSink.label} — a dangerous execution sink.`,
       description:
         "LLM outputs are non-deterministic and can contain attacker-crafted payloads. Passing them to exec(), eval(), subprocess, or SQL queries allows remote code/SQL execution.",
@@ -459,12 +550,26 @@ function checkAI005(lines: string[], i: number, file: string, ctx: FileContext):
   // Weaker fallback: no confirmed assignment link, but an LLM-result-shaped
   // name appears in the sink's arguments and an LLM call happens nearby.
   // Report at a lower tier since this is name-only proximity, not dataflow.
-  const hasGenericVarInArgs = LLM_RESULT_VAR_PATTERNS.some((p) => p.test(argsWindow));
-  const nearbyLlmCall = matchesAny(beforeLines.join("\n"), LLM_CALL_PATTERNS);
+  const argsText = args.map((argument) => argument.text).join("\n");
+  const hasGenericVarInArgs = LLM_RESULT_VAR_PATTERNS.some((pattern) => pattern.test(argsText));
+  const nearbyLlmCall = src.ast.calls.some(
+    (candidate) =>
+      candidate.node.startPosition.row >= Math.max(scope.startPosition.row, i - 10) &&
+      candidate.node.startPosition.row < i &&
+      candidate.node.startIndex >= scope.startIndex &&
+      candidate.node.endIndex <= scope.endIndex &&
+      ctx.isLlmCallNode(candidate),
+  );
   if (!hasGenericVarInArgs || !nearbyLlmCall) return null;
 
   return {
-    ...findingBase("AI005", "Possible unsafe LLM output handling", "high", file, i + 1),
+    ...findingBase(
+      "AI005",
+      "Possible unsafe LLM output handling",
+      "high",
+      file,
+      call.node.startPosition.row + 1,
+    ),
     summary: `A variable that may hold LLM output is passed to ${matchedSink.label}.`,
     description:
       "LLM outputs are non-deterministic and can contain attacker-crafted payloads. Passing them to exec(), eval(), subprocess, or SQL queries allows remote code/SQL execution.",
@@ -475,12 +580,13 @@ function checkAI005(lines: string[], i: number, file: string, ctx: FileContext):
   };
 }
 
-function checkAI006(lines: string[], i: number, file: string): Finding | null {
-  const line = lines[i];
-  // tools=[ in an LLM call
-  if (!/tools\s*=\s*\[/.test(line)) return null;
-
-  const ctx = windowText(lines, i, 2, 15);
+function checkAI006(src: PythonSource, i: number, file: string, fileCtx: FileContext): Finding | null {
+  const call = src.ast.callsAtLine(i).find(
+    (candidate) => candidate.keywords.has("tools") && fileCtx.isLlmCallNode(candidate),
+  );
+  if (!call) return null;
+  const scope = pythonScope(src, call.node);
+  const ctx = scope.text;
   const DANGEROUS_WORDS = ["delete", "remove", "exec", "shell", "command", "email", "send", "purchase", "payment", "deploy", "write", "fetch"];
   const hasDangerous = DANGEROUS_WORDS.some((w) => ctx.toLowerCase().includes(w));
   if (!hasDangerous) return null;
@@ -501,12 +607,13 @@ function checkAI006(lines: string[], i: number, file: string): Finding | null {
   };
 }
 
-function checkAI007(lines: string[], i: number, file: string): Finding | null {
-  const line = lines[i];
-  // system=f"...{docs}..." or "role":"system" with retrieved docs variable
+function checkAI007(src: PythonSource, i: number, file: string): Finding | null {
+  const stringNode = src.ast.strings.find((node) => node.startPosition.row === i);
+  if (!stringNode) return null;
+  const line = stringNode.text;
   const hasSystemWithDocs =
-    /system\s*=\s*f["'].*\{(docs|context|retrieved|chunks|results)/.test(line) ||
-    /["']role["']\s*:\s*["']system["'].*\{(docs|context|retrieved|chunks)/.test(line);
+    /system\s*=\s*f["'][\s\S]*\{(docs|context|retrieved|chunks|results)/.test(line) ||
+    /["']role["']\s*:\s*["']system["'][\s\S]*\{(docs|context|retrieved|chunks)/.test(line);
   if (!hasSystemWithDocs) return null;
 
   return {
@@ -521,17 +628,30 @@ function checkAI007(lines: string[], i: number, file: string): Finding | null {
   };
 }
 
-function checkAI010(lines: string[], i: number, file: string): Finding | null {
-  const line = lines[i];
-  const isFetch = /\b(requests|httpx|urllib)\s*\.\s*(get|post|request)\s*\(/.test(line);
-  if (!isFetch) return null;
-
-  // Look for .text or .json() or .content used in LLM call ahead
-  const ahead = windowText(lines, i, 0, 12);
-  const usesContent = /\.(text|content|json\s*\(\))\b/.test(ahead);
-  if (!usesContent) return null;
-  if (!matchesAny(ahead, LLM_CALL_PATTERNS)) return null;
-  if (hasSanitization(ahead)) return null;
+function checkAI010(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
+  if (!ctx.fileHasLlm) return null;
+  const fetchCall = src.ast.callsAtLine(i).find((call) =>
+    /^(?:requests|httpx|urllib)(?:\.[\w]+)*\.(?:get|post|request)$/.test(pythonCallName(call)),
+  );
+  if (!fetchCall) return null;
+  const scope = pythonScope(src, fetchCall.node);
+  const assignment = src.ast.assignments.find(
+    (candidate) =>
+      candidate.node.startIndex <= fetchCall.node.startIndex &&
+      candidate.node.endIndex >= fetchCall.node.endIndex,
+  );
+  const targets = assignment?.targets.map(pythonTargetText) ?? [];
+  const sink = src.ast.calls.find(
+    (call) =>
+      call.node.startPosition.row >= i &&
+      call.node.startPosition.row <= i + 12 &&
+      call.node.startIndex >= scope.startIndex &&
+      call.node.endIndex <= scope.endIndex &&
+      ctx.isLlmCallNode(call) &&
+      (fetchCall.node.startIndex >= call.node.startIndex ||
+        targets.some((target) => pythonNodeContainsText(call.node, target))),
+  );
+  if (!sink || hasSanitization(scope.text.slice(fetchCall.node.startIndex - scope.startIndex, sink.node.endIndex - scope.startIndex))) return null;
 
   return {
     ...findingBase("AI010", "Indirect prompt injection via HTTP response", "high", file, i + 1),
@@ -545,14 +665,66 @@ function checkAI010(lines: string[], i: number, file: string): Finding | null {
   };
 }
 
-function checkVEC001(lines: string[], i: number, file: string): Finding | null {
-  const line = lines[i];
-  if (!matchesAny(line, VECTOR_SEARCH_PATTERNS)) return null;
+function checkVEC001(src: PythonSource, i: number, file: string): Finding | null {
+  const call = src.ast.callsAtLine(i).find((candidate) =>
+    matchesAny(candidate.node.text, VECTOR_SEARCH_PATTERNS),
+  );
+  if (!call) return null;
+  const filterNames = [
+    "expr",
+    "filter",
+    "metadata",
+    "metadata_filter",
+    "metadata_filters",
+    "namespace",
+    "query_filter",
+    "where",
+  ];
+  const hasDirectFilter = filterNames.some((name) =>
+    call.keywords.has(name),
+  );
+  if (hasDirectFilter) return null;
 
-  // If there's a filter= keyword arg in this line or the next 3 lines, it's safe
-  const ctx = windowText(lines, i, 0, 3);
-  const hasFilter = /\bfilter\s*=|where\s*=|namespace\s*=|metadata_filter\s*=/.test(ctx);
-  if (hasFilter) return null;
+  const scope = pythonScope(src, call.node);
+  const keywordSplats = call.arguments
+    .filter((argument) => argument.type === "dictionary_splat")
+    .map((argument) => argument.namedChildren[0]?.text)
+    .filter((name): name is string => Boolean(name));
+  const hasExpandedFilter = src.ast.assignments.some((assignment) => {
+    if (assignment.node.startIndex < scope.startIndex || assignment.node.endIndex >= call.node.startIndex) {
+      return false;
+    }
+    return assignment.targets.some((target) => {
+      if (target.type !== "subscript") return false;
+      const object = target.childForFieldName("value")?.text;
+      const key = target.childForFieldName("subscript")?.text.replace(/^['"]|['"]$/g, "");
+      return keywordSplats.includes(object ?? "") && filterNames.includes(key ?? "");
+    });
+  });
+  if (hasExpandedFilter) return null;
+
+  const containingAssignment = src.ast.assignments.find(
+    (assignment) =>
+      assignment.value.startIndex <= call.node.startIndex &&
+      assignment.value.endIndex >= call.node.endIndex,
+  );
+  const queryTargets = containingAssignment?.targets.map(pythonTargetText) ?? [];
+  const hasFluentFilter = src.ast.calls.some((candidate) => {
+    if (candidate.node.startIndex < call.node.startIndex) return false;
+    if (candidate.node.startIndex < scope.startIndex || candidate.node.endIndex > scope.endIndex) {
+      return false;
+    }
+    const name = pythonCallName(candidate);
+    const filterMethod = /\.(?:where|filter|namespace|metadata_filter)$/.test(name);
+    if (!filterMethod) return false;
+    const containsSearch =
+      candidate.node.startIndex <= call.node.startIndex && candidate.node.endIndex >= call.node.endIndex;
+    const continuesAssignedQuery = queryTargets.some(
+      (target) => name === target || name.startsWith(`${target}.`),
+    );
+    return containsSearch || continuesAssignedQuery;
+  });
+  if (hasFluentFilter) return null;
 
   return {
     ...findingBase("VEC001", "Vector search without access control filter", "high", file, i + 1),
@@ -566,15 +738,18 @@ function checkVEC001(lines: string[], i: number, file: string): Finding | null {
   };
 }
 
-function checkVEC003(lines: string[], i: number, file: string): Finding | null {
-  const line = lines[i];
-  if (!matchesAny(line, VECTOR_INGEST_PATTERNS)) return null;
-
-  // Check if request data appears in the same line or the 3 lines before
-  const ctx = windowText(lines, i, 3, 0);
-  const hasRequestSource = matchesAny(ctx + "\n" + line, REQUEST_PATTERNS);
+function checkVEC003(src: PythonSource, i: number, file: string): Finding | null {
+  const call = src.ast.callsAtLine(i).find((candidate) =>
+    matchesAny(candidate.node.text, VECTOR_INGEST_PATTERNS),
+  );
+  if (!call) return null;
+  const scope = pythonScope(src, call.node);
+  const tainted = collectRequestTaintedVars(src, scope, i);
+  const hasRequestSource =
+    matchesAny(call.node.text, REQUEST_PATTERNS) ||
+    [...tainted].some((target) => pythonNodeContainsText(call.node, target));
   if (!hasRequestSource) return null;
-  if (hasSanitization(ctx + line)) return null;
+  if (hasSanitization(scope.text.slice(0, call.node.endIndex - scope.startIndex))) return null;
 
   return {
     ...findingBase("VEC003", "User-controlled content ingested into vector store", "high", file, i + 1),
@@ -594,16 +769,32 @@ function checkVEC003(lines: string[], i: number, file: string): Finding | null {
 // (e.g. a `system_prompt: str` constructor parameter's docstring).
 const MCP_LISTING_HINT = /list_tools|listtools|list_mcp_tools|mcp_tools|tools_result|available_tools/i;
 
-function checkMCP001(lines: string[], i: number, file: string): Finding | null {
-  const line = lines[i];
-  // Look for description field in a dict-like context
-  if (!/"description"\s*:|description\s*=/.test(line)) return null;
+function descriptionValueAtLine(src: PythonSource, line: number): PythonNode | undefined {
+  return src.ast.strings.find((node) => {
+    if (node.startPosition.row !== line) return false;
+    let parent: PythonNode | null = node.parent;
+    while (parent && parent.startPosition.row >= line - 2) {
+      if (parent.type === "keyword_argument") {
+        return parent.childForFieldName("name")?.text === "description";
+      }
+      if (parent.type === "pair") {
+        const key = parent.childForFieldName("key");
+        return key ? pythonStringValue(key) === "description" : false;
+      }
+      parent = parent.parent;
+    }
+    return false;
+  });
+}
 
-  const lower = line.toLowerCase();
+function checkMCP001(src: PythonSource, i: number, file: string): Finding | null {
+  const description = descriptionValueAtLine(src, i);
+  if (!description) return null;
+  const lower = pythonStringValue(description).toLowerCase();
   const matched = INJECTION_PHRASES.find((phrase) => lower.includes(phrase));
   if (!matched) return null;
 
-  const ctx = windowText(lines, i, 8, 2);
+  const ctx = pythonScope(src, description).text;
   if (!MCP_LISTING_HINT.test(ctx)) return null;
 
   return {
@@ -618,9 +809,9 @@ function checkMCP001(lines: string[], i: number, file: string): Finding | null {
   };
 }
 
-function checkMCP007(lines: string[], i: number, file: string, ctx: FileContext): Finding | null {
+function checkMCP007(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
   if (!ctx.fileHasMcpServer) return null;
-  const def = extractPyToolAtLine(lines, i);
+  const def = ctx.mcpTools?.find((tool) => tool.decoratorLine === i);
   if (!def) return null;
 
   for (const text of [{ value: def.name, line: i }, ...def.texts]) {
@@ -640,9 +831,9 @@ function checkMCP007(lines: string[], i: number, file: string, ctx: FileContext)
   return null;
 }
 
-function checkMCP008(lines: string[], i: number, file: string, ctx: FileContext): Finding | null {
+function checkMCP008(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
   if (!ctx.fileHasMcpServer) return null;
-  const def = extractPyToolAtLine(lines, i);
+  const def = ctx.mcpTools?.find((tool) => tool.decoratorLine === i);
   if (!def) return null;
 
   for (const text of def.texts) {
@@ -675,9 +866,9 @@ function checkMCP008(lines: string[], i: number, file: string, ctx: FileContext)
   return null;
 }
 
-function checkMCP009(lines: string[], i: number, file: string, ctx: FileContext): Finding | null {
+function checkMCP009(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
   if (!ctx.fileHasMcpServer || !ctx.mcpToolNames || ctx.mcpToolNames.size < 2) return null;
-  const def = extractPyToolAtLine(lines, i);
+  const def = ctx.mcpTools?.find((tool) => tool.decoratorLine === i);
   if (!def) return null;
 
   for (const text of def.texts) {
@@ -702,11 +893,14 @@ function checkMCP009(lines: string[], i: number, file: string, ctx: FileContext)
 interface FileContext {
   fileHasLlm: boolean;
   fileHasMcpServer: boolean;
+  mcpTools?: PyToolDefinition[];
   /** Tool names defined in this file (only computed for MCP server files). */
   mcpToolNames?: Set<string>;
+  /** Import/constructor-resolved AST call predicate. */
+  isLlmCallNode: (call: PythonCallNode) => boolean;
 }
 
-type RuleChecker = (lines: string[], i: number, file: string, ctx: FileContext) => Finding | null;
+type RuleChecker = (src: PythonSource, i: number, file: string, ctx: FileContext) => Finding | null;
 
 const PYTHON_RULES: RuleChecker[] = [
   checkAI001,
@@ -791,22 +985,26 @@ export function scanPythonFiles(
       continue;
     }
 
-    const lines = raw.split(/\r?\n/);
+    const src = analyzePythonSource(raw);
     const relPath = path.relative(resolved, filePath);
-    const hasMcpServer = fileImportsMcpServerSdk(raw);
+    const hasMcpServer = fileImportsMcpServerSdk(src);
+    const mcpTools = hasMcpServer ? collectPyTools(src) : undefined;
+    const receiverNames = collectLlmReceiverNames(src);
     const ctx: FileContext = {
-      fileHasLlm: fileImportsLlmSdk(raw),
+      fileHasLlm: fileImportsLlmSdk(src),
       fileHasMcpServer: hasMcpServer,
-      mcpToolNames: hasMcpServer ? collectPyToolNames(lines) : undefined,
+      mcpTools,
+      mcpToolNames: mcpTools ? new Set(mcpTools.map((tool) => tool.name)) : undefined,
+      isLlmCallNode: (call: PythonCallNode) => isLlmCallNode(call, receiverNames),
     };
 
-    for (let i = 0; i < lines.length; i++) {
+    for (let i = 0; i < src.lineCount; i++) {
       for (const rule of PYTHON_RULES) {
         // Skip rules not in the requested rule list
         if (options?.rules) {
           // We'll check rule_id after — run first then filter
         }
-        const finding = rule(lines, i, relPath, ctx);
+        const finding = rule(src, i, relPath, ctx);
         if (!finding) continue;
 
         // Filter by requested rules and blocked rules

@@ -22,7 +22,7 @@ node --test test/corpus.test.js   # run a single test file directly, after build
 
 ## Where things live
 
-- Detection logic: `src/scanner/rules/*.ts` (TS/JS, AST-based), `src/scanner/python-scanner.ts` (Python, regex-based), `src/scanner/mcp-config-scanner.ts` + `src/scanner/skill-scanner.ts` (config/content), `src/scanner/dependency-guard.ts` (advisories). See [Architecture.md](Architecture.md).
+- Detection logic: `src/scanner/rules/*.ts` (TS/JS AST), `src/scanner/python-ast.ts` + `src/scanner/python-scanner.ts` (Python AST), `src/scanner/mcp-config-scanner.ts` + `src/scanner/skill-scanner.ts` (config/content), `src/scanner/dependency-guard.ts` (advisories). See [Architecture.md](Architecture.md).
 - CLI wiring: `src/cli.ts`. Any change here needs a corresponding case in `test/cli.test.js` — it's the only test file that exercises the real built binary via `execFileSync` rather than calling scanner functions directly, so a flag-wiring bug (a dropped parser argument, a flag that silently no-ops) has no other test that would catch it. This has happened once already.
 - Test corpus: `test-fixtures/vulnerable/` and `test-fixtures/safe/`, enforced by `test/corpus.test.js`.
 - Documentation you're reading now: `docs/`. Auto-generated/per-project docs (`THREAT_MODEL.md`, the AI-BOM) are separate — see [ThreatModel.md](ThreatModel.md) for the distinction.

@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Evidence, Finding, Rule, RuleContext } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getFileCalls, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import {
   evidenceConfidence,
   demoteEvidence,
@@ -101,7 +101,7 @@ export const ruleExcessiveAgency: Rule = {
       const relFile = getRelativeFilePath(context.rootPath, sourceFile);
       const testFile = isTestFilePath(relFile);
 
-      for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      for (const call of getFileCalls(sourceFile)) {
         const sink = resolveLlmSink(call);
         if (!sink) continue;
 

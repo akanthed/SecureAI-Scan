@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Finding } from "./types.js";
-import { findAdvisory, type PackageAdvisory } from "./advisories.js";
+import { findAdvisories, type PackageAdvisory } from "./advisories.js";
 import { findMcpConfigFiles, parseServers } from "./mcp-config-scanner.js";
 import { parseExactVersion, versionSatisfiesRange } from "./semver.js";
+import { evidenceConfidence } from "./confidence.js";
 import { stripBom } from "../utils/text.js";
 
 export interface DependencyGuardOptions {
@@ -90,9 +91,21 @@ export async function scanDependencyFilesForRisks(
 
 /**
  * DEP003: dependencies with a documented malicious release or critical CVE.
- * Fully offline (curated list bundled with the scanner), so unlike the
+ * Fully offline (curated incidents + a bundled OSV snapshot), so unlike the
  * registry checks above this runs on every scan, and additionally covers
  * packages launched from MCP configs (`npx -y some-server`).
+ *
+ * The two advisory kinds get deliberately different ambiguity handling:
+ *
+ * - `malicious` — an unresolvable version spec still flags. Installing a
+ *   backdoored release is unrecoverable, so "unsure" must mean "keep the
+ *   finding," never "clear it."
+ * - `vulnerable` — a CVE only flags when the declared version is an exact pin
+ *   provably inside the affected range. Applying the malicious-kind rule to
+ *   the CVE snapshot would fire `proven` on every unpinned mainstream
+ *   dependency (`langchain>=0.1`), which is precisely the noise this scanner
+ *   exists to avoid. Unpinned-but-possibly-affected is surfaced at
+ *   `heuristic` (--paranoid) instead.
  */
 export function scanKnownMaliciousPackages(rootPath: string, skipPaths?: string[]): Finding[] {
   const candidates = [
@@ -102,46 +115,109 @@ export function scanKnownMaliciousPackages(rootPath: string, skipPaths?: string[
 
   const findings: Finding[] = [];
   for (const candidate of candidates) {
-    const advisory = findAdvisory(candidate.ecosystem, candidate.name);
-    if (!advisory) continue;
+    const advisories = findAdvisories(candidate.ecosystem, candidate.name);
+    if (advisories.length === 0) continue;
 
-    // Only suppress when the declared version is an exact pin we can prove
-    // sits outside the affected range. Any ambiguity (a caret/tilde range,
-    // "latest", an unparseable spec) fails toward flagging — the whole
-    // point of this check is to never let a compromised install through
-    // silently, so "unsure" must mean "keep the finding," not "clear it."
-    if (advisory.affectedVersions && candidate.version) {
-      const exact = parseExactVersion(candidate.version);
-      if (exact) {
-        const satisfies = versionSatisfiesRange(exact, advisory.affectedVersions);
-        if (satisfies === false) continue;
+    const exact = candidate.version ? parseExactVersion(candidate.version) : undefined;
+
+    const malicious: PackageAdvisory[] = [];
+    const confirmed: PackageAdvisory[] = [];
+    const unresolved: PackageAdvisory[] = [];
+
+    for (const advisory of advisories) {
+      const inRange = advisoryCoversVersion(advisory, exact);
+      if (advisory.kind === "malicious") {
+        if (inRange !== false) malicious.push(advisory);
+      } else if (inRange === true) {
+        confirmed.push(advisory);
+      } else if (inRange === undefined) {
+        unresolved.push(advisory);
       }
     }
 
-    findings.push({
-      rule_id: "DEP003",
-      title: "Dependency has a known-malicious or critically vulnerable release",
-      severity: advisory.kind === "malicious" ? "critical" : "high",
-      file: candidate.file,
-      line: candidate.line,
-      summary: advisorySummary(candidate.name, advisory),
-      description: advisory.reason,
-      recommendation:
-        advisory.kind === "malicious"
-          ? `Remove ${candidate.name} immediately, rotate any credentials it could access, and review its activity. Reference: ${advisory.reference}`
-          : `Update ${candidate.name} to a patched version (affected: ${advisory.affectedVersions ?? "see reference"}). Reference: ${advisory.reference}`,
-      confidence: 0.9,
-      evidence: "proven",
-    });
+    if (malicious.length > 0) {
+      findings.push(
+        advisoryFinding(candidate, malicious, "critical", "proven", {
+          summary: `${candidate.name} has a documented malicious release${rangeSuffix(malicious[0])}.`,
+          recommendation: `Remove ${candidate.name} immediately, rotate any credentials it could access, and review its activity. Reference: ${malicious[0].reference}`,
+        }),
+      );
+      continue;
+    }
+
+    if (confirmed.length > 0) {
+      findings.push(
+        advisoryFinding(candidate, confirmed, "high", "proven", {
+          summary: `${candidate.name}@${candidate.version} is inside the affected range of ${plural(confirmed.length, "advisory", "advisories")}.`,
+          recommendation: `Update ${candidate.name} past the affected range (${confirmed[0].affectedVersions ?? "see reference"}). Reference: ${confirmed[0].reference}`,
+        }),
+      );
+      continue;
+    }
+
+    if (unresolved.length > 0) {
+      findings.push(
+        advisoryFinding(candidate, unresolved, "medium", "heuristic", {
+          summary: `${candidate.name} is declared as "${candidate.version ?? "unpinned"}", which cannot be proven outside ${plural(unresolved.length, "a known advisory range", "known advisory ranges")}.`,
+          recommendation: `Pin ${candidate.name} to an exact version at or above the patched release so this can be verified. Reference: ${unresolved[0].reference}`,
+        }),
+      );
+    }
   }
   return findings;
 }
 
-function advisorySummary(name: string, advisory: PackageAdvisory): string {
-  const range = advisory.affectedVersions ? ` (affected: ${advisory.affectedVersions})` : "";
-  return advisory.kind === "malicious"
-    ? `${name} has a documented malicious release${range}.`
-    : `${name} has a critical security advisory${range}.`;
+/**
+ * Is `version` inside the advisory's affected range? `undefined` means
+ * "can't tell" (no pinned version, or a range this scanner won't parse) and
+ * is handled per-kind by the caller — never silently treated as "safe".
+ */
+function advisoryCoversVersion(
+  advisory: PackageAdvisory,
+  version: ReturnType<typeof parseExactVersion>,
+): boolean | undefined {
+  const ranges = advisory.ranges ?? (advisory.affectedVersions ? [advisory.affectedVersions] : []);
+  if (ranges.length === 0) return true;
+  if (!version) return undefined;
+
+  let sawUnknown = false;
+  for (const range of ranges) {
+    const satisfies = versionSatisfiesRange(version, range);
+    if (satisfies === true) return true;
+    if (satisfies === undefined) sawUnknown = true;
+  }
+  return sawUnknown ? undefined : false;
+}
+
+function advisoryFinding(
+  candidate: PackageCandidate,
+  advisories: PackageAdvisory[],
+  severity: Finding["severity"],
+  evidence: Finding["evidence"],
+  text: { summary: string; recommendation: string },
+): Finding {
+  const shown = advisories.slice(0, 3).map((a) => `• ${a.reason} (${a.reference})`);
+  const more = advisories.length > shown.length ? `\n• …and ${advisories.length - shown.length} more.` : "";
+  return {
+    rule_id: "DEP003",
+    title: "Dependency has a known-malicious or critically vulnerable release",
+    severity,
+    file: candidate.file,
+    line: candidate.line,
+    summary: text.summary,
+    description: shown.join("\n") + more,
+    recommendation: text.recommendation,
+    confidence: evidenceConfidence(evidence),
+    evidence,
+  };
+}
+
+function rangeSuffix(advisory: PackageAdvisory): string {
+  return advisory.affectedVersions ? ` (affected: ${advisory.affectedVersions})` : "";
+}
+
+function plural(n: number, one: string, many: string): string {
+  return n === 1 ? one : `${n} ${many}`;
 }
 
 /** Package names launched by MCP config servers via npx/uvx-style runners. */
@@ -282,14 +358,23 @@ function readRequirementsCandidates(requirementsPath: string, rootPath: string):
       if (!nameMatch) {
         continue;
       }
-      // requirements.txt pins: "pkg==1.2.3", "pkg>=1.2.3", "pkg~=1.2.3", ...
-      const versionMatch = line.match(/(==|>=|<=|~=|>|<)\s*([\w.]+)/);
+      // Keep the operator with the version. Stripping it turned every
+      // `pkg>=1.2.3` / `pkg~=4.0` into what looked like an exact pin, so a
+      // lower bound was compared against advisory ranges as though it were
+      // the installed version — a proven-tier finding built on a version the
+      // repo never actually declared. Only `==` is an exact pin.
+      const versionMatch = line.match(/(===?|>=|<=|~=|!=|>|<)\s*([\w.*+!-]+)/);
+      const version = versionMatch
+        ? /^===?$/.test(versionMatch[1])
+          ? versionMatch[2]
+          : `${versionMatch[1]}${versionMatch[2]}`
+        : undefined;
       candidates.push({
         ecosystem: "pypi",
         name: nameMatch[1],
         file: fileRelative,
         line: index + 1,
-        version: versionMatch ? versionMatch[2] : undefined,
+        version,
       });
     }
 

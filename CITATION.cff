@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use SecureAI-Scan in research or an ecosystem audit, cite the software and the exact version tested."
+title: "SecureAI-Scan: evidence-tiered static analysis for LLM, MCP, RAG, and Agent Skill security"
+type: software
+authors:
+  - family-names: Kanthed
+    given-names: Akshay
+repository-code: "https://github.com/akanthed/SecureAI-Scan"
+url: "https://www.npmjs.com/package/secureai-scan"
+license: MIT
+abstract: "A local-first static AI security scanner for TypeScript, JavaScript, Python, MCP configurations, and Agent Skill bundles, with source-to-sink evidence, SARIF reporting, and reviewed real-repository regression testing."
+keywords:
+  - AI security
+  - LLM security
+  - MCP security
+  - prompt injection
+  - Agent Skill security
+  - RAG poisoning
+  - static analysis

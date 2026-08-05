@@ -1,18 +1,29 @@
 # SecureAI-Scan
 
 [![npm version](https://img.shields.io/npm/v/secureai-scan)](https://www.npmjs.com/package/secureai-scan)
+[![npm downloads](https://img.shields.io/npm/dm/secureai-scan)](https://www.npmjs.com/package/secureai-scan)
+[![CI](https://github.com/akanthed/SecureAI-Scan/actions/workflows/ci.yml/badge.svg)](https://github.com/akanthed/SecureAI-Scan/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/akanthed/SecureAI-Scan/actions/workflows/codeql.yml/badge.svg)](https://github.com/akanthed/SecureAI-Scan/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/akanthed/SecureAI-Scan/badge)](https://scorecard.dev/viewer/?uri=github.com/akanthed/SecureAI-Scan)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-ready-blue.svg)](https://www.typescriptlang.org/)
-[![Python](https://img.shields.io/badge/Python-supported-yellow.svg)](https://www.python.org/)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
-[![ChatGPT](https://img.shields.io/badge/ChatGPT-GPT%20available-74aa9c?logo=openai&logoColor=white)](https://chatgpt.com/g/g-6a25141758188191a764020c1ab6a226-secureai-scan-ai-security-advisor)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen)](https://nodejs.org)
 [![OWASP](https://img.shields.io/badge/OWASP-LLM%20%C2%B7%20ASI%20%C2%B7%20MCP%20Top%2010-000000)](#rules)
 
 **The AI security scanner that proves its findings.**
 
 SecureAI-Scan finds LLM, MCP, Agent Skill, and RAG vulnerabilities in **TypeScript, JavaScript, and Python** — and shows you the evidence: the exact source → flow → sink path for every dataflow finding, resolved through real imports, not keyword matching.
 
-It's the first scanner mapped to **all three** OWASP AI security frameworks — the LLM Top 10, the [Top 10 for Agentic Applications (2026)](https://genai.owasp.org/), and the [MCP Top 10](https://owasp.org/www-project-mcp-top-10/) — with a coverage matrix in every threat model showing exactly which risks are checked and which are runtime concerns.
+It is mapped to **all three** OWASP AI security frameworks — the LLM Top 10, the [Top 10 for Agentic Applications (2026)](https://genai.owasp.org/), and the [MCP Top 10](https://owasp.org/www-project-mcp-top-10/) — with a coverage matrix in every threat model showing exactly which risks are checked and which are runtime concerns.
+
+## Get started in 30 seconds
+
+```bash
+npx --yes secureai-scan@0.8.0 scan .
+```
+
+No account, cloud upload, Python interpreter, or configuration required. TypeScript, JavaScript, Python, MCP configs, and Agent Skill bundles are detected automatically.
+
+**Measured `0.8.0` release candidate:** 133/133 tests · 88.07% statement coverage · 12,676 files across 9 public repositories · 0 new default-tier fingerprints against the reviewed baseline. [Evidence](docs/benchmarks/v0.8.0.json) · [methodology and limits](docs/ReleaseAssurance.md)
 
 ```
   ▌ HIGH  AI001  Prompt injection via user input
@@ -39,6 +50,7 @@ It's the first scanner mapped to **all three** OWASP AI security frameworks — 
 - [Architecture](#architecture)
 - [MCP server (use it from Claude)](#mcp-server-use-it-from-claude)
 - [Claude Skill](#claude-skill)
+- [Trust and release assurance](#trust-and-release-assurance)
 - [The precision contract](#the-precision-contract)
 - [Testing & benchmarking](#testing--benchmarking)
 - [Roadmap](#roadmap)
@@ -48,20 +60,20 @@ It's the first scanner mapped to **all three** OWASP AI security frameworks — 
 
 - **Evidence tiers, not noise.** Every finding is `proven` (traced dataflow or parsed config fact), `likely` (resolved sink, one heuristic hop), or `heuristic`. **A default scan shows only proven + likely.** Heuristics are opt-in via `--paranoid`.
 - **Import-resolved detection.** A call is only an "LLM call" if it resolves to a real SDK import (`openai`, `@anthropic-ai/sdk`, `ai`, `@google/genai`, LangChain, Bedrock, …). Your Google Maps client will never be flagged as an LLM again.
-- **Precision-gated, and benchmarked against real repos.** The test suite asserts every vulnerable fixture fires *and* every safe fixture stays clean — a false positive on the safe corpus fails the build. Beyond that, every detection change is run against real public repos (OpenAI/Anthropic/Vercel AI SDKs, official MCP servers, LlamaIndex) before shipping. See [Testing & benchmarking](#testing--benchmarking) for the actual before/after numbers.
+- **Precision-gated, and benchmarked against real repos.** The test suite asserts every vulnerable fixture fires *and* every safe fixture stays clean — a false positive on the safe corpus fails the build. Beyond that, `npm run regression` scans real public repos (OpenAI/Anthropic/Vercel AI SDKs, official MCP servers, LlamaIndex) against a committed, hand-reviewed baseline and **fails on any new `proven`/`likely` finding**. See [Testing & benchmarking](#testing--benchmarking) for the actual before/after numbers.
 - **SARIF for GitHub code scanning.** `--output report.sarif` puts findings inline on pull requests and in the Security tab.
-- **AI-BOM.** `secureai-scan bom .` inventories every SDK, model ID, vector store, agent framework, and MCP server in your repo — zero-false-positive by construction, mapped to OWASP LLM Top 10 / EU AI Act documentation needs.
+- **AI-BOM.** `secureai-scan bom .` builds a syntax-derived inventory of SDKs, model IDs, vector stores, agent frameworks, and MCP servers, mapped to OWASP LLM Top 10 / EU AI Act documentation needs.
 - **MCP config scanning.** Parses `.mcp.json`, `claude_desktop_config.json`, `.cursor/mcp.json`: unpinned `npx -y` servers, inline secrets, plaintext HTTP transports.
 - **MCP tool-poisoning detection.** Catches the pattern behind the WhatsApp MCP rug-pull and postmark-mcp backdoor — invisible Unicode, agent-directed injection phrases, and cross-tool shadowing in tool names/descriptions, statically, before you ever run the server.
 - **MCP command-injection detection.** Flags MCP stdio transport `command`/`args` built from request data — the pattern behind the 2026 MCP STDIO RCE disclosure.
 - **Agent Skill poisoning detection.** The same invisible-Unicode, injection-phrase, and shadowing checks applied to `SKILL.md` files — Agent Skills load into context wholesale, so a poisoned skill is a poisoned tool description by another name.
 - **Evasion-resistant skill scanning.** Skill bundles are scanned as *directories*, not just their `SKILL.md`, and every content check runs against deobfuscated variants of the text. This targets the published techniques — homoglyphs, zero-width splitting, payloads staged in `.git/` or `build/`, exfiltration hidden in a `*.test.ts` file — that bypassed **>90% of the nine scanners** surveyed in *Cloak and Detonate* (arXiv:2607.02357). See [Evasion resistance](#evasion-resistance).
-- **Known-malicious package advisories, version-aware.** Checks every dependency and every MCP-launched package against a curated advisory list (documented backdoors, critical CVEs) — offline, on every scan, no flag required. Clears a finding once you've actually upgraded past the affected range; stays flagged on any ambiguous or unpinned version, never silently.
+- **Known-vulnerable and known-malicious package advisories, version-aware.** Checks every dependency and every MCP-launched package against a bundled advisory snapshot — a hand-curated list of documented in-the-wild backdoors, plus HIGH/CRITICAL OSV advisories for an LLM/MCP/RAG package watchlist, regenerated by [`scripts/sync-advisories.js`](scripts/sync-advisories.js). Runs offline on every scan, no flag required. A CVE only fires when your pinned version is *provably* inside the affected range; a documented-malicious package fires even on an ambiguous range, because installing a backdoor is unrecoverable.
 - **Local-first.** Nothing leaves your machine.
 
 ## How it compares
 
-SecureAI-Scan is not a replacement for a general SAST tool or a container/IaC scanner — run it alongside one, not instead of one. It's the only one of these purpose-built for the LLM/MCP/RAG attack surface with dataflow evidence, not keyword rules.
+SecureAI-Scan is not a replacement for a general SAST tool or a container/IaC scanner — run it alongside one, not instead of one. It is purpose-built for the LLM/MCP/RAG attack surface and emphasizes dataflow evidence over flat keyword findings.
 
 | | SecureAI-Scan | Semgrep (OSS rules) | Trivy | GitHub Advanced Security |
 |---|---|---|---|---|
@@ -77,14 +89,6 @@ SecureAI-Scan is not a replacement for a general SAST tool or a container/IaC sc
 | Runs offline, no account | ✅ | ✅ (OSS rules) | ✅ | ❌ requires GitHub |
 
 If you already run Semgrep or GHAS, keep them — add SecureAI-Scan for the risk surface they don't model at all.
-
-## Get started in 30 seconds
-
-```bash
-npx --yes secureai-scan@latest scan .
-```
-
-TypeScript, JavaScript, Python, MCP config files, and Agent Skill (`SKILL.md`) files are scanned automatically — one command, no config.
 
 > Prefer to ask questions first? Try the free **[SecureAI-Scan AI Security Advisor on ChatGPT](https://chatgpt.com/g/g-6a25141758188191a764020c1ab6a226-secureai-scan-ai-security-advisor)**.
 
@@ -185,8 +189,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: akanthed/SecureAI-Scan@main
+      - uses: akanthed/SecureAI-Scan@v0.8.0
         with:
+          scanner-version: 0.8.0
           fail-on: high
 ```
 
@@ -253,8 +258,8 @@ Three independent scanning surfaces feed one merged, deduped finding list:
                     └─────────────────────┘   │
                                                │
                     ┌─────────────────────┐   │      ┌──────────────┐      ┌─────────────────┐
-  *.py         ───▶ │  Python regex +     │───┼───▶  │  scan.ts     │───▶  │  evidence filter │
-                    │  taint-propagation  │   │      │  merge/dedupe│      │  → confidence    │
+  *.py         ───▶ │  tree-sitter AST + │───┼───▶  │  scan.ts     │───▶  │  evidence filter │
+                    │  local taint flow   │   │      │  merge/dedupe│      │  → confidence    │
                     └─────────────────────┘   │      │  + suppress  │      │  → severity      │
                                                │      │  (// secure- │      │  → baseline diff │
   .mcp.json,         ┌─────────────────────┐  │      │  ai-ignore)  │      │  → report        │
@@ -332,6 +337,16 @@ Validated against two real-world corpora, not just fixtures we wrote ourselves: 
 
 Honest limitation: the paper's conclusion is that runtime detonation beats static analysis, and that is correct. An adaptive adversary who knows these rules can write a transformation they don't cover. What changes here is the *cost* of evasion — the published, currently-circulating techniques no longer work, and the obfuscation needed to defeat them now itself raises the finding's severity. **Static scanning is a filter, not a security boundary.** Treat an untrusted skill as untrusted code regardless of what any scanner says.
 
+## Trust and release assurance
+
+- CI runs on Linux, Windows, and macOS across supported Node versions.
+- CodeQL, production dependency audit, OpenSSF Scorecard, Dependabot, and this scanner's own blocking self-scan provide independent checks.
+- Every manual npm publication invokes tests, coverage floors, the reviewed real-repository regression gate, and tarball inspection through `prepublishOnly`.
+- GitHub Actions receives no npm password or token and cannot publish the package.
+- [Release assurance](docs/ReleaseAssurance.md), [single-maintainer governance](GOVERNANCE.md), [security reporting](SECURITY.md), and [versioned benchmark evidence](docs/benchmarks/v0.8.0.json) are public.
+
+This is a single-maintainer project with no contractual SLA or independent certification. The controls above reduce risk; they do not turn a static scan into proof of security.
+
 ## The precision contract
 
 False positives kill scanners. SecureAI-Scan's rule engine follows three hard rules:
@@ -355,12 +370,15 @@ npm test
 **2. Real-world regression benchmark — against public repos we didn't write.**
 
 ```bash
-npm run regression                # scan the full curated repo set
-npm run regression -- --fresh     # re-clone everything first
-npm run regression -- openai-node # scan just one repo by name
+npm run regression                          # scan the full curated repo set
+npm run regression -- --fresh               # re-clone everything first
+npm run regression -- openai-node           # scan just one repo by name
+npm run regression -- --update-baseline     # accept the current findings
 ```
 
-[`scripts/regression-scan.js`](scripts/regression-scan.js) clones a curated, diverse set of real public repos (OpenAI/Anthropic/Vercel AI SDKs, the official MCP servers and TypeScript SDK, LlamaIndex, plus [anthropics/skills](https://github.com/anthropics/skills) and [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) for skill-bundle coverage — spanning TS and Python, SDK-consumer example code and SDK-author source) and scans each with the built CLI. There's no fixed pass/fail threshold — upstream repos change — so every `proven`/`likely` finding gets read against its source line by hand. Anything that isn't a genuine issue is a rule bug, fixed at the root cause and locked in permanently as a new `test-fixtures/safe/` fixture.
+[`scripts/regression-scan.js`](scripts/regression-scan.js) clones a curated, diverse set of real public repos (OpenAI/Anthropic/Vercel AI SDKs, the official MCP servers and TypeScript SDK, LlamaIndex, plus [anthropics/skills](https://github.com/anthropics/skills) and [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) for skill-bundle coverage — spanning TS and Python, SDK-consumer example code and SDK-author source) and scans each with the built CLI.
+
+It **exits non-zero on any `proven`/`likely` finding not already in [`test/regression-baseline.json`](test/regression-baseline.json)** — a hand-reviewed record of findings already read against their source line. Fingerprints are `repo|rule|file`, not line numbers, so ordinary upstream churn doesn't produce noise. A new fingerprint is a claim the scanner has to justify: if it isn't a genuine issue it's a rule bug, fixed at the root cause and locked in as a new `test-fixtures/safe/` fixture. Baselining a finding you haven't read defeats the entire mechanism.
 
 **Skill-bundle coverage gets its own line** because `cisco-ai-defense/skill-scanner`'s `evals/` corpus is labeled — each of its 20 fixtures ships an `_expected.json` verdict and sits under a directory literally named `malicious/` or `safe/`, so it doubles as a recall check, not just a precision one: **6/6 in-scope malicious fixtures fire, 0 findings on anything labeled safe**, and 0 findings across all 18 real bundles in `anthropics/skills` and all 14 in `vercel/ai`. (The remaining Cisco categories — SQL injection, path traversal, resource exhaustion, generic `eval()` of a function argument, a payload deliberately split across four files — are either out of the documented LLM/MCP/RAG scope or beyond same-file conjunction analysis; see the [0.6.0 changelog entry](CHANGELOG.md) for the specific reasoning on each.)
 
@@ -374,13 +392,13 @@ Historical before/after from the run that drove the original precision fixes (fi
 | [modelcontextprotocol/typescript-sdk](https://github.com/modelcontextprotocol/typescript-sdk) | 3 | 0 | `token_endpoint`/`tokenType`-style OAuth metadata fields flagged as leaked secrets |
 | [run-llama/llama_index](https://github.com/run-llama/llama_index) | 18 | 15 | A Python check flagged any `description=` field containing "system prompt" as `proven` MCP tool poisoning, regardless of context. The remaining 15 are `VEC001` hits on the library's own generic retriever definitions — scanning a vector-DB SDK's own source, not application code, so a filter can't exist to check; an honest, inherent limit, not a bug |
 
-**Current run (v0.6.0, 2026-07-28)** — upstream repos have grown substantially since the table above, so the counts have moved:
+**Current run (2026-08-05)** — versioned evidence is recorded in [`docs/benchmarks/v0.8.0.json`](docs/benchmarks/v0.8.0.json):
 
 | Repo | Findings | Rules | Status |
 |------|---------:|-------|--------|
 | openai-node, anthropic-sdk-typescript, anthropic-sdk-python, modelcontextprotocol/typescript-sdk, modelcontextprotocol/servers | 0 | — | clean |
 | [anthropics/skills](https://github.com/anthropics/skills) (18 real skill bundles) | 0 | — | clean — pure precision check for SKL001–005 |
-| [vercel/ai](https://github.com/vercel/ai) (5,511 files) | 0 | — | **was 40** (AI001, AI003, AI005, AI010, MCP002) before triage — every one hand-reviewed against source and confirmed a false positive, traced to 3 independent root-cause bugs (see below), fixed, and re-confirmed clean on a full re-scan |
+| [vercel/ai](https://github.com/vercel/ai) (5,691 files) | 0 | — | **was 40** (AI001, AI003, AI005, AI010, MCP002) before triage — every one hand-reviewed against source and confirmed a false positive, traced to 3 independent root-cause bugs (see below), fixed, and re-confirmed clean on a full re-scan |
 | [run-llama/llama_index](https://github.com/run-llama/llama_index) | 46 | VEC001 | inherent limit, not a bug — the library's own generic retriever definitions, where no tenant filter can exist to find |
 | [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) | 7 | SKL001, SKL002, SKL005 | **all on fixtures labeled `malicious/`** — 6/6 in-scope, 0 on anything labeled `safe/` |
 
@@ -400,11 +418,13 @@ The two layers above only check that the scanner stays quiet on safe code. `DEP0
 node --test test/dependency-guard.test.js
 ```
 
-covers: `mcp-remote@0.1.15` (CVE-2025-6514, vulnerable) flagged / `mcp-remote@0.1.16` (patched) clear; `postmark-mcp@1.0.15` (before the backdoor) clear / `postmark-mcp@1.0.20` (after — no legitimate patch exists for a malicious package) still flagged; an unpinned `^0.1.16` range still flagged despite being patchable, since we can't prove what actually resolves. Building this test caught a real gap: `DEP003` used to match advisories by package name only, never actually comparing the declared version against the advisory's affected range — fixed in [`src/scanner/semver.ts`](src/scanner/semver.ts), which clears a finding only when an exact version pin is provably outside the affected range, and fails toward flagging on anything ambiguous.
+covers: `mcp-remote@0.1.15` (CVE-2025-6514, vulnerable) flagged / `mcp-remote@0.1.16` (patched) clear; `postmark-mcp@1.0.15` (before the backdoor) clear / `postmark-mcp@1.0.20` (after — no legitimate patch exists for a malicious package) still flagged; `llama-cpp-python==0.2.71` (CVE-2024-34359, from the OSV-generated set) flagged / `==0.2.72` (patched) clear, including under PyPI name normalization (`llama_cpp_python`); and `langchain>=0.1.0`-style unpinned specifiers producing **zero** default-report findings. Building this test caught a real gap: `DEP003` used to match advisories by package name only, never actually comparing the declared version against the advisory's affected range — fixed in [`src/scanner/semver.ts`](src/scanner/semver.ts).
+
+Ambiguity is resolved differently per advisory kind, deliberately. A **malicious** package fires even when the declared version can't be resolved — installing a backdoor is unrecoverable, so it fails toward flagging. A **CVE** fires at `proven` only when the declared version is an exact pin provably inside the affected range; unpinned-but-possibly-affected drops to `heuristic` (`--paranoid` only). Applying the malicious-kind rule to a 162-entry CVE snapshot would put a critical finding on every repo that declares `langchain>=0.1.0` — unactionable noise at scale.
 
 ## Roadmap
 
-See [`ROADMAP.md`](ROADMAP.md) for what's shipped and what's planned — the short version: the Python scanner is regex-based today (a documented, deliberate trade-off, not an oversight — see [`docs/DetectionEngine.md`](docs/DetectionEngine.md)), and moving it to full AST analysis is the largest planned change.
+See [`ROADMAP.md`](ROADMAP.md) for what's shipped and what's planned. Both language engines are AST-based: ts-morph for TypeScript/JavaScript and Tree-sitter for Python. Python imports, calls, assignments, decorators, scopes, keyword arguments, dictionary fields, and strings are syntax nodes; target code is never imported or executed, and no Python interpreter is required. The remaining Python gap is bounded cross-function/cross-file taint depth, not parsing. Scan performance and known limits are documented in [`docs/Performance.md`](docs/Performance.md).
 
 ## Contributing
 

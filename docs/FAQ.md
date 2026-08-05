@@ -22,7 +22,7 @@ No. Everything runs locally; nothing leaves your machine. The only network calls
 Yes — that's what `secureai-scan skill <target>` and `secureai-scan mcp <target>` are for. They accept a GitHub `owner/repo` shorthand, a full git URL, a local path, or (for `mcp`) a bare npm package name. The target is fetched (npm: `npm pack` only, no `install`, no lifecycle scripts; git: `git clone --depth 1`), scanned, then deleted (`--keep` to inspect it instead). See the README's "Scan before you install" section.
 
 **Why does the Python scanner seem weaker than the TS/JS engine?**
-It's regex/line-based, not AST-based, which is an honest, documented trade-off — see [Architecture.md](Architecture.md) and [ROADMAP.md](../ROADMAP.md). A tree-sitter-based AST rewrite is planned (spike in `spike/python-ast-poc/`) but not yet shipped.
+Both engines are AST-based. Python uses Tree-sitter for imports, calls, assignments, decorators, scopes, arguments, and strings; TypeScript uses ts-morph and has deeper symbol resolution and bounded interprocedural tracing. The remaining difference is semantic depth, not parsing correctness — see [Architecture.md](Architecture.md) and [ROADMAP.md](../ROADMAP.md).
 
 **How do I add a new detection rule?**
 [WritingRules.md](WritingRules.md) is the step-by-step checklist; [RuleDevelopment.md](RuleDevelopment.md) covers the day-to-day loop and how a rule PR gets reviewed.
@@ -31,4 +31,4 @@ It's regex/line-based, not AST-based, which is an honest, documented trade-off �
 Yes — SARIF output (`--output report.sarif`) puts findings inline on PRs and in the GitHub Security tab. See the README's GitHub Action example, or run `secureai-scan init` to scaffold a workflow automatically.
 
 **What Node/TypeScript/Python versions are supported?**
-Node `>=20` (see `package.json` `engines`). TypeScript scanning works on any `.ts`/`.tsx`/`.js`/`.jsx` regardless of the target project's own TS version, since ts-morph parses independently. Python scanning is regex-based and doesn't depend on a specific Python version being installed — SecureAI-Scan never executes your code.
+Node `>=22.12.0` (see `package.json` `engines`). TypeScript scanning works on any `.ts`/`.tsx`/`.js`/`.jsx` regardless of the target project's own TS version, since ts-morph parses independently. Python is parsed by Tree-sitter and does not require Python to be installed — SecureAI-Scan never executes your code.

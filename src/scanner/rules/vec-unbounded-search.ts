@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getFileCalls, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath } from "../confidence.js";
 import type { Evidence } from "../types.js";
 
@@ -72,7 +72,7 @@ export const ruleVecUnboundedSearch: Rule = {
       const relPath = getRelativeFilePath(context.rootPath, sourceFile);
       const isTest = isTestFilePath(relPath);
 
-      for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      for (const call of getFileCalls(sourceFile)) {
         if (!isVectorSearchCall(call)) continue;
 
         const kArg = getKArgument(call);

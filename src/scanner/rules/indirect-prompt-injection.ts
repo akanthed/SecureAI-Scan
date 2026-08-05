@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getCallsWithin, getFileFunctions, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { isLikelyLlmCall } from "./llm-rule-utils.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
 import type { Evidence } from "../types.js";
@@ -99,18 +99,11 @@ export const ruleIndirectPromptInjection: Rule = {
       const relPath = getRelativeFilePath(context.rootPath, sourceFile);
       const isTest = isTestFilePath(relPath);
 
-      for (const fnNode of sourceFile.getDescendants()) {
-        if (
-          !Node.isFunctionDeclaration(fnNode) &&
-          !Node.isFunctionExpression(fnNode) &&
-          !Node.isArrowFunction(fnNode) &&
-          !Node.isMethodDeclaration(fnNode)
-        ) continue;
-
+      for (const fnNode of getFileFunctions(sourceFile)) {
         const fetchVars = collectFetchDerivedIdentifiers(fnNode);
         if (fetchVars.size === 0) continue;
 
-        const calls = fnNode.getDescendantsOfKind(SyntaxKind.CallExpression);
+        const calls = getCallsWithin(fnNode);
         for (const call of calls) {
           if (!isLikelyLlmCall(call)) continue;
 

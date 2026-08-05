@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Evidence, Finding, Rule, RuleContext } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getFileCalls, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { demoteEvidence, evidenceConfidence, isTestFilePath } from "../confidence.js";
 import { containsIdentifierNamed, getPromptParts, isLikelyLlmCall } from "./llm-rule-utils.js";
 
@@ -59,7 +59,7 @@ export const ruleRagContextInjection: Rule = {
       const relFile = getRelativeFilePath(context.rootPath, sourceFile);
       const testFile = isTestFilePath(relFile);
 
-      for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      for (const call of getFileCalls(sourceFile)) {
         if (!isLikelyLlmCall(call)) {
           continue;
         }

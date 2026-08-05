@@ -1,6 +1,6 @@
 ﻿import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getFileCalls, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { evidenceConfidence } from "../confidence.js";
 import {
   getLlmPromptNodes,
@@ -37,7 +37,7 @@ export const ruleUnboundedLlmInput: Rule = {
     const findings: Finding[] = [];
 
     for (const sourceFile of context.sourceFiles) {
-      for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      for (const call of getFileCalls(sourceFile)) {
         if (!isLikelyLlmCall(call) || hasTokenLimit(call)) {
           continue;
         }

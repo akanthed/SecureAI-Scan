@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext, TraceStep } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getCallsWithin, getFileFunctions, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
 
 // Methods used to ingest content into vector stores
@@ -126,18 +126,11 @@ export const ruleVecUserIngestion: Rule = {
       const relPath = getRelativeFilePath(context.rootPath, sourceFile);
       const isTest = isTestFilePath(relPath);
 
-      for (const fnNode of sourceFile.getDescendants()) {
-        if (
-          !Node.isFunctionDeclaration(fnNode) &&
-          !Node.isFunctionExpression(fnNode) &&
-          !Node.isArrowFunction(fnNode) &&
-          !Node.isMethodDeclaration(fnNode)
-        ) continue;
-
+      for (const fnNode of getFileFunctions(sourceFile)) {
         const tainted = collectTaintedVars(fnNode);
         const hasSanitization = hasSanitizationNearby(fnNode.getText());
 
-        for (const call of fnNode.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+        for (const call of getCallsWithin(fnNode)) {
           if (!isVectorIngestionCall(call)) continue;
           const matched = taintedArgMatch(call, tainted);
           if (!matched) continue;

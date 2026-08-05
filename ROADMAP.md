@@ -2,7 +2,7 @@
 
 Where this scanner is going, and why — kept separate from [`CHANGELOG.md`](CHANGELOG.md) (what shipped) and [`MARKETING.md`](MARKETING.md) (how to talk about it). This file is the plan; update it as decisions change rather than letting it drift out of sync with reality.
 
-## Where we stand (2026-07-28)
+## Where we stand (2026-08-05)
 
 **Shipped in v0.6.0:** evasion-resistant Agent Skill scanning (SKL004/SKL005, deobfuscation-aware SKL001–003), validated against two real-world corpora — [anthropics/skills](https://github.com/anthropics/skills) (18 bundles, 0 findings) and [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner)'s labeled eval set (6/6 malicious fixtures correctly flagged, 0 false positives). The pre-install wedge (`secureai-scan skill <target>` / `secureai-scan mcp <target>`) — fetch and scan before you trust, no clone or config required, nothing fetched is ever executed.
 
@@ -16,20 +16,15 @@ This is the exact validation loop the project is built around: real code found r
 
 ## The four gaps, and what closes them
 
-### 1. Python is regex-based, not AST-based
+### 1. Python AST foundation — shipped
 
-The TS/JS rules resolve real imports and walk a real AST (`ts-morph`). The Python scanner (`python-scanner.ts`) matches patterns line-by-line with a small taint pass — `CLAUDE.md` documents this as the most false-positive-prone surface in the codebase, and it's the majority language for production LLM/agent code.
+**Status: complete (2026-08-05).** Python source is parsed synchronously with `tree-sitter` + `tree-sitter-python` in `src/scanner/python-ast.ts`. Imports, calls, arguments, keyword arguments, assignments (identifier, attribute, tuple/list unpacking), decorators, functions, scopes, dictionary fields, and string/docstring nodes all come from the syntax tree. The old lexical `code`/`logical` views and hand-written assignment parser were deleted; no production rule infers Python structure from physical lines.
 
-**Plan:** integrate `tree-sitter-python` (WASM, pure-npm, no external Python interpreter required — keeps `npx secureai-scan` working with zero Python installed). Port rules incrementally behind the existing regex path as a fallback, so the precision gate never regresses mid-migration. Start with AI001 (prompt injection) as the proof of concept, since it has the most-documented false-negative history (see memory: litellm calls, >10-line taint gaps).
+The parser is a runtime dependency with prebuilt binaries for macOS/Linux/Windows on x64 and ARM64; no Python interpreter and no execution of target code is required. Tree-sitter error recovery keeps malformed files scanable instead of aborting the repository.
 
-**Status: spiked (2026-07-28), not integrated.** `spike/python-ast-poc/` — not part of the shipped package, `tree-sitter-python`/`web-tree-sitter` are `devDependencies` only. Findings:
+This closes the concrete class-handler gap that motivated the migration (`self.user_message = request.json[...]`), fake imports/calls inside comments and docstrings, multiline calls and keyword arguments, tuple assignment, and decorated async handlers. Direct AST contracts in `test/python-ast.test.js`, the vulnerable/safe corpus, and the real-repo regression gate protect both recall and precision.
 
-- **Technically viable exactly as planned.** `web-tree-sitter` + `tree-sitter-python`'s own bundled `.wasm` grammar (not the 51MB `tree-sitter-wasms` multi-language bundle) parses real Python with zero native compilation — confirmed by testing on this machine. `tree-sitter-python`'s own npm entry point pulls in `node-gyp-build`/native bindings; that path was deliberately avoided.
-- **Found and closed a real, concrete gap** in the current regex scanner during the spike itself: `collectRequestTaintedVars` in `python-scanner.ts` only recognizes bare-identifier assignment targets, so `self.user_message = request.json[...]` — a common shape in any class-based handler (Flask `MethodView`, FastAPI DI classes, agent/session state) — is invisible to it, confirmed empirically (0 findings, even at `--paranoid`, on a textbook prompt-injection case). The AST-based POC catches it with no special-casing, because an assignment target is either an `identifier` or an `attribute` node either way — the gap only existed because the regex approach had to enumerate LHS shapes by hand and missed one.
-- **Recall parity confirmed** on the shape the regex scanner already handles (bare-identifier taint), and **no precision regression** on a safe case (plain function argument, no request source) — 1/1/0 findings across the three test cases, exactly as expected.
-- **Effort estimate for a real migration, based on what the POC didn't cover:** the POC is single-function, single-pass, no cross-function propagation, no sanitizer detection (`hasSanitization` in the current scanner), no evidence tiering, and covers only AI001's core shape — not the ~10 other Python rules that share `python-scanner.ts`'s taint infrastructure (AI003, AI004, AI005, AI007, AI010, MCP007–009, DEP checks). A full port is a genuine multi-session rewrite of that shared infrastructure, not an incremental patch — closer to "rebuild the Python surface on a new foundation" than "swap one function's implementation."
-
-**Recommendation:** proceed. The technical risk is retired — this was the open question, and it's now answered with working code, not a guess. The remaining cost is pure engineering time, and the AI001 case alone (a completely invisible textbook vulnerability) is enough to justify it independent of the strategic case in the rest of this document. Next step, when picked up: expand the POC to a second rule (AI005 or AI007, since they read the same shared taint set) to confirm the "shared infrastructure" assumption before committing to the full rebuild.
+**Remaining work:** bounded cross-function and cross-file propagation. The AST establishes correct syntax and scope; it does not automatically make arbitrary interprocedural taint sound. That is tracked below as a separate problem rather than being misrepresented as unfinished parsing.
 
 ### 2. No cross-file taint tracking
 

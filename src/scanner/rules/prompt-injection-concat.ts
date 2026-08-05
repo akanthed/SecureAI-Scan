@@ -1,6 +1,6 @@
 import { Node, SyntaxKind, type SourceFile } from "ts-morph";
 import type { Evidence, Finding, Rule, RuleContext, TraceStep } from "../types.js";
-import { getNodeLine, getRelativeFilePath, isStringConcatenation } from "../../utils/ast.js";
+import { getCallsWithin, getFileFunctions, getNodeLine, getRelativeFilePath, isFunctionLike, isStringConcatenation } from "../../utils/ast.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
 import { getPromptParts, resolveLlmSink, resolveLocalCallTarget } from "./llm-rule-utils.js";
 
@@ -29,15 +29,6 @@ function isRequestObjectAccess(node: Node): boolean {
   if (rootName === "req" || rootName === "request") return true;
   if (rootName === "ctx") return node.getText().toLowerCase().startsWith("ctx.request");
   return false;
-}
-
-function isFunctionLike(node: Node): boolean {
-  return (
-    Node.isFunctionDeclaration(node) ||
-    Node.isFunctionExpression(node) ||
-    Node.isArrowFunction(node) ||
-    Node.isMethodDeclaration(node)
-  );
 }
 
 /**
@@ -218,7 +209,7 @@ function traceInterproceduralSink(
   rootPath: string,
   findings: Finding[],
 ): void {
-  for (const call of fnNode.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+  for (const call of getCallsWithin(fnNode)) {
     const sink = resolveLlmSink(call);
 
     if (sink) {
@@ -349,13 +340,12 @@ export const rulePromptInjectionConcat: Rule = {
       const relFile = getRelativeFilePath(context.rootPath, sourceFile);
       const testFile = isTestFilePath(relFile);
 
-      for (const fnNode of sourceFile.getDescendants()) {
-        if (!isFunctionLike(fnNode)) continue;
+      for (const fnNode of getFileFunctions(sourceFile)) {
         // Skip nested functions: taint is collected per enclosing function,
         // and the outer pass already visits inner calls.
         const taint = collectTaint(fnNode);
 
-        for (const call of fnNode.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+        for (const call of getCallsWithin(fnNode)) {
           const sink = resolveLlmSink(call);
           if (!sink) {
             // Not a direct LLM sink — if tainted data flows into a call this

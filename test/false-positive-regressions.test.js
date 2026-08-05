@@ -8,6 +8,7 @@ import { scanPythonFiles } from "../dist/scanner/python-scanner.js";
 import { createScanProject } from "../dist/scanner/project.js";
 import { generateBom } from "../dist/scanner/bom.js";
 import { catalogFor } from "../dist/scanner/catalog.js";
+import { isTestFilePath } from "../dist/scanner/confidence.js";
 
 /**
  * Locks in the false-positive and crash-safety fixes made in this session.
@@ -216,6 +217,81 @@ test("AI001 finds prompt injection when the LLM call is far from the tainted req
     findings.some((f) => f.rule_id === "AI001"),
     "expected AI001 to trace taint across ordinary business logic between the request read and the LLM call",
   );
+});
+
+// ── Python receiver resolution (renamed SDK client variables) ───────────────
+
+test("AI001 fires when the LLM client variable is not named client/llm/chain", () => {
+  const dir = tempDir("secureai-py-receiver-");
+  fs.writeFileSync(
+    path.join(dir, "app.py"),
+    [
+      "from openai import OpenAI",
+      "from flask import request",
+      "",
+      "gateway = OpenAI()",
+      "",
+      "def handle():",
+      "    user_input = request.json['q']",
+      "    reply = gateway.chat.completions.create(",
+      '        model="gpt-4",',
+      '        messages=[{"role": "system", "content": f"Answer: {user_input}"}],',
+      "    )",
+      "    return reply",
+      "",
+    ].join("\n"),
+  );
+
+  const { findings } = scanPythonFiles(dir);
+  assert.ok(
+    findings.some((f) => f.rule_id === "AI001"),
+    "expected AI001 to resolve `gateway` through its OpenAI() constructor binding",
+  );
+});
+
+test("Python rules do not fire on a chain-shaped call in a file with no LLM SDK import", () => {
+  const dir = tempDir("secureai-py-nollm-");
+  fs.writeFileSync(
+    path.join(dir, "etl.py"),
+    [
+      "from flask import request",
+      "from mypipeline import chain",
+      "",
+      "def handle():",
+      "    user_input = request.json['q']",
+      "    return chain.invoke(user_input)",
+      "",
+    ].join("\n"),
+  );
+
+  const { findings } = scanPythonFiles(dir);
+  assert.equal(
+    findings.some((f) => f.rule_id === "AI001"),
+    false,
+    "a `chain.invoke` in a non-LLM file must not be treated as an LLM sink",
+  );
+});
+
+// ── Non-production path segments (confidence.ts) ────────────────────────────
+
+test("isTestFilePath matches prefixed segments like test-fixtures, not just suffixed ones", () => {
+  for (const p of [
+    "test-fixtures/vulnerable/app.ts",
+    "ecosystem-tests/node/index.ts",
+    "example-app/src/main.py",
+    "packages/demo-server/server.ts",
+    "src/__tests__/foo.ts",
+  ]) {
+    assert.equal(isTestFilePath(p), true, `${p} should be non-production`);
+  }
+  for (const p of [
+    "src/attestation/verify.ts",
+    "src/protest/index.ts",
+    "src/sampler/rate.ts",
+    "src/exemplar/main.py",
+  ]) {
+    assert.equal(isTestFilePath(p), false, `${p} must stay production code`);
+  }
 });
 
 // ── BOM bare-identifier gating (bom.ts) ─────────────────────────────────────
