@@ -6,7 +6,7 @@
 [![CodeQL](https://github.com/akanthed/SecureAI-Scan/actions/workflows/codeql.yml/badge.svg)](https://github.com/akanthed/SecureAI-Scan/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/akanthed/SecureAI-Scan/badge)](https://scorecard.dev/viewer/?uri=github.com/akanthed/SecureAI-Scan)
 [![license](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen)](https://nodejs.org)
 [![OWASP](https://img.shields.io/badge/OWASP-LLM%20%C2%B7%20ASI%20%C2%B7%20MCP%20Top%2010-000000)](#rules)
 
 **The AI security scanner that proves its findings.**
@@ -340,7 +340,7 @@ Honest limitation: the paper's conclusion is that runtime detonation beats stati
 ## Trust and release assurance
 
 - CI runs on Linux, Windows, and macOS across supported Node versions.
-- CodeQL, dependency review, OpenSSF Scorecard, Dependabot, and this scanner's own blocking self-scan provide independent checks.
+- CodeQL, production dependency audit, OpenSSF Scorecard, Dependabot, and this scanner's own blocking self-scan provide independent checks.
 - Every manual npm publication invokes tests, coverage floors, the reviewed real-repository regression gate, and tarball inspection through `prepublishOnly`.
 - GitHub Actions receives no npm password or token and cannot publish the package.
 - [Release assurance](docs/ReleaseAssurance.md), [single-maintainer governance](GOVERNANCE.md), [security reporting](SECURITY.md), and [versioned benchmark evidence](docs/benchmarks/v0.8.0.json) are public.

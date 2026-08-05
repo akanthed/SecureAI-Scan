@@ -15,7 +15,7 @@ SecureAI-Scan is a single-maintainer open-source project. Trust comes from repro
 
 ## Independent platform checks
 
-Pull requests and `main` run on Linux, Windows, and macOS with supported Node versions. GitHub also runs CodeQL, dependency review, OpenSSF Scorecard, Dependabot, and SecureAI-Scan against its own repository. High and critical self-scan findings block CI.
+Pull requests and `main` run on Linux, Windows, and macOS with Node 22.12+ and 24. Every install job asserts the runtime before `npm ci`, so stale Node 20 jobs fail clearly before native dependencies invoke node-gyp. GitHub also runs CodeQL, a production-only `npm audit`, OpenSSF Scorecard, Dependabot, and SecureAI-Scan against its own repository. High and critical self-scan findings block CI. The dependency audit does not require GitHub Dependency Graph.
 
 These checks are independent implementations, not proof that the package is vulnerability-free.
 

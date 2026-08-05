@@ -31,4 +31,4 @@ Both engines are AST-based. Python uses Tree-sitter for imports, calls, assignme
 Yes — SARIF output (`--output report.sarif`) puts findings inline on PRs and in the GitHub Security tab. See the README's GitHub Action example, or run `secureai-scan init` to scaffold a workflow automatically.
 
 **What Node/TypeScript/Python versions are supported?**
-Node `>=20` (see `package.json` `engines`). TypeScript scanning works on any `.ts`/`.tsx`/`.js`/`.jsx` regardless of the target project's own TS version, since ts-morph parses independently. Python is parsed by Tree-sitter and does not require Python to be installed — SecureAI-Scan never executes your code.
+Node `>=22.12.0` (see `package.json` `engines`). TypeScript scanning works on any `.ts`/`.tsx`/`.js`/`.jsx` regardless of the target project's own TS version, since ts-morph parses independently. Python is parsed by Tree-sitter and does not require Python to be installed — SecureAI-Scan never executes your code.

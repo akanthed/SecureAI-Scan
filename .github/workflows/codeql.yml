@@ -23,6 +23,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
+      - run: npm run check:runtime
       - run: npm ci
       - run: npm run build
       - uses: github/codeql-action/analyze@v4.37.3
