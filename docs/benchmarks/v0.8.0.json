@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "product": "secureai-scan",
+  "version": "0.8.0",
+  "status": "release-candidate",
+  "measured_at": "2026-08-05",
+  "commands": [
+    "npm test",
+    "npm run coverage",
+    "npm run regression",
+    "npm pack --dry-run --ignore-scripts"
+  ],
+  "tests": {
+    "total": 133,
+    "passed": 133,
+    "failed": 0
+  },
+  "coverage_percent": {
+    "statements": 88.07,
+    "branches": 80.8,
+    "functions": 84.61,
+    "lines": 88.07
+  },
+  "regression": {
+    "repositories": 9,
+    "files_scanned": 12676,
+    "new_default_tier_fingerprints": 0,
+    "repositories_with_zero_default_tier_findings": [
+      "openai/openai-node",
+      "anthropics/anthropic-sdk-typescript",
+      "anthropics/anthropic-sdk-python",
+      "modelcontextprotocol/typescript-sdk",
+      "modelcontextprotocol/servers",
+      "vercel/ai",
+      "anthropics/skills"
+    ],
+    "reviewed_baseline_findings": {
+      "run-llama/llama_index": {
+        "count": 46,
+        "rules": ["VEC001"],
+        "interpretation": "Known framework-source limitation: generic retriever implementations have no authenticated tenant context to inspect."
+      }
+    },
+    "labeled_malicious_evaluation": {
+      "repository": "cisco-ai-defense/skill-scanner",
+      "default_tier_findings": 7,
+      "in_scope_malicious_cases_detected": "6/6",
+      "safe_labeled_cases_with_default_tier_findings": 0,
+      "rules": ["SKL001", "SKL002", "SKL005"]
+    }
+  },
+  "package": {
+    "files": 58,
+    "packed_bytes": 150200,
+    "unpacked_bytes": 568000
+  },
+  "methodology": "../ReleaseAssurance.md",
+  "regression_baseline": "../../test/regression-baseline.json"
+}

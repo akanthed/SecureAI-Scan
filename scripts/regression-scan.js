@@ -6,24 +6,30 @@
  * on code we wrote ourselves; this catches false positives against code we
  * didn't — real SDK examples, official MCP servers, framework internals.
  *
- * Not a pass/fail gate: upstream repos change over time, so there's no
- * fixed expected-count baseline. Run it, read the findings, and use
- * judgment — every `proven`/`likely` finding here should be either a real
- * issue or a bug to fix in a rule, never "close enough."
+ * This IS a gate, against a committed baseline (test/regression-baseline.json)
+ * of the `proven`/`likely` findings already reviewed by hand. Upstream repos
+ * change, so the baseline is keyed on `repo|rule|file` rather than line
+ * numbers, and only *new* fingerprints fail. Every new fingerprint must be
+ * reviewed against its source line before being accepted: if it isn't a
+ * genuine issue it's a rule bug, and the fix belongs in the rule plus a new
+ * test-fixtures/safe/ fixture — not in the baseline.
  *
  * Usage:
- *   node scripts/regression-scan.js            scan all repos (cached clones)
- *   node scripts/regression-scan.js --fresh     re-clone everything first
- *   node scripts/regression-scan.js openai-node scan just one repo by name
+ *   node scripts/regression-scan.js                    scan all repos (cached clones)
+ *   node scripts/regression-scan.js --fresh            re-clone everything first
+ *   node scripts/regression-scan.js openai-node        scan just one repo by name
+ *   node scripts/regression-scan.js --update-baseline  accept current findings
  */
 import { execSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const cacheDir = path.join(root, ".regression-cache");
+const baselinePath = path.join(root, "test", "regression-baseline.json");
 
 // Diverse on purpose: different SDKs (OpenAI/Anthropic/Vercel AI/LlamaIndex),
 // different languages (TS + Python), and both SDK-consumer code (examples/
@@ -53,6 +59,7 @@ const REPOS = [
 ];
 
 const fresh = process.argv.includes("--fresh");
+const updateBaseline = process.argv.includes("--update-baseline");
 const only = process.argv.slice(2).find((a) => !a.startsWith("--"));
 const targets = only ? REPOS.filter((r) => r.name === only) : REPOS;
 if (only && targets.length === 0) {
@@ -62,7 +69,19 @@ if (only && targets.length === 0) {
 
 fs.mkdirSync(cacheDir, { recursive: true });
 
+/** repo|ruleId|file — deliberately line-free so upstream churn isn't noise. */
+function fingerprint(repo, ruleId, file) {
+  return `${repo}|${ruleId}|${file.replace(/\\/g, "/")}`;
+}
+
+const baseline = fs.existsSync(baselinePath)
+  ? JSON.parse(fs.readFileSync(baselinePath, "utf-8"))
+  : { fingerprints: [] };
+const baselineSet = new Set(baseline.fingerprints);
+
 const summary = [];
+const observed = new Set();
+const newFindings = [];
 
 for (const repo of targets) {
   const dest = path.join(cacheDir, repo.name);
@@ -75,12 +94,13 @@ for (const repo of targets) {
   }
 
   console.log(`\n${"=".repeat(70)}\nScanning ${repo.name}\n${"=".repeat(70)}`);
+  const reportPath = path.join(os.tmpdir(), `secureai-regression-${repo.name}.json`);
   let output = "";
   try {
-    output = execSync(`node "${path.join(root, "dist", "index.js")}" scan "${dest}" --limit 15`, {
-      encoding: "utf-8",
-      maxBuffer: 1024 * 1024 * 32,
-    });
+    output = execSync(
+      `node "${path.join(root, "dist", "index.js")}" scan "${dest}" --limit 15 --output "${reportPath}"`,
+      { encoding: "utf-8", maxBuffer: 1024 * 1024 * 32 },
+    );
   } catch (err) {
     // scan exits non-zero only with --fail-on, which we don't pass here —
     // a non-zero exit means the CLI itself crashed, not "findings exist".
@@ -88,19 +108,67 @@ for (const repo of targets) {
   }
   console.log(output);
 
-  const findingsMatch = output.match(/(\d+) finding\(s\)/);
-  summary.push({
-    repo: repo.name,
-    findings: findingsMatch ? Number(findingsMatch[1]) : output.includes("No findings") ? 0 : "ERROR",
-  });
+  let count = 0;
+  if (fs.existsSync(reportPath)) {
+    const report = JSON.parse(fs.readFileSync(reportPath, "utf-8"));
+    for (const group of report.groups ?? []) {
+      for (const occurrence of group.occurrences ?? []) {
+        if (occurrence.evidence === "heuristic") continue;
+        count += 1;
+        const fp = fingerprint(repo.name, group.ruleId, occurrence.file);
+        observed.add(fp);
+        if (!baselineSet.has(fp)) {
+          newFindings.push({ fp, summary: occurrence.summary, line: occurrence.line });
+        }
+      }
+    }
+    fs.rmSync(reportPath, { force: true });
+  } else {
+    count = "ERROR";
+  }
+  summary.push({ repo: repo.name, findings: count });
 }
 
 console.log(`\n${"=".repeat(70)}\nSummary\n${"=".repeat(70)}`);
 for (const row of summary) {
   console.log(`  ${row.repo.padEnd(28)} ${row.findings} finding(s) at default evidence level`);
 }
-console.log(
-  "\nReview every finding above against its source line. Any that isn't a\n" +
-    "genuine issue is a rule bug — fix the rule and add the offending pattern\n" +
-    "as a new test-fixtures/safe/ regression fixture before merging.",
+
+if (updateBaseline) {
+  const merged = only
+    ? [...new Set([...baseline.fingerprints.filter((f) => !f.startsWith(`${only}|`)), ...observed])]
+    : [...observed];
+  merged.sort();
+  fs.writeFileSync(
+    baselinePath,
+    JSON.stringify(
+      { note: "Reviewed proven/likely findings from scripts/regression-scan.js. Only add entries you have read against their source line.", updated: new Date().toISOString().slice(0, 10), fingerprints: merged },
+      null,
+      2,
+    ) + "\n",
+  );
+  console.log(`\nBaseline updated: ${merged.length} fingerprint(s).`);
+  process.exit(0);
+}
+
+const resolved = [...baselineSet].filter(
+  (fp) => !observed.has(fp) && (!only || fp.startsWith(`${only}|`)),
 );
+if (resolved.length > 0) {
+  console.log(`\n${resolved.length} baseline finding(s) no longer reported (upstream change or a rule fix):`);
+  for (const fp of resolved.slice(0, 20)) console.log(`  - ${fp}`);
+}
+
+if (newFindings.length > 0) {
+  console.error(`\n${"!".repeat(70)}`);
+  console.error(`${newFindings.length} NEW proven/likely finding(s) not in the baseline:`);
+  for (const f of newFindings) console.error(`  + ${f.fp}:${f.line}\n      ${f.summary}`);
+  console.error(
+    "\nRead each one against its source line. If it isn't a genuine issue it's a\n" +
+      "rule bug: fix the rule and add the pattern to test-fixtures/safe/. Only\n" +
+      "once every entry is confirmed real should you run --update-baseline.",
+  );
+  process.exit(1);
+}
+
+console.log("\nNo new findings against the reviewed baseline.");

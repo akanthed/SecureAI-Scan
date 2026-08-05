@@ -1,18 +1,20 @@
 # Architecture
 
-SecureAI-Scan runs four independent scanning surfaces and merges their output into one finding list. Each surface exists because the source material is fundamentally different — an AST for TypeScript, text for Python, JSON for MCP config, a whole directory for Agent Skills — and forcing them through one abstraction would weaken all four.
+SecureAI-Scan runs four independent scanning surfaces and merges their output into one finding list. Each surface exists because the source material is fundamentally different — language ASTs for TypeScript and Python, JSON for MCP config, a whole directory for Agent Skills — and forcing them through one abstraction would weaken all four.
 
 ## The four surfaces
 
 ### 1. TypeScript/JavaScript — AST-based (`src/scanner/project.ts`, `src/scanner/rules/*.ts`)
 
-`src/scanner/project.ts` builds one [`ts-morph`](https://ts-morph.com/) `Project` from the target path (`skipAddingFilesFromTsConfig: true`, excluding `node_modules`/`dist`/`build`/`out`/`.next`). Every rule in `src/scanner/rules/` is a `Rule` object (`id`, `title`, `severity`, `run(context)`) that walks this AST independently — rules do not share a traversal pass, each does its own `forEachDescendant`-style walk.
+`src/scanner/project.ts` builds one [`ts-morph`](https://ts-morph.com/) `Project` from the target path (`skipAddingFilesFromTsConfig: true`, excluding `node_modules`/`dist`/`build`/`out`/`.next`). Every rule in `src/scanner/rules/` is a `Rule` object (`id`, `title`, `severity`, `run(context)`). Rules share the memoized per-file call/function index in `src/utils/ast.ts`; they do not independently walk every file.
 
 The defining property of this surface: **a call is only ever treated as "an LLM call" if it resolves through actual import bindings to a known SDK** (`resolveLlmSink` in `src/scanner/rules/llm-rule-utils.ts` — covers `openai`, `@anthropic-ai/sdk`, `ai`, `@google/genai`, LangChain, Bedrock, and others). A function named `query()` or `chat()` that isn't imported from one of those packages is never flagged, no matter how LLM-shaped its name looks. This is the single biggest lever against false positives in the whole project — see [DetectionEngine.md](DetectionEngine.md) for why.
 
-### 2. Python — regex + taint propagation (`src/scanner/python-scanner.ts`)
+### 2. Python — Tree-sitter AST + taint propagation (`src/scanner/python-ast.ts`, `src/scanner/python-scanner.ts`)
 
-Python has no AST pass here — patterns for LLM SDK calls, request-input taint sources, vector-store calls, and exec-style sinks are matched line-by-line, with a small taint-propagation pass connecting a source line to a sink line within the same file. This is a real trade-off, not an oversight: regex matching is inherently more prone to context-free false positives than an AST + import resolution (see the MCP001 false-positive class in [DetectionEngine.md](DetectionEngine.md), which was exactly this). [`ROADMAP.md`](../ROADMAP.md) tracks the plan to move this to full AST analysis; a working spike lives in `spike/python-ast-poc/` (tree-sitter-based, not yet wired into `src/`).
+Every Python file is parsed once with `tree-sitter-python`. One indexed tree supplies imports, calls, arguments, keyword arguments, assignment targets, functions, decorators, scopes, dictionary fields, and literal strings to all Python rules. LLM receivers are bound from SDK constructor assignments, and request/LLM-result taint propagates through AST assignment expressions within the enclosing function or module scope. String-content rules still inspect string text, but the fact that a value is a tool description, dictionary field, keyword argument, or docstring comes from its syntax node — not a substring search over physical lines.
+
+Tree-sitter recovers around syntax errors, so an incomplete file remains scanable. Parsing is static and local: SecureAI-Scan does not need a Python interpreter and never imports or executes target code.
 
 ### 3. Config and content files — read directly off disk (`src/scanner/mcp-config-scanner.ts`, `src/scanner/skill-scanner.ts`)
 

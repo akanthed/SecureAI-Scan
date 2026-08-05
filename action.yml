@@ -6,6 +6,10 @@ branding:
   color: "purple"
 
 inputs:
+  scanner-version:
+    description: "Exact secureai-scan npm version to install"
+    required: false
+    default: "0.8.0"
   path:
     description: "Path to scan"
     required: false
@@ -32,15 +36,22 @@ runs:
   steps:
     - name: Install secureai-scan
       shell: bash
-      run: npm install -g secureai-scan
+      env:
+        SCANNER_VERSION: ${{ inputs.scanner-version }}
+      run: npm install -g "secureai-scan@$SCANNER_VERSION"
 
     - name: Run SecureAI-Scan
       shell: bash
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
+        PARANOID: ${{ inputs.paranoid }}
+        SARIF_FILE: ${{ inputs.sarif-file }}
+        SCAN_PATH: ${{ inputs.path }}
       run: |
-        ARGS="--output ${{ inputs.sarif-file }}"
-        if [ "${{ inputs.paranoid }}" = "true" ]; then ARGS="$ARGS --paranoid"; fi
-        if [ -n "${{ inputs.fail-on }}" ]; then ARGS="$ARGS --fail-on ${{ inputs.fail-on }}"; fi
-        secureai-scan scan "${{ inputs.path }}" $ARGS
+        args=(--output "$SARIF_FILE")
+        if [ "$PARANOID" = "true" ]; then args+=(--paranoid); fi
+        if [ -n "$FAIL_ON" ]; then args+=(--fail-on "$FAIL_ON"); fi
+        secureai-scan scan "$SCAN_PATH" "${args[@]}"
 
     - name: Upload SARIF to GitHub code scanning
       if: ${{ inputs.upload-sarif == 'true' && always() }}

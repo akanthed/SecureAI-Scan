@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Evidence, Finding, Rule, RuleContext } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getCallsWithin, getFileFunctions, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import {
   evidenceConfidence,
   demoteEvidence,
@@ -73,12 +73,12 @@ export const ruleLlmBeforeAuth: Rule = {
     for (const sourceFile of context.sourceFiles) {
       const relFile = getRelativeFilePath(context.rootPath, sourceFile);
       const testFile = isTestFilePath(relFile);
-      const functionNodes = sourceFile.getDescendants().filter(isRequestHandler);
+      const functionNodes = getFileFunctions(sourceFile).filter(isRequestHandler);
 
       for (const fn of functionNodes) {
         if (surroundingHasAuth(fn)) continue;
 
-        const calls = fn.getDescendantsOfKind(SyntaxKind.CallExpression);
+        const calls = getCallsWithin(fn);
         let authSeen = false;
 
         for (const call of calls) {

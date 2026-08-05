@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getFileFunctions, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { isTestFilePath, evidenceConfidence } from "../confidence.js";
 import {
   collectRequestDerivedVars,
@@ -59,14 +59,7 @@ export const ruleMcpDynamicServerCommand: Rule = {
       const relPath = getRelativeFilePath(context.rootPath, sourceFile);
       if (isTestFilePath(relPath)) continue;
 
-      for (const fnNode of sourceFile.getDescendants()) {
-        if (
-          !Node.isFunctionDeclaration(fnNode) &&
-          !Node.isFunctionExpression(fnNode) &&
-          !Node.isArrowFunction(fnNode) &&
-          !Node.isMethodDeclaration(fnNode)
-        ) continue;
-
+      for (const fnNode of getFileFunctions(sourceFile)) {
         const tainted = collectRequestDerivedVars(fnNode);
 
         for (const objLit of fnNode.getDescendantsOfKind(SyntaxKind.ObjectLiteralExpression)) {

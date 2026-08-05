@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getCallsWithin, getFileFunctions, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { isLikelyLlmCall } from "./llm-rule-utils.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath } from "../confidence.js";
 import type { Evidence } from "../types.js";
@@ -132,18 +132,11 @@ export const ruleMultiagentTrustBoundary: Rule = {
       const relPath = getRelativeFilePath(context.rootPath, sourceFile);
       const isTest = isTestFilePath(relPath);
 
-      for (const fnNode of sourceFile.getDescendants()) {
-        if (
-          !Node.isFunctionDeclaration(fnNode) &&
-          !Node.isFunctionExpression(fnNode) &&
-          !Node.isArrowFunction(fnNode) &&
-          !Node.isMethodDeclaration(fnNode)
-        ) continue;
-
+      for (const fnNode of getFileFunctions(sourceFile)) {
         const agentVars = collectAgentOutputVars(fnNode);
         if (agentVars.size === 0) continue;
 
-        for (const call of fnNode.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+        for (const call of getCallsWithin(fnNode)) {
           if (!isLikelyLlmCall(call)) continue;
           if (!agentOutputUsedInHighTrustRole(call, agentVars)) continue;
 

@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Evidence, Finding, Rule, RuleContext } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getFileCalls, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import {
   evidenceConfidence,
   demoteEvidence,
@@ -106,7 +106,7 @@ export const ruleSensitivePromptLogging: Rule = {
       const testFile = isTestFilePath(relFile);
       const llmFile = fileImportsLlmSdk(sourceFile);
 
-      for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      for (const call of getFileCalls(sourceFile)) {
         if (!isLoggerCall(call)) continue;
 
         let kind: "secret" | "prompt" | undefined;

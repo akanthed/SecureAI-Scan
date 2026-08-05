@@ -1,0 +1,14 @@
+# SecureAI-Scan
+
+SecureAI-Scan is a local-first static AI security scanner for TypeScript, JavaScript, Python, MCP configurations, and Agent Skill bundles.
+
+Primary capabilities: prompt-injection dataflow, MCP tool poisoning, Agent Skill poisoning, RAG and vector-store risks, unsafe LLM output handling, AI-BOM generation, SARIF reporting, and version-aware AI dependency advisories.
+
+The TypeScript/JavaScript engine uses ts-morph AST analysis. The Python engine uses tree-sitter AST nodes with local taint propagation. Findings are separated into proven, likely, and heuristic evidence tiers. Static analysis is a filter, not proof of runtime safety.
+
+Project: https://github.com/akanthed/SecureAI-Scan
+Package: https://www.npmjs.com/package/secureai-scan
+Browser MCP scanner: https://akanthed.github.io/SecureAI-Scan/
+Release assurance: https://github.com/akanthed/SecureAI-Scan/blob/main/docs/ReleaseAssurance.md
+Latest benchmark: https://github.com/akanthed/SecureAI-Scan/blob/main/docs/benchmarks/v0.8.0.json
+Security policy: https://github.com/akanthed/SecureAI-Scan/blob/main/SECURITY.md

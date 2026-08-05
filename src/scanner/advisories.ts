@@ -3,10 +3,15 @@
  * or critical vulnerabilities. Checked offline on every scan (DEP003) — unlike
  * the registry-existence checks (DEP001/DEP002), no network is needed.
  *
+ * This file is hand-maintained and holds incidents OSV does not carry (yanked
+ * malicious packages, in-the-wild backdoors). The much larger CVE half of
+ * DEP003 lives in the generated snapshot — see scripts/sync-advisories.js.
+ *
  * Inclusion bar: a public incident report or CVE. Do not add packages on
  * suspicion — this list produces `proven` findings. Maintenance process is
  * documented in CONTRIBUTING.md.
  */
+import { GENERATED_ADVISORIES } from "./advisories-generated.js";
 
 export interface PackageAdvisory {
   ecosystem: "npm" | "pypi";
@@ -14,6 +19,12 @@ export interface PackageAdvisory {
   kind: "malicious" | "vulnerable";
   /** Human-readable affected range, e.g. ">=1.0.16" or "<0.1.16". */
   affectedVersions?: string;
+  /**
+   * Machine-comparable comparator strings, OR'd together. Present on
+   * generated entries where an advisory spans several disjoint ranges;
+   * `affectedVersions` alone can't express that.
+   */
+  ranges?: string[];
   reason: string;
   reference: string;
 }
@@ -39,7 +50,22 @@ export const PACKAGE_ADVISORIES: PackageAdvisory[] = [
   },
 ];
 
+/** PEP 503 name normalization for PyPI; plain lowercase for npm. */
+function normalizeName(ecosystem: "npm" | "pypi", name: string): string {
+  const lower = name.toLowerCase();
+  return ecosystem === "pypi" ? lower.replace(/[-_.]+/g, "-") : lower;
+}
+
+const ALL_ADVISORIES: PackageAdvisory[] = [...PACKAGE_ADVISORIES, ...GENERATED_ADVISORIES];
+
+/** Every advisory affecting a package. Curated entries come first. */
+export function findAdvisories(ecosystem: "npm" | "pypi", name: string): PackageAdvisory[] {
+  const normalized = normalizeName(ecosystem, name);
+  return ALL_ADVISORIES.filter(
+    (a) => a.ecosystem === ecosystem && normalizeName(ecosystem, a.name) === normalized,
+  );
+}
+
 export function findAdvisory(ecosystem: "npm" | "pypi", name: string): PackageAdvisory | undefined {
-  const normalized = name.toLowerCase();
-  return PACKAGE_ADVISORIES.find((a) => a.ecosystem === ecosystem && a.name === normalized);
+  return findAdvisories(ecosystem, name)[0];
 }

@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext, TraceStep } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getCallsWithin, getFileFunctions, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { isLikelyLlmCall } from "./llm-rule-utils.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath } from "../confidence.js";
 
@@ -35,7 +35,7 @@ interface ResponseOrigin {
 function collectLlmResponseVars(fnNode: Node): Map<string, ResponseOrigin> {
   const vars = new Map<string, ResponseOrigin>();
 
-  for (const call of fnNode.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+  for (const call of getCallsWithin(fnNode)) {
     if (!isLikelyLlmCall(call)) continue;
     // Find the variable the call result is assigned to
     const parent = call.getParent();
@@ -96,21 +96,14 @@ export const ruleUnvalidatedStructuredOutput: Rule = {
       const relPath = getRelativeFilePath(context.rootPath, sourceFile);
       const isTest = isTestFilePath(relPath);
 
-      for (const fnNode of sourceFile.getDescendants()) {
-        if (
-          !Node.isFunctionDeclaration(fnNode) &&
-          !Node.isFunctionExpression(fnNode) &&
-          !Node.isArrowFunction(fnNode) &&
-          !Node.isMethodDeclaration(fnNode)
-        ) continue;
-
+      for (const fnNode of getFileFunctions(sourceFile)) {
         const llmVars = collectLlmResponseVars(fnNode);
         if (llmVars.size === 0) continue;
 
         if (hasSchemaValidationNearby(fnNode)) continue;
 
         // Look for JSON.parse of LLM response vars
-        for (const call of fnNode.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+        for (const call of getCallsWithin(fnNode)) {
           const exprText = call.getExpression().getText().toLowerCase();
           if (exprText !== "json.parse") continue;
 

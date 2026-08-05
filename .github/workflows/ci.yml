@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
@@ -34,6 +37,7 @@ jobs:
       - run: npm ci
       - run: npm run coverage
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
           name: coverage-report
           path: coverage/

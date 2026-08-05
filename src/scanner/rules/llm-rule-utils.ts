@@ -175,17 +175,48 @@ function lastMethodName(callText: string): string {
  * call" rather than propagated.
  */
 export function resolveLlmSink(node: Node): LlmSink | undefined {
+  const cached = sinkCache.get(node);
+  if (cached !== undefined) return cached ?? undefined;
+  let result: LlmSink | undefined;
   try {
-    return resolveLlmSinkInner(node);
+    result = resolveLlmSinkInner(node);
   } catch {
-    return undefined;
+    result = undefined;
   }
+  sinkCache.set(node, result ?? null);
+  return result;
 }
+
+/**
+ * Resolution is deterministic for a fixed project, and roughly ten rules ask
+ * about the same call expressions. Without this each of them pays for symbol
+ * resolution separately.
+ */
+const sinkCache = new WeakMap<Node, LlmSink | null>();
 
 function resolveLlmSinkInner(node: Node): LlmSink | undefined {
   if (!Node.isCallExpression(node)) return undefined;
   const callText = node.getExpression().getText();
   const method = lastMethodName(callText);
+
+  // Every path below requires a generation-shaped method name, so checking it
+  // first is behaviour-preserving — and it keeps the type checker away from
+  // call expressions that cannot be a model invocation whatever they resolve to.
+  if (!GENERATION_METHODS.has(method)) return undefined;
+
+  const lower = callText.toLowerCase();
+  const hinted = FALLBACK_NAME_HINTS.some((h) => lower.includes(h));
+
+  // `resolveIdentifierModule` only ever reports a specifier that this file
+  // itself imports or requires: it reads the declarations an identifier binds
+  // to in this file (import specifier, local variable, parameter type) and
+  // never follows an alias into another module. So when the file imports no
+  // LLM SDK, resolution cannot yield a provider, and the only remaining way
+  // to return a sink is the name fallback. If that can't fire either, the
+  // answer is `undefined` without asking the type checker anything — which is
+  // the difference between minutes and seconds on a large repo, where the
+  // overwhelming majority of files have nothing to do with an LLM.
+  if (!hinted && !fileHasLlmModuleImport(node.getSourceFile())) return undefined;
 
   const root = leftmostIdentifier(node.getExpression());
   if (root) {
@@ -200,29 +231,30 @@ function resolveLlmSinkInner(node: Node): LlmSink | undefined {
         // alongside generateText/streamText. Resolution alone previously
         // treated every one of those as an LLM call (found via a false
         // positive on isToolUIPart() in vercel/ai's own TUI harness — see
-        // CHANGELOG). GENERATION_METHODS is the same generation-shaped-verb
-        // check already applied on the unresolved fallback path below;
-        // requiring it here too closes that gap without weakening the
-        // resolved case, since every real SDK entry point (generateText,
-        // streamText, chat.completions.create, embeddings.create, …) is
-        // already in that set.
-        if (GENERATION_METHODS.has(method)) {
-          return { provider, resolved: true, callText };
-        }
-        return undefined;
+        // CHANGELOG). The generation-shaped-verb check that gates this is
+        // now hoisted to the top of this function.
+        return { provider, resolved: true, callText };
       }
       // Resolved to a known non-LLM module: definitively not an LLM call.
       return undefined;
     }
   }
 
-  // Resolution failed — narrow name fallback, and require a generation method.
-  const lower = callText.toLowerCase();
-  const hinted = FALLBACK_NAME_HINTS.some((h) => lower.includes(h));
-  if (hinted && GENERATION_METHODS.has(method)) {
+  // Resolution failed — narrow name fallback.
+  if (hinted) {
     return { provider: "unresolved LLM client", resolved: false, callText };
   }
   return undefined;
+}
+
+const llmImportCache = new WeakMap<SourceFile, boolean>();
+
+function fileHasLlmModuleImport(sourceFile: SourceFile): boolean {
+  const cached = llmImportCache.get(sourceFile);
+  if (cached !== undefined) return cached;
+  const value = fileImportsLlmSdk(sourceFile);
+  llmImportCache.set(sourceFile, value);
+  return value;
 }
 
 /** Back-compat boolean wrapper used by older rules. */

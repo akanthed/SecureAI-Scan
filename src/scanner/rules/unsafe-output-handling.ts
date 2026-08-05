@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext, TraceStep } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getCallsWithin, getFileFunctions, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { evidenceConfidence } from "../confidence.js";
 import { isLikelyLlmCall, resolveLlmSink } from "./llm-rule-utils.js";
 
@@ -140,22 +140,13 @@ export const ruleUnsafeOutputHandling: Rule = {
     for (const sourceFile of context.sourceFiles) {
       const relFile = getRelativeFilePath(context.rootPath, sourceFile);
 
-      for (const functionNode of sourceFile.getDescendants()) {
-        if (
-          !Node.isFunctionDeclaration(functionNode) &&
-          !Node.isFunctionExpression(functionNode) &&
-          !Node.isArrowFunction(functionNode) &&
-          !Node.isMethodDeclaration(functionNode)
-        ) {
-          continue;
-        }
-
+      for (const functionNode of getFileFunctions(sourceFile)) {
         const llmOutputs = collectLlmOutputIdentifiers(functionNode);
         if (llmOutputs.size === 0) {
           continue;
         }
 
-        for (const call of functionNode.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+        for (const call of getCallsWithin(functionNode)) {
           if (!isDangerousSink(call)) continue;
           const matched = matchingLlmOutputArg(call, llmOutputs);
           if (!matched) continue;

@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Evidence, Finding, Rule, RuleContext, TraceStep } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getFileCalls, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath } from "../confidence.js";
 import { getPromptParts, resolveLlmSink } from "./llm-rule-utils.js";
 
@@ -58,7 +58,7 @@ export const ruleSensitiveDataToLlm: Rule = {
       const relFile = getRelativeFilePath(context.rootPath, sourceFile);
       const testFile = isTestFilePath(relFile);
 
-      for (const call of sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+      for (const call of getFileCalls(sourceFile)) {
         const sink = resolveLlmSink(call);
         if (!sink) continue;
 

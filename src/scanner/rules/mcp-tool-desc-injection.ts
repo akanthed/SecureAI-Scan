@@ -1,6 +1,6 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
-import { getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import { getCallsWithin, getFileFunctions, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
 import type { Evidence } from "../types.js";
 import { isLikelyLlmCall, getObjectProperty } from "./llm-rule-utils.js";
@@ -62,7 +62,7 @@ function collectToolListVars(fnNode: Node): Set<string> {
 // Returns the system/developer message content node if any tainted variable
 // reaches it, otherwise undefined.
 function toolVarReachesSystemPrompt(fnNode: Node, tainted: Set<string>): Node | undefined {
-  for (const call of fnNode.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+  for (const call of getCallsWithin(fnNode)) {
     if (!isLikelyLlmCall(call)) continue;
 
     const firstArg = call.getArguments()[0];
@@ -107,14 +107,7 @@ export const ruleMcpToolDescInjection: Rule = {
       const relPath = getRelativeFilePath(context.rootPath, sourceFile);
       if (isTestFilePath(relPath)) continue;
 
-      for (const fnNode of sourceFile.getDescendants()) {
-        if (
-          !Node.isFunctionDeclaration(fnNode) &&
-          !Node.isFunctionExpression(fnNode) &&
-          !Node.isArrowFunction(fnNode) &&
-          !Node.isMethodDeclaration(fnNode)
-        ) continue;
-
+      for (const fnNode of getFileFunctions(sourceFile)) {
         const tainted = collectToolListVars(fnNode);
         if (tainted.size === 0) continue;
 

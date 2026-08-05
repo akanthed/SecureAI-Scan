@@ -1,7 +1,7 @@
 {
   "name": "secureai-scan",
-  "version": "0.7.0",
-  "description": "AI security scanner with dataflow evidence — prompt injection, MCP tool poisoning, Agent Skill poisoning, RAG poisoning. Evidence-tiered findings (no false-positive noise by default), SARIF for GitHub code scanning, AI-BOM with OWASP LLM/ASI/MCP Top 10 mapping.",
+  "version": "0.8.0",
+  "description": "AST-based AI security scanner for TypeScript, JavaScript, and Python with dataflow evidence for prompt injection, MCP, Agent Skill, and RAG risks.",
   "author": "Akshay Kanthed",
   "license": "MIT",
   "repository": {
@@ -56,6 +56,10 @@
     "mcp-server",
     "skills",
     "README.md",
+    "GOVERNANCE.md",
+    "SECURITY.md",
+    "docs/ReleaseAssurance.md",
+    "docs/benchmarks/v0.8.0.json",
     "LICENSE"
   ],
   "scripts": {
@@ -64,18 +68,22 @@
     "start": "node dist/index.js",
     "dev": "npm run build && node dist/index.js",
     "test": "npm run build && node test/run-tests.js",
-    "coverage": "npm run build && c8 --reporter=text --reporter=html -o coverage node test/run-tests.js",
-    "regression": "npm run build && node scripts/regression-scan.js"
+    "coverage": "npm run build && c8 --check-coverage --lines 80 --functions 80 --branches 75 --statements 80 --reporter=text --reporter=html -o coverage node test/run-tests.js",
+    "regression": "npm run build && node scripts/regression-scan.js",
+    "release:check": "npm test && npm run coverage && npm run regression && npm pack --dry-run --ignore-scripts",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run release:check",
+    "sync-advisories": "node scripts/sync-advisories.js"
   },
   "dependencies": {
     "commander": "^15.0.0",
+    "tree-sitter": "^0.25.1",
+    "tree-sitter-python": "^0.25.0",
     "ts-morph": "^28.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
     "c8": "^12.0.0",
-    "tree-sitter-python": "^0.25.0",
-    "typescript": "^7.0.2",
-    "web-tree-sitter": "^0.26.11"
+    "typescript": "^7.0.2"
   }
 }

@@ -29,6 +29,9 @@ function has(ruleId, fileSubstring) {
 const EXPECTED_VULNERABLE = [
   ["AI001", "vulnerable/prompt_injection.ts"],
   ["AI001", "vulnerable/rag_app.py"],
+  // Attribute assignment target (`self.x = request.json[...]`) in a class-based
+  // handler, with the model call far outside any proximity window.
+  ["AI001", "vulnerable/attribute_taint.py"],
   ["AI002", "vulnerable/logging.ts"],
   ["AI003", "vulnerable/llm_before_auth.ts"],
   ["AI004", "vulnerable/pii_to_llm.ts"],

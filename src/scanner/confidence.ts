@@ -25,10 +25,15 @@ export function demoteEvidence(evidence: Evidence): Evidence {
 // than production logic. Matched per-segment (not substring) so a real
 // production directory like "attestation" or "protest-bot" never collides,
 // while hyphenated conventions real repos actually use — "ecosystem-tests",
-// "integration-tests" — and top-level dirs (no leading "/" in a relative
-// path, e.g. "tests/foo.ts") are still caught.
-const NON_PRODUCTION_SEGMENT =
-  /^(tests?|__tests__|e2e|examples?|demos?|samples?|fixtures?|__fixtures__|playground|.*[-_](?:tests?|e2e))$/;
+// "integration-tests", "test-fixtures", "example-app" — and top-level dirs
+// (no leading "/" in a relative path, e.g. "tests/foo.ts") are still caught.
+// Both affix positions are needed: suffix-only missed "test-fixtures", the
+// layout this repo itself uses.
+const NON_PRODUCTION_WORD = "tests?|e2e|examples?|demos?|samples?|fixtures?|mocks?|stubs?";
+const NON_PRODUCTION_SEGMENT = new RegExp(
+  `^(?:__(?:${NON_PRODUCTION_WORD})__|playground|(?:${NON_PRODUCTION_WORD})` +
+    `|.*[-_](?:${NON_PRODUCTION_WORD})|(?:${NON_PRODUCTION_WORD})[-_].*)$`,
+);
 
 export function isTestFilePath(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, "/").toLowerCase();
