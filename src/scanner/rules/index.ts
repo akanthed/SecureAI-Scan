@@ -63,7 +63,7 @@ export const RULES: Rule[] = [
 export const CONFIG_RULE_IDS = ["MCP004", "MCP005", "MCP006"];
 
 // Agent Skill (SKILL.md) rules implemented outside the AST rule engine (skill-scanner).
-export const SKILL_RULE_IDS = ["SKL001", "SKL002", "SKL003", "SKL004", "SKL005"];
+export const SKILL_RULE_IDS = ["SKL001", "SKL002", "SKL003", "SKL004", "SKL005", "SKL006", "SKL007"];
 
 // Dependency rules implemented in dependency-guard (DEP001/DEP002 are opt-in
 // via --check-dependencies; DEP003 runs on every scan from the offline

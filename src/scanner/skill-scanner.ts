@@ -33,6 +33,10 @@ import {
  *   SKL003 — a skill's content steers when/how a different skill is used
  *   SKL004 — staged / self-extracting payload hidden in the bundle
  *   SKL005 — credential-exfiltration capability in a bundle companion file
+ *   SKL006 — dynamic-context-injection command runs at load time, before any
+ *            agent decision or tool-permission gate (Claude Code `` !`cmd` ``
+ *            / fenced ```! blocks)
+ *   SKL007 — unscoped `Bash` grant in a skill's `allowed-tools` frontmatter
  */
 
 export interface ParsedSkill {
@@ -40,6 +44,10 @@ export interface ParsedSkill {
   description?: string;
   /** 1-based line of the `description:` frontmatter field, if present. */
   descriptionLine: number;
+  /** Raw `allowed-tools:` frontmatter value, if present (single-line form only). */
+  allowedTools?: string;
+  /** 1-based line of the `allowed-tools:` frontmatter field, if present. */
+  allowedToolsLine: number;
   body: string;
   /** 1-based line where the body starts (first line after closing `---`). */
   bodyStartLine: number;
@@ -55,7 +63,7 @@ export function parseSkillFile(raw: string): ParsedSkill {
   const lines = raw.split(/\r?\n/);
 
   if (lines[0]?.trim() !== "---") {
-    return { name: "", description: undefined, descriptionLine: 1, body: raw, bodyStartLine: 1 };
+    return { name: "", description: undefined, descriptionLine: 1, allowedToolsLine: 1, body: raw, bodyStartLine: 1 };
   }
 
   let end = -1;
@@ -66,12 +74,14 @@ export function parseSkillFile(raw: string): ParsedSkill {
     }
   }
   if (end === -1) {
-    return { name: "", description: undefined, descriptionLine: 1, body: raw, bodyStartLine: 1 };
+    return { name: "", description: undefined, descriptionLine: 1, allowedToolsLine: 1, body: raw, bodyStartLine: 1 };
   }
 
   let name = "";
   let description: string | undefined;
   let descriptionLine = 1;
+  let allowedTools: string | undefined;
+  let allowedToolsLine = 1;
 
   for (let i = 1; i < end; i++) {
     const match = lines[i].match(/^([A-Za-z0-9_-]+)\s*:\s*(.*)$/);
@@ -83,11 +93,18 @@ export function parseSkillFile(raw: string): ParsedSkill {
       description = value;
       descriptionLine = i + 1;
     }
+    // Single-line form only (`allowed-tools: Bash(...) Read`); the YAML-list
+    // form is out of scope for this hand-rolled parser, same as every other
+    // field here.
+    if (key === "allowed-tools" && value.length > 0) {
+      allowedTools = value;
+      allowedToolsLine = i + 1;
+    }
   }
 
   const bodyStartLine = end + 2;
   const body = lines.slice(end + 1).join("\n");
-  return { name, description, descriptionLine, body, bodyStartLine };
+  return { name, description, descriptionLine, allowedTools, allowedToolsLine, body, bodyStartLine };
 }
 
 /** Back-compat helper: paths of every SKILL.md under `rootPath`. */
@@ -537,6 +554,144 @@ function scanBundleInvisibleUnicode(bundle: SkillBundle, parsed: ParsedSkill): F
   return findings;
 }
 
+/**
+ * SKL006 — Claude Code's dynamic-context-injection syntax (`` !`cmd` `` inline
+ * and fenced ```! blocks) runs shell commands the instant a skill's content
+ * is rendered, before Claude ever sees the text and before any tool
+ * permission gate applies. It is preprocessing, not a Bash tool call, so it
+ * never appears as a tool invocation in the transcript. A skill that uses
+ * this mechanism to fetch-and-execute remote code, or that splices its own
+ * invocation arguments (`$ARGUMENTS`, `$0`..`$9`) directly into the command
+ * text, gets code execution or shell injection with zero agent decision and
+ * zero confirmation prompt — a materially worse position than SKL005, which
+ * still requires the agent to choose to run something.
+ */
+const INLINE_EXEC_RE = /(^|[ \t])!`([^`\r\n]+)`/gm;
+const FENCED_EXEC_RE = /```!\r?\n([\s\S]*?)```/g;
+
+// $ARGUMENTS / $ARGUMENTS[N] / the $0..$9 shorthand — the built-in
+// placeholders substituted as raw text before the shell ever parses the
+// command. Named placeholders from a skill's own `arguments:` list are not
+// matched here: without knowing the declared names, matching bare `$word`
+// would collide with ordinary shell variables (`$HOME`, `$PATH`) that have
+// nothing to do with skill arguments.
+const ARGUMENT_SPLICE_RE = /\$ARGUMENTS(?:\[\d+\])?|\$[0-9](?!\w)/;
+
+function extractDynamicExecBlocks(raw: string): Array<{ text: string; index: number }> {
+  const blocks: Array<{ text: string; index: number }> = [];
+  let m: RegExpExecArray | null;
+  INLINE_EXEC_RE.lastIndex = 0;
+  while ((m = INLINE_EXEC_RE.exec(raw))) {
+    blocks.push({ text: m[2], index: m.index + m[1].length + 2 });
+  }
+  FENCED_EXEC_RE.lastIndex = 0;
+  while ((m = FENCED_EXEC_RE.exec(raw))) {
+    blocks.push({ text: m[1], index: m.index + 4 });
+  }
+  return blocks;
+}
+
+function scanDynamicContextExecution(bundle: SkillBundle, parsed: ParsedSkill): Finding[] {
+  const findings: Finding[] = [];
+  const label = parsed.name || bundle.skillRelPath;
+  const relFile = bundle.skillRelPath;
+
+  for (const block of extractDynamicExecBlocks(bundle.skillRaw)) {
+    const line = lineForIndex(bundle.skillRaw, block.index, 1);
+    const hits = detectCapabilities(block.text);
+    const remoteExec = hits.find((h) => h.kind === "remote-code-exec");
+    const creds = hits.filter((h) => h.kind === "credential-access");
+    const egress = hits.filter((h) => h.kind === "network-egress");
+    const exfilPair = creds.length > 0 && egress.length > 0;
+
+    if (remoteExec || exfilPair) {
+      const primaryMatch = (remoteExec ?? creds[0]).match;
+      findings.push(
+        finding(
+          "SKL006",
+          "Load-time command execution in agent skill",
+          "critical",
+          relFile,
+          line,
+          `Skill "${label}" runs "${block.text.trim().slice(0, 100)}" via dynamic context injection — this executes the moment the skill is read, before Claude sees the content or any tool permission applies.`,
+          remoteExec
+            ? "Claude Code's `` !`cmd` `` / ```! syntax preprocesses and runs shell commands before the skill's content ever reaches the model, and the run never appears as a Bash tool call in the transcript. This command downloads and executes remote code, so merely loading the skill is enough to compromise the machine — no agent decision or user confirmation is involved."
+            : "This block both reads a credential and reaches a hardcoded external host, and it runs automatically the moment the skill loads via dynamic context injection — before any tool-permission gate applies.",
+          "Remove dynamic-context-injection commands that fetch or transmit data over the network. Keep this mechanism to local, static commands (e.g. `git diff HEAD`).",
+          "proven",
+          [
+            { kind: "source", file: relFile, line, note: "dynamic context injection block (`!` syntax)" },
+            { kind: "sink", file: relFile, line, note: `${primaryMatch} — executes at load time` },
+          ],
+        ),
+      );
+      continue;
+    }
+
+    if (ARGUMENT_SPLICE_RE.test(block.text)) {
+      findings.push(
+        finding(
+          "SKL006",
+          "Skill argument spliced into load-time command",
+          "high",
+          relFile,
+          line,
+          `Skill "${label}" interpolates its own invocation arguments directly into a dynamic-context-injection command ("${block.text.trim().slice(0, 100)}").`,
+          "Claude Code substitutes `$ARGUMENTS`/`$0`..`$9` as raw text into the command before any shell parsing happens, and the command then runs immediately as preprocessing. Whatever the caller supplies as an argument — a user, or Claude acting on untrusted context it read — becomes part of the shell command line verbatim: classic argument/command injection, except it fires at skill-load time instead of through a reviewable tool call.",
+          "Quote and validate arguments before using them in a dynamic-context command, or avoid interpolating raw arguments into `` !`cmd` `` blocks entirely.",
+          "likely",
+        ),
+      );
+    }
+  }
+
+  return findings;
+}
+
+/**
+ * SKL007 — an unrestricted `Bash` entry in a skill's `allowed-tools`
+ * frontmatter pre-approves arbitrary shell execution for the whole turn that
+ * invokes the skill, without a confirmation prompt. Anthropic's own docs
+ * warn "a skill can grant itself broad tool access" for exactly this field.
+ * Every legitimate example scopes the grant to a specific command prefix
+ * (`Bash(git add *)`, `Bash(gh *)`); a bare `Bash` or `Bash(*)` has no
+ * ordinary reading — it is a blanket shell-execution grant, which is why
+ * this is a parsed config fact (`proven`), not a heuristic.
+ */
+const TOOL_TOKEN_RE = /([A-Za-z][A-Za-z0-9_]*)(\([^)]*\))?/g;
+
+function scanAllowedToolsOverreach(bundle: SkillBundle, parsed: ParsedSkill): Finding[] {
+  if (!parsed.allowedTools) return [];
+  const label = parsed.name || bundle.skillRelPath;
+  const findings: Finding[] = [];
+
+  TOOL_TOKEN_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = TOOL_TOKEN_RE.exec(parsed.allowedTools))) {
+    const [, toolName, scope] = m;
+    if (toolName !== "Bash") continue;
+    const unscoped = !scope || /^\(\s*\*\s*\)$/.test(scope);
+    if (!unscoped) continue;
+
+    findings.push(
+      finding(
+        "SKL007",
+        "Unscoped Bash grant in agent skill frontmatter",
+        "high",
+        bundle.skillRelPath,
+        parsed.allowedToolsLine,
+        `Skill "${label}" declares "allowed-tools: ${parsed.allowedTools}" — an unrestricted Bash grant.`,
+        "The `allowed-tools` frontmatter pre-approves the listed tools for the whole turn that invokes the skill, with no confirmation prompt. A bare `Bash` (or `Bash(*)`) grants arbitrary shell execution rather than a specific command, and Claude may auto-invoke the skill itself unless it is marked `disable-model-invocation`.",
+        "Scope the grant to the exact command(s) the skill needs, e.g. `Bash(git status *)`, rather than a bare `Bash`.",
+        "proven",
+      ),
+    );
+    break; // one finding is enough signal for review; further Bash tokens are the same fact.
+  }
+
+  return findings;
+}
+
 export function scanSkillFiles(rootPath: string, skipPaths?: string[]): Finding[] {
   const findings: Finding[] = [];
   const bundles = findSkillBundles(rootPath, skipPaths);
@@ -556,6 +711,8 @@ export function scanSkillFiles(rootPath: string, skipPaths?: string[]): Finding[
     findings.push(...scanBundleInvisibleUnicode(bundle, parsed));
     findings.push(...scanStagedPayload(bundle, parsed));
     findings.push(...scanBundleCapabilities(bundle, parsed));
+    findings.push(...scanDynamicContextExecution(bundle, parsed));
+    findings.push(...scanAllowedToolsOverreach(bundle, parsed));
   }
 
   return findings;
