@@ -255,7 +255,7 @@ export function generateBom(rootPath: string): BomResult {
     rootPath: resolved,
     components,
     owaspNote:
-      "Inventory supports OWASP LLM03 (Supply Chain) review and EU AI Act Art. 11 technical documentation.",
+      "Inventory supports OWASP LLM04:2026 (Supply Chain) review and EU AI Act Art. 11 technical documentation.",
   };
 }
 

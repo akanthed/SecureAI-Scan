@@ -11,7 +11,7 @@ import type { Severity, Finding } from "./scanner/types.js";
 import { filterFindingsBySeverity } from "./scanner/filters.js";
 import { AVAILABLE_RULE_IDS } from "./scanner/rules/index.js";
 import { StaticExplainer } from "./scanner/explainer.js";
-import { catalogFor } from "./scanner/catalog.js";
+import { catalogFor, OWASP_LLM_TOP10_VERSION } from "./scanner/catalog.js";
 import { applyBaseline } from "./scanner/baseline.js";
 import { scanDependencyFilesForRisks, scanKnownMaliciousPackages } from "./scanner/dependency-guard.js";
 import { loadPolicy, writeDefaultPolicy, writeGithubWorkflow } from "./scanner/policy.js";
@@ -383,7 +383,7 @@ export async function runCli(argv: string[]): Promise<void> {
       if (catalog) {
         const tags = [
           `Severity: ${catalog.severity}`,
-          `OWASP ${catalog.owasp} (${catalog.owaspName})`,
+          `OWASP ${catalog.owasp}:${OWASP_LLM_TOP10_VERSION} (${catalog.owaspName})`,
           catalog.euAiAct ? `EU AI Act ${catalog.euAiAct}` : "",
         ].filter(Boolean);
         process.stdout.write(`${tags.join("  ·  ")}\n\n`);

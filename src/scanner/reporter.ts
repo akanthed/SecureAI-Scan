@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Evidence, Finding, Severity, TraceStep } from "./types.js";
-import { catalogFor } from "./catalog.js";
+import { catalogFor, OWASP_LLM_TOP10_VERSION } from "./catalog.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Report model
@@ -44,6 +44,7 @@ export interface ReportGroup {
   severity: Severity;
   evidence: Evidence; // strongest across occurrences
   owasp?: string;
+  owaspVersion?: string;
   owaspName?: string;
   asi?: string;
   asiName?: string;
@@ -139,6 +140,7 @@ export function buildReport(
       severity: maxSeverity,
       evidence: strongest,
       owasp: cat?.owasp,
+      owaspVersion: cat?.owasp ? OWASP_LLM_TOP10_VERSION : undefined,
       owaspName: cat?.owaspName,
       asi: cat?.asi,
       asiName: cat?.asiName,
@@ -349,7 +351,7 @@ export function formatTerminalReport(report: ReportModel, limit = 10): string {
 
   const shown = report.groups.slice(0, Math.max(1, limit));
   for (const group of shown) {
-    const tag = group.owasp ? `  ${tc.magenta(group.owasp)}` : "";
+    const tag = group.owasp ? `  ${tc.magenta(`${group.owasp}:${group.owaspVersion}`)}` : "";
     const extraFrameworks = [
       group.asi ? `${group.asi} ${group.asiName ?? ""}`.trim() : "",
       group.mcpTop10 ? `MCP-Top10 ${group.mcpTop10} ${group.mcpTop10Name ?? ""}`.trim() : "",
@@ -449,7 +451,7 @@ function formatMarkdown(report: ReportModel): string {
   for (const group of report.groups) {
     const tags = [
       group.evidence.toUpperCase(),
-      group.owasp ? `OWASP ${group.owasp} ${group.owaspName}` : "",
+      group.owasp ? `OWASP LLM Top 10 ${group.owaspVersion} · ${group.owasp} ${group.owaspName}` : "",
       group.asi ? `OWASP ${group.asi} ${group.asiName}` : "",
       group.mcpTop10 ? `OWASP MCP Top 10 ${group.mcpTop10} ${group.mcpTop10Name}` : "",
       group.euAiAct ?? "",
@@ -536,7 +538,7 @@ export function formatSarif(report: ReportModel): string {
         tags: [
           "security",
           "ai",
-          cat?.owasp ? `owasp-llm-top10/${cat.owasp.toLowerCase()}` : "",
+          cat?.owasp ? `owasp-llm-top10-${OWASP_LLM_TOP10_VERSION}/${cat.owasp.toLowerCase()}` : "",
           cat?.asi ? `owasp-asi-2026/${cat.asi.toLowerCase()}` : "",
           cat?.mcpTop10 ? `owasp-mcp-top10/${cat.mcpTop10.toLowerCase()}` : "",
         ].filter(Boolean),
@@ -708,7 +710,7 @@ function formatHtml(report: ReportModel): string {
 
       const tags = [
         `<span class="tag ev-${group.evidence}">${group.evidence}</span>`,
-        group.owasp ? `<span class="tag">OWASP ${group.owasp} · ${escapeHtml(group.owaspName ?? "")}</span>` : "",
+        group.owasp ? `<span class="tag">OWASP LLM Top 10 ${group.owaspVersion} · ${group.owasp} · ${escapeHtml(group.owaspName ?? "")}</span>` : "",
         group.asi ? `<span class="tag">OWASP ${group.asi} · ${escapeHtml(group.asiName ?? "")}</span>` : "",
         group.mcpTop10 ? `<span class="tag">OWASP MCP Top 10 ${group.mcpTop10} · ${escapeHtml(group.mcpTop10Name ?? "")}</span>` : "",
         group.euAiAct ? `<span class="tag">EU AI Act ${escapeHtml(group.euAiAct)}</span>` : "",

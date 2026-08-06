@@ -93,7 +93,7 @@ function buildTrustBoundaries(findings: Finding[]): ThreatBoundary[] {
  * instead of being stretched onto a code rule.
  */
 const RUNTIME_ONLY_RISKS: Record<string, string> = {
-  LLM09: "runtime concern (output monitoring)",
+  LLM07: "runtime concern (output monitoring)",
   ASI08: "runtime concern (orchestration monitoring)",
   ASI09: "process concern (UX / approval design)",
   ASI10: "runtime concern (behavioral monitoring)",
@@ -110,7 +110,7 @@ interface FrameworkSpec {
 function buildCoverageMatrix(findings: Finding[]): string[] {
   const firedRules = new Set(findings.map((f) => f.rule_id));
   const frameworks: FrameworkSpec[] = [
-    { title: "OWASP LLM Top 10 (2025)", risks: OWASP_LLM_TOP10, ruleKey: (e) => e.owasp },
+    { title: "OWASP Top 10 for LLM Applications (2026)", risks: OWASP_LLM_TOP10, ruleKey: (e) => e.owasp },
     { title: "OWASP Top 10 for Agentic Applications (2026)", risks: OWASP_ASI_2026, ruleKey: (e) => e.asi },
     { title: "OWASP MCP Top 10 (2025)", risks: OWASP_MCP_TOP10, ruleKey: (e) => e.mcpTop10 },
   ];

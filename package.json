@@ -1,6 +1,6 @@
 {
   "name": "secureai-scan",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "AST-based AI security scanner for TypeScript, JavaScript, and Python with dataflow evidence for prompt injection, MCP, Agent Skill, and RAG risks.",
   "author": "Akshay Kanthed",
   "license": "MIT",
@@ -59,7 +59,8 @@
     "GOVERNANCE.md",
     "SECURITY.md",
     "docs/ReleaseAssurance.md",
-    "docs/benchmarks/v0.8.0.json",
+    "docs/OWASP2026.md",
+    "docs/benchmarks/v0.9.0.json",
     "LICENSE"
   ],
   "scripts": {

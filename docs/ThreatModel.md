@@ -31,6 +31,8 @@ Detection scope is fixed to **LLM, MCP, and RAG/agent-related risk.** Concretely
 
 ## Framework mapping methodology
 
-Every rule maps to the OWASP LLM Top 10 (2025) at minimum. Where the mapping is genuinely defensible (not forced), rules also map to the OWASP Top 10 for Agentic Applications (2026, ASI) and/or the OWASP MCP Top 10 (2025), and where relevant, an EU AI Act article. This mapping lives entirely in `src/scanner/catalog.ts`'s `RULE_CATALOG` and `FRAMEWORK_MAP` — adding a rule there is the only wiring needed for it to appear correctly in every generated `THREAT_MODEL.md`.
+Every rule maps to the OWASP Top 10 for LLM Applications (2026) at minimum. Where the mapping is genuinely defensible (not forced), rules also map to the OWASP Top 10 for Agentic Applications (2026, ASI) and/or the OWASP MCP Top 10 (2025), and where relevant, an EU AI Act article. This mapping lives entirely in `src/scanner/catalog.ts`'s `RULE_CATALOG` and `FRAMEWORK_MAP` — adding a rule there is the only wiring needed for it to appear correctly in every generated `THREAT_MODEL.md`.
+
+The mapping is not a claim that every sub-risk in an OWASP category is statically detectable. The [OWASP 2026 coverage document](OWASP2026.md) records the exact signals implemented today and the remaining static or runtime boundary.
 
 The mapping is intentionally conservative: a rule is only mapped to an ASI or MCP Top 10 category if the fit is real, not because triple-framework coverage looks more impressive. `CATEGORY_LABELS` and `buildTrustBoundaries` in `threat-model.ts` need updating only if a genuinely new rule-ID prefix is introduced (a fifth scanning surface) — existing prefixes (AI/MCP/VEC/SKL/DEP) are already wired.

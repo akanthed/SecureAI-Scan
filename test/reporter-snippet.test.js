@@ -41,7 +41,7 @@ test("markdown report includes evidence tier, OWASP tag, and code snippet", () =
 
   const markdown = formatReport(makeReport([sampleFinding()], dir), "markdown");
   assert.equal(markdown.includes("LIKELY"), true);
-  assert.equal(markdown.includes("OWASP LLM10"), true);
+  assert.equal(markdown.includes("OWASP LLM Top 10 2026 · LLM06 Unbounded Consumption"), true);
   assert.equal(markdown.includes("openai.chat.completions.create"), true);
 });
 
@@ -51,10 +51,18 @@ test("sarif output is valid 2.1.0 with rules, results, and locations", () => {
   const run = sarif.runs[0];
   assert.equal(run.tool.driver.name, "SecureAI-Scan");
   assert.equal(run.tool.driver.rules[0].id, "AI003");
+  assert.deepEqual(run.tool.driver.rules[0].properties.tags.includes("owasp-llm-top10-2026/llm06"), true);
   assert.equal(run.results.length, 1);
   assert.equal(run.results[0].level, "error");
   assert.equal(run.results[0].locations[0].physicalLocation.region.startLine, 3);
   assert.ok(run.results[0].partialFingerprints.secureaiScanFingerprint);
+});
+
+test("JSON report identifies the OWASP LLM framework version", () => {
+  const json = JSON.parse(formatReport(makeReport([sampleFinding()]), "json"));
+  assert.equal(json.groups[0].owasp, "LLM06");
+  assert.equal(json.groups[0].owaspVersion, "2026");
+  assert.equal(json.groups[0].owaspName, "Unbounded Consumption");
 });
 
 test("trace steps render in markdown output", () => {
