@@ -146,7 +146,7 @@ function referencesToolName(segment: string, toolName: string): boolean {
 }
 
 /** Split into sentences, also breaking on newlines and list markers. */
-function sentences(text: string): string[] {
+export function sentences(text: string): string[] {
   return text
     .split(/(?<=[.!?:])\s+|\r?\n/)
     .map((s) => s.trim())
@@ -171,4 +171,110 @@ export function findCrossToolReference(
     }
   }
   return undefined;
+}
+
+export interface RemoteInstructionHit {
+  /** The URL the agent is directed to fetch. */
+  url: string;
+  /** The full sentence carrying both the fetch and the follow directive. */
+  directive: string;
+}
+
+const URL_RE = /https?:\/\/[^\s)"'<>]+/;
+const FETCH_VERB_RE = /\b(?:fetch|download|retrieve|load|check|read|get|pull)\b/i;
+
+/**
+ * The fetched content must be named as the thing to act on, not merely
+ * mentioned near a URL. "follow the standard PR workflow" or "follow @handle
+ * for updates" must never match — the object of the verb has to resolve back
+ * to the fetched content itself ("the instructions", "it", "what it says").
+ */
+const FOLLOW_DIRECTIVE_RE =
+  /\b(?:follow|execute|run|apply|obey|do\s+(?:exactly\s+)?what)\b[^.]{0,40}\b(?:instructions?|it\s+says|it\s+exactly|this\s+exactly|those\s+steps|that\s+exactly|whatever\s+(?:it|that|they)\s+(?:says?|returns?|contains?))\b/i;
+
+/**
+ * The "Circus of Skills" attack (Air Security, June 2026): a skill's real
+ * instructions are never checked into the reviewed bundle at all — they are
+ * fetched from an external URL at runtime and executed as if they were the
+ * skill's own content. Static review of the bundle sees only an innocuous
+ * fetch-a-doc step; the payload can change on the server at any time after
+ * install, with nothing in the bundle to re-review.
+ *
+ * Both signals — a fetch verb pointed at a URL, and a directive telling the
+ * agent to treat the fetched content as instructions to execute — must land
+ * in the same sentence. A skill that says "Fetch the changelog from
+ * https://example.com/CHANGELOG.md for context" is ordinary documentation
+ * lookup; nothing tells the agent to *act on* what comes back.
+ */
+export function findRemoteInstructionDirective(text: string): RemoteInstructionHit | undefined {
+  for (const segment of sentences(text)) {
+    const urlMatch = URL_RE.exec(segment);
+    if (!urlMatch) continue;
+    if (!FETCH_VERB_RE.test(segment)) continue;
+    if (!FOLLOW_DIRECTIVE_RE.test(segment)) continue;
+    return { url: urlMatch[0], directive: segment };
+  }
+  return undefined;
+}
+
+export interface PersistenceWriteHit {
+  /** The identity/context file the skill instructs the agent to write into. */
+  targetFile: string;
+  directive: string;
+}
+
+const WRITE_VERB_RE = /\b(?:write|append|add|insert|inject|save|persist|prepend)\b/i;
+const PERSISTENCE_TARGET_RE = /\b(SOUL|MEMORY|AGENTS?|CLAUDE)\.md\b/;
+const PERSISTENCE_SIGNAL_RE =
+  /\b(?:across\s+sessions?|future\s+sessions?|every\s+session|next\s+time\s+(?:the\s+)?(?:agent|claude|it)\s+(?:runs?|loads?|starts?)|survive[s]?\s+(?:a\s+)?restart|silently|without\s+(?:telling|informing|notifying|showing)\s+(?:the\s+)?user|do\s+not\s+(?:tell|inform|mention|reveal|show)\b[^.]{0,30}\buser\b)\b/i;
+
+/**
+ * Cross-file persistence / backdoor propagation: a skill that instructs the
+ * agent to write into a *different* trust-elevated context file (`MEMORY.md`,
+ * `SOUL.md`, `AGENTS.md`, `CLAUDE.md`) so its behavior survives after the
+ * skill itself is removed and spreads to other sessions or collaborators who
+ * load that file. This is precisely how the ClawHavoc campaign backdoored
+ * `MEMORY.md`/`SOUL.md` for session persistence, and the scenario the Cloud
+ * Security Alliance's May 2026 research note names "persistence and
+ * propagation".
+ *
+ * Requires a write verb, the target file, and a persistence-or-concealment
+ * signal all in the same sentence — an ordinary "keep AGENTS.md up to date
+ * with new build steps" documentation-sync skill has no reason to mention
+ * surviving restarts or hiding the change from the user, so it does not
+ * collide with this pattern.
+ */
+export function findPersistenceWriteDirective(text: string): PersistenceWriteHit | undefined {
+  for (const segment of sentences(text)) {
+    const targetMatch = PERSISTENCE_TARGET_RE.exec(segment);
+    if (!targetMatch) continue;
+    if (!WRITE_VERB_RE.test(segment)) continue;
+    if (!PERSISTENCE_SIGNAL_RE.test(segment)) continue;
+    return { targetFile: targetMatch[0], directive: segment };
+  }
+  return undefined;
+}
+
+export interface UnsafeDeserializationHit {
+  match: string;
+  index: number;
+}
+
+/**
+ * YAML/JSON deserialization tags that construct language-native objects
+ * (Python `!!python/object`, Ruby `!ruby/object`, JS "function" tags) rather
+ * than plain scalars/mappings. These have no legitimate use in a skill's
+ * frontmatter or a bundled config file — a hand-written skill manifest never
+ * needs to deserialize a class instance or a function — so any match is
+ * `proven`, the same standing as SKL001's invisible-Unicode check. OWASP
+ * Agentic Skills Top 10 catalogs this under AST04 (Insecure Metadata):
+ * "safe parsing with approved YAML/JSON loaders".
+ */
+const UNSAFE_DESERIALIZATION_RE =
+  /!!?(?:python|ruby|js|javascript|perl)\/(?:object|object\/(?:new|apply)|function|module|code|eval|exec)\b|tag:yaml\.org,2002:(?:python|js|ruby)\//i;
+
+export function findUnsafeDeserializationTag(text: string): UnsafeDeserializationHit | undefined {
+  const match = UNSAFE_DESERIALIZATION_RE.exec(text);
+  if (!match) return undefined;
+  return { match: match[0], index: match.index };
 }

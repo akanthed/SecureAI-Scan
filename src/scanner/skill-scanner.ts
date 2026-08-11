@@ -4,6 +4,9 @@ import { evidenceConfidence } from "./confidence.js";
 import {
   findCrossToolReference,
   findInvisibleUnicode,
+  findPersistenceWriteDirective,
+  findRemoteInstructionDirective,
+  findUnsafeDeserializationTag,
   matchInjectionPhrases,
 } from "./tool-poisoning-checks.js";
 import { matchAcrossVariants, textVariants } from "./deobfuscate.js";
@@ -37,6 +40,14 @@ import {
  *            agent decision or tool-permission gate (Claude Code `` !`cmd` ``
  *            / fenced ```! blocks)
  *   SKL007 — unscoped `Bash` grant in a skill's `allowed-tools` frontmatter
+ *   SKL008 — skill directs the agent to fetch and execute instructions from
+ *            an external URL ("Circus of Skills": the reviewed bundle never
+ *            contains the real payload, which can change after install)
+ *   SKL009 — skill instructs the agent to persist a backdoor by writing into
+ *            a different trust-elevated context file (MEMORY.md, SOUL.md,
+ *            AGENTS.md, CLAUDE.md) so it survives after the skill is removed
+ *   SKL010 — unsafe YAML/JSON deserialization tag in a skill's frontmatter or
+ *            a bundled config file (OWASP Agentic Skills Top 10, AST04)
  */
 
 export interface ParsedSkill {
@@ -279,6 +290,58 @@ function scanSkillContent(
           ),
         );
       }
+    }
+
+    // SKL008 — remote instruction loading ("Circus of Skills"): a fetch verb
+    // and a URL, plus a directive to follow/execute what comes back, in the
+    // same sentence.
+    const remoteHit = matchAcrossVariants(
+      segment.text,
+      (candidate) => findRemoteInstructionDirective(candidate),
+      (r) => (r ? [r.url] : []),
+    );
+    if (remoteHit?.result) {
+      const remote = remoteHit.result;
+      findings.push(
+        finding(
+          "SKL008",
+          "Agent skill fetches and executes remote instructions",
+          "critical",
+          relFile,
+          lineOfSubstring(segment.text, remote.url, segment.baseLine),
+          `Skill "${label}" ${segment.label} directs the agent to fetch "${remote.url}" and follow its content as instructions.`,
+          "The skill's real behavior is never checked into the reviewed bundle at all — it is fetched from an external URL at runtime and executed as if it were the skill's own content. Review of the installed bundle sees only an innocuous fetch step; the server-side payload can change at any time after install, with nothing in the bundle left to re-review. This is the delivery mechanism behind Air Security's June 2026 \"Circus of Skills\" finding, where a single skill reached 26,000+ agents while every scanner tested cleared it." +
+            transformSuffix(remoteHit.transforms),
+          "Ship the skill's actual instructions in the reviewed bundle. If the skill genuinely needs to fetch data, treat the response as data to display or process — never as instructions to execute.",
+          evidenceFor("likely", remoteHit.transforms),
+        ),
+      );
+    }
+
+    // SKL009 — cross-file persistence/backdoor propagation: a write directive
+    // targeting a different identity/context file, combined with a
+    // persistence-or-concealment signal in the same sentence.
+    const persistHit = matchAcrossVariants(
+      segment.text,
+      (candidate) => findPersistenceWriteDirective(candidate),
+      (r) => (r ? [r.targetFile] : []),
+    );
+    if (persistHit?.result) {
+      const persist = persistHit.result;
+      findings.push(
+        finding(
+          "SKL009",
+          "Agent skill persists a backdoor into another context file",
+          "critical",
+          relFile,
+          lineOfSubstring(segment.text, persist.targetFile, segment.baseLine),
+          `Skill "${label}" ${segment.label} instructs the agent to write into "${persist.targetFile}" so the change persists or stays hidden from the user.`,
+          `A skill that directs the agent to modify a different trust-elevated context file — rather than only performing its own declared task — is planting a backdoor that outlives the skill itself and can propagate to every future session or collaborator that loads "${persist.targetFile}". This is exactly how the ClawHavoc campaign backdoored MEMORY.md/SOUL.md for session-persistent compromise.` +
+            transformSuffix(persistHit.transforms),
+          `Remove the instruction to modify "${persist.targetFile}". A skill should only affect its own declared task; audit "${persist.targetFile}" for content this skill (or any other) may already have written.`,
+          evidenceFor("likely", persistHit.transforms),
+        ),
+      );
     }
 
     // SKL003 — cross-skill shadowing.
@@ -555,6 +618,43 @@ function scanBundleInvisibleUnicode(bundle: SkillBundle, parsed: ParsedSkill): F
 }
 
 /**
+ * SKL010 \u2014 unsafe deserialization tag in a skill's frontmatter or any
+ * bundled config file. Scanned across SKILL.md and every non-binary
+ * companion file: a manifest-format bug is exactly as dangerous in
+ * `config.yaml` or `skill.json` as it is in SKILL.md's own frontmatter.
+ */
+function scanUnsafeMetadata(bundle: SkillBundle, parsed: ParsedSkill): Finding[] {
+  const findings: Finding[] = [];
+  const label = parsed.name || bundle.skillRelPath;
+
+  const carriers: Array<{ file: string; bundlePath: string; text: string }> = [
+    { file: bundle.skillRelPath, bundlePath: "SKILL.md", text: bundle.skillRaw },
+    ...bundle.files
+      .filter((f) => !f.binary)
+      .map((f) => ({ file: f.relPath, bundlePath: f.bundlePath, text: f.content })),
+  ];
+
+  for (const carrier of carriers) {
+    const hit = findUnsafeDeserializationTag(carrier.text);
+    if (!hit) continue;
+    findings.push(
+      finding(
+        "SKL010",
+        "Unsafe deserialization tag in agent skill metadata",
+        "critical",
+        carrier.file,
+        lineForIndex(carrier.text, hit.index, 1),
+        `Skill "${label}" file "${carrier.bundlePath}" contains the unsafe deserialization tag "${hit.match}".`,
+        "YAML/JSON tags that construct language-native objects or functions (rather than plain scalars and mappings) have no legitimate use in a skill manifest or config file. If the agent platform's frontmatter or config loader uses an unsafe YAML loader, this tag reconstructs an arbitrary object \u2014 including one with a constructor that executes code \u2014 the moment the file is parsed, before any skill logic runs. OWASP's Agentic Skills Top 10 catalogs this under AST04 (Insecure Metadata).",
+        "Remove the tag and use a safe (default-constructor-only) YAML/JSON loader for all skill metadata and config files.",
+        "proven",
+      ),
+    );
+  }
+  return findings;
+}
+
+/**
  * SKL006 — Claude Code's dynamic-context-injection syntax (`` !`cmd` `` inline
  * and fenced ```! blocks) runs shell commands the instant a skill's content
  * is rendered, before Claude ever sees the text and before any tool
@@ -713,6 +813,7 @@ export function scanSkillFiles(rootPath: string, skipPaths?: string[]): Finding[
     findings.push(...scanBundleCapabilities(bundle, parsed));
     findings.push(...scanDynamicContextExecution(bundle, parsed));
     findings.push(...scanAllowedToolsOverreach(bundle, parsed));
+    findings.push(...scanUnsafeMetadata(bundle, parsed));
   }
 
   return findings;

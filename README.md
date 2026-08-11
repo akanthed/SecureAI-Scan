@@ -205,7 +205,7 @@ Scanning clean? Add the badge to your own README:
 
 ## Rules
 
-**35 rules**, mapped to the official OWASP Top 10 for LLM Applications (2026) — plus, where applicable, the OWASP Top 10 for Agentic Applications (2026, ASI), the OWASP MCP Top 10 (2025), and an EU AI Act article. See the [versioned 2026 coverage and limits](docs/OWASP2026.md); `threat-model` renders the matrix for each scanned project.
+**39 rules**, mapped to the official OWASP Top 10 for LLM Applications (2026) — plus, where applicable, the OWASP Top 10 for Agentic Applications (2026, ASI), the OWASP MCP Top 10 (2025), and an EU AI Act article. See the [versioned 2026 coverage and limits](docs/OWASP2026.md); `threat-model` renders the matrix for each scanned project.
 
 | Rule | What it proves | OWASP |
 |------|----------------|-------|
@@ -236,6 +236,11 @@ Scanning clean? Add the badge to your own README:
 | SKL003 | A skill's content steers when/how a different skill is used (shadowing) | LLM01 |
 | SKL004 | Staged/self-extracting payload: opaque blob + instructions to decode and run it | LLM04 · MCP04 |
 | SKL005 | Credential read + hardcoded external egress in a bundle companion file | LLM02 · MCP04 |
+| SKL006 | Load-time command execution via Claude Code's dynamic-context-injection syntax (`` !`cmd` ``/```!), before any tool-permission gate | LLM04 · MCP05 |
+| SKL007 | Unscoped `Bash` grant in a skill's `allowed-tools` frontmatter | LLM03 |
+| SKL008 | Skill fetches instructions from an external URL and directs the agent to follow them ("Circus of Skills") | LLM04 |
+| SKL009 | Skill persists a backdoor by writing into another context file (`MEMORY.md`/`SOUL.md`/`AGENTS.md`/`CLAUDE.md`) | LLM05 |
+| SKL010 | Unsafe YAML/JSON deserialization tag in a skill's frontmatter or a bundled config file | LLM04 |
 | VEC001 | Vector search without a tenant/user filter | LLM09 |
 | VEC002 | Unbounded or user-controlled search limit | LLM06 |
 | VEC003 | User content ingested into a shared vector store | LLM05 |
