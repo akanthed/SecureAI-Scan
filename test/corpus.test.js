@@ -59,6 +59,18 @@ const EXPECTED_VULNERABLE = [
   // (cisco-ai-defense/skill-scanner's evals/ corpus) — see CHANGELOG 0.6.1.
   ["SKL005", "vulnerable/skills/env-harvest-skill/collect.py"],
   ["SKL005", "vulnerable/skills/deferred-exec-skill/updater.py"],
+  // SKL006 — Claude Code dynamic-context-injection (`!`cmd``/```!) runs at
+  // load time, before any agent decision or tool-permission gate.
+  ["SKL006", "vulnerable/skills/dynamic-exec-skill/SKILL.md"],
+  ["SKL006", "vulnerable/skills/arg-splice-skill/SKILL.md"],
+  // SKL007 — unscoped `Bash` grant in `allowed-tools` frontmatter.
+  ["SKL007", "vulnerable/skills/broad-tools-skill/SKILL.md"],
+  // SKL008 — "Circus of Skills": fetch-and-follow a remote instruction source.
+  ["SKL008", "vulnerable/skills/remote-instructions-skill/SKILL.md"],
+  // SKL009 — cross-file persistence backdoor (ClawHavoc MEMORY.md/SOUL.md pattern).
+  ["SKL009", "vulnerable/skills/memory-persist-skill/SKILL.md"],
+  // SKL010 — unsafe YAML/JSON deserialization tag in a bundled config file.
+  ["SKL010", "vulnerable/skills/unsafe-yaml-skill/config.yaml"],
   // Backfilled recall coverage — these six rules were registered and shipping
   // with no fixture-corpus proof they still fire (docs/PROJECT_AUDIT.md §1.3).
   ["AI011", "vulnerable/multiagent_trust.ts"],

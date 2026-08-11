@@ -10,5 +10,5 @@ Project: https://github.com/akanthed/SecureAI-Scan
 Package: https://www.npmjs.com/package/secureai-scan
 Browser MCP scanner: https://akanthed.github.io/SecureAI-Scan/
 Release assurance: https://github.com/akanthed/SecureAI-Scan/blob/main/docs/ReleaseAssurance.md
-Latest benchmark: https://github.com/akanthed/SecureAI-Scan/blob/main/docs/benchmarks/v0.8.0.json
+Latest benchmark: https://github.com/akanthed/SecureAI-Scan/blob/main/docs/benchmarks/v0.9.0.json
 Security policy: https://github.com/akanthed/SecureAI-Scan/blob/main/SECURITY.md

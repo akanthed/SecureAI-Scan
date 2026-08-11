@@ -7,7 +7,7 @@ import { scanRepositoryDetailed } from "../dist/scanner/scan.js";
 import { scanPythonFiles } from "../dist/scanner/python-scanner.js";
 import { createScanProject } from "../dist/scanner/project.js";
 import { generateBom } from "../dist/scanner/bom.js";
-import { catalogFor } from "../dist/scanner/catalog.js";
+import { catalogFor, OWASP_LLM_TOP10, OWASP_LLM_TOP10_VERSION } from "../dist/scanner/catalog.js";
 import { isTestFilePath } from "../dist/scanner/confidence.js";
 
 /**
@@ -447,6 +447,48 @@ test("AI012 does not fire on JSON.parse of a non-LLM variable merely named 'resu
 
 test("DEP002 has a catalog entry so reports don't render blank OWASP/fix tags", () => {
   assert.ok(catalogFor("DEP002"), "expected a RULE_CATALOG entry for DEP002");
+});
+
+test("catalog uses the official OWASP LLM Top 10 2026 taxonomy", () => {
+  assert.equal(OWASP_LLM_TOP10_VERSION, "2026");
+  assert.deepEqual(OWASP_LLM_TOP10, {
+    LLM01: "Prompt Injection",
+    LLM02: "Sensitive Information Disclosure",
+    LLM03: "Excessive Agency",
+    LLM04: "Supply Chain",
+    LLM05: "Data and Model Poisoning",
+    LLM06: "Unbounded Consumption",
+    LLM07: "Misinformation",
+    LLM08: "Hidden Context Exposure",
+    LLM09: "Vector and Embedding Weaknesses",
+    LLM10: "Improper Output Handling",
+  });
+
+  const expectedMappings = {
+    AI003: "LLM06",
+    AI005: "LLM10",
+    AI006: "LLM03",
+    AI008: "LLM08",
+    AI009: "LLM06",
+    AI011: "LLM03",
+    AI012: "LLM10",
+    MCP002: "LLM04",
+    MCP003: "LLM10",
+    MCP004: "LLM04",
+    MCP006: "LLM04",
+    MCP010: "LLM04",
+    SKL004: "LLM04",
+    VEC001: "LLM09",
+    VEC002: "LLM06",
+    VEC003: "LLM05",
+    VEC004: "LLM09",
+    DEP001: "LLM04",
+    DEP002: "LLM04",
+    DEP003: "LLM04",
+  };
+  for (const [ruleId, owasp] of Object.entries(expectedMappings)) {
+    assert.equal(catalogFor(ruleId)?.owasp, owasp, `${ruleId} should map to ${owasp}:2026`);
+  }
 });
 
 // ── Crash safety smoke test (llm-rule-utils.ts / sensitive-data-to-llm.ts) ──

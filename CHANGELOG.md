@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.9.0 — 2026-08-12
+
+Support for the official OWASP Top 10 for LLM Applications 2026, plus five new Agent Skill detection rules.
+
+### Added
+- **Versioned OWASP 2026 reporting.** JSON includes `owaspVersion: "2026"`, terminal and CLI output use the official `LLMxx:2026` notation, Markdown/HTML name the framework version, and SARIF emits `owasp-llm-top10-2026/*` tags.
+- **A conservative 2026 coverage statement.** `docs/OWASP2026.md` distinguishes implemented static signals, partial category coverage, and the runtime-only Misinformation boundary instead of presenting category mapping as exhaustive detection.
+- **Taxonomy contract tests.** Tests lock all ten official names, every changed rule mapping, structured report metadata, SARIF tags, and the real built CLI output.
+- **SKL006: Load-time command execution in agent skills.** Flags Claude Code's dynamic-context-injection syntax when it runs shell commands the instant a skill is read — before Claude ever sees the content or any tool-permission gate applies.
+- **SKL007: Unscoped Bash grants.** Flags a bare `Bash` (or `Bash(*)`) in a skill's `allowed-tools` frontmatter, which pre-approves arbitrary shell execution for the whole turn with no confirmation prompt.
+- **SKL008: Remote instruction fetch.** Flags skills whose real behavior is fetched from an external URL at runtime rather than checked into the reviewed bundle, so the payload can change after install with nothing left to re-review.
+- **SKL009: Trust-elevated persistence.** Flags skills that write into a different trust-elevated context file (MEMORY.md, SOUL.md, AGENTS.md, CLAUDE.md), planting a backdoor that outlives the skill and can propagate to future sessions or collaborators.
+- **SKL010: Unsafe deserialization tags.** Flags YAML/JSON tags that construct language-native objects (e.g. `!!python/object`) in skill-bundle metadata/config, which can execute code the moment an unsafe loader parses the file.
+- Vulnerable and safe fixtures for SKL006–SKL010, plus catalog and explainer entries (`secureai-scan explain SKL006`–`SKL010`).
+
+### Changed
+- Remapped existing findings to the official 2026 ranking: Excessive Agency is LLM03, Supply Chain LLM04, Data and Model Poisoning LLM05, Unbounded Consumption LLM06, Misinformation LLM07, Hidden Context Exposure LLM08, Vector and Embedding Weaknesses LLM09, and Improper Output Handling LLM10. Detection behavior and evidence tiers are unchanged.
+
 ## 0.8.0 — 2026-08-05
 
 Audit-driven hardening. Every item below came from reviewing the project the way an external evaluator would: claims checked against code, then the gaps closed.

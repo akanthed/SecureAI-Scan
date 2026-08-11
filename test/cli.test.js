@@ -135,6 +135,12 @@ for (const ruleId of ["AI001", "MCP010", "SKL001", "SKL004", "SKL005", "DEP003"]
   });
 }
 
+test("explain renders the versioned OWASP 2026 mapping", () => {
+  const { stdout, status } = run(["explain", "AI003"]);
+  assert.equal(status, 0);
+  assert.match(stdout, /OWASP LLM06:2026 \(Unbounded Consumption\)/);
+});
+
 test("--version prints a bare semver, matching package.json", () => {
   const { stdout, status } = run(["--version"]);
   assert.equal(status, 0);

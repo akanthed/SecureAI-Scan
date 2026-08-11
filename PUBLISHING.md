@@ -46,8 +46,8 @@ npm publish --access public
 6. After npm confirms the publication, create and push an annotated tag matching the package version exactly:
 
 ```bash
-git tag -a v0.8.0 -m "secureai-scan v0.8.0"
-git push origin v0.8.0
+git tag -a v0.9.0 -m "secureai-scan v0.9.0"
+git push origin v0.9.0
 ```
 
 Pushing the tag creates no npm publication job. Keep the tag and manifest version identical so the GitHub release and npm artifact remain traceable.
@@ -57,9 +57,9 @@ Pushing the tag creates no npm publication job. Keep the tag and manifest versio
 After `npm publish` succeeds:
 
 ```bash
-npm view secureai-scan@0.8.0 version dependencies dist.integrity
-npx --yes secureai-scan@0.8.0 --version
-npx --yes secureai-scan@0.8.0 scan .
+npm view secureai-scan@0.9.0 version dependencies dist.integrity
+npx --yes secureai-scan@0.9.0 --version
+npx --yes secureai-scan@0.9.0 scan .
 ```
 
 Confirm that `tree-sitter` and `tree-sitter-python` are runtime dependencies. Create the matching GitHub release from the tag and include the relevant changelog section.
