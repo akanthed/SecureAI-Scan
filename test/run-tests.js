@@ -6,6 +6,7 @@ import "./ignore-annotations.test.js";
 import "./new-ai-rules.test.js";
 import "./reporter-snippet.test.js";
 import "./mcp-config.test.js";
+import "./litellm-config.test.js";
 import "./python-ast.test.js";
 import "./skill-scanner.test.js";
 import "./corpus.test.js";

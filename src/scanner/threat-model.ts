@@ -20,6 +20,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   SKL: "Agent Skills",
   VEC: "Vector / RAG Pipeline",
   LLM: "LLM SDK Usage",
+  LLC: "LiteLLM Proxy Config",
 };
 
 function ruleCategory(ruleId: string): string {
@@ -59,6 +60,9 @@ function buildTrustBoundaries(findings: Finding[]): ThreatBoundary[] {
     } else if (f.rule_id.startsWith("VEC")) {
       from = "Vector Store / Document Pipeline";
       to = "LLM Context / RAG";
+    } else if (f.rule_id.startsWith("LLC")) {
+      from = "LiteLLM Proxy Config";
+      to = "LLM Provider";
     } else if (f.rule_id === "AI003") {
       from = "Unauthenticated Request";
       to = "LLM Model";

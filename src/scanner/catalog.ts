@@ -482,6 +482,32 @@ export const RULE_CATALOG: Record<string, RuleCatalogEntry> = {
     "Remove or update the package per the advisory; rotate credentials it could have accessed.",
     "Art. 15 (cybersecurity)",
   ),
+  LLC001: entry(
+    "LLC001",
+    "Hardcoded secret in LiteLLM config",
+    "critical",
+    "LLM02",
+    "Provider API keys and proxy master/salt keys written directly into a shared config.yaml are exposed to everyone with repo access.",
+    "Reference credentials via LiteLLM's os.environ/VAR_NAME convention instead of inlining values; rotate the exposed credential.",
+    "Art. 15 (cybersecurity)",
+  ),
+  LLC002: entry(
+    "LLC002",
+    "Plaintext HTTP provider endpoint",
+    "high",
+    "LLM04",
+    "Requests, responses, and header credentials to a non-localhost provider api_base travel unencrypted.",
+    "Use https:// for all non-localhost provider api_base URLs.",
+    "Art. 15 (cybersecurity)",
+  ),
+  LLC003: entry(
+    "LLC003",
+    "No guardrails configured",
+    "low",
+    "LLM03",
+    "A LiteLLM proxy with no guardrails: section has no pre/post-call PII, prompt-injection, or content-moderation checks in front of routed models.",
+    "Add a guardrails: section (top-level or under litellm_settings) if this proxy handles untrusted input.",
+  ),
 };
 
 export function catalogFor(ruleId: string): RuleCatalogEntry | undefined {

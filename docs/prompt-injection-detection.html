@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to Detect Prompt Injection in Code — Static Analysis Guide</title>
+<meta name="description" content="Prompt injection vulnerabilities live in the dataflow between user input and an LLM call, not in a keyword. Here's how to trace it statically, what a real finding looks like, and a free scanner that traces it for you." />
+<meta name="keywords" content="prompt injection detection, LLM security scanner, static analysis prompt injection, OWASP LLM01, dataflow tracing LLM, prompt injection code review" />
+<link rel="canonical" href="https://akanthed.github.io/SecureAI-Scan/prompt-injection-detection.html" />
+<meta property="og:type" content="article" />
+<meta property="og:title" content="How to Detect Prompt Injection in Code" />
+<meta property="og:description" content="Prompt injection lives in the dataflow between user input and an LLM call. How to trace it statically, and what a real finding looks like." />
+<meta property="og:url" content="https://akanthed.github.io/SecureAI-Scan/prompt-injection-detection.html" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="How to Detect Prompt Injection in Code" />
+<meta name="twitter:description" content="How to trace prompt injection statically, source to sink, before it ships." />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "How to Detect Prompt Injection in Code",
+  "description": "Prompt injection vulnerabilities live in the dataflow between user input and an LLM call. How to trace it statically and what a real finding looks like.",
+  "author": { "@type": "Organization", "name": "SecureAI-Scan" },
+  "mainEntityOfPage": "https://akanthed.github.io/SecureAI-Scan/prompt-injection-detection.html",
+  "url": "https://akanthed.github.io/SecureAI-Scan/prompt-injection-detection.html"
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is prompt injection?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Prompt injection is when untrusted input — user text, a fetched web page, a document, a tool result — reaches an LLM call in a position the model treats as an instruction, such as a system prompt or a position with elevated trust, instead of being clearly scoped as data. The model can't reliably distinguish 'text describing what the user wants' from 'text telling me what to do,' so whoever controls that input effectively controls part of the model's behavior. It is OWASP's LLM01:2026 category."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do you detect prompt injection with static analysis?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Trace the dataflow from a request-data source (an HTTP request field, a websocket message, a form input) forward to see whether it reaches an LLM SDK call's system-role message or is concatenated directly into a system prompt string, without being scoped as a separate user-role message. A tool only qualifies as a real finding if the sink resolves through an actual import to a known LLM SDK — matching on the word 'prompt' or 'system' alone produces too many false positives to be useful, since those words also appear in unrelated code."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is a keyword search for 'ignore previous instructions' enough to catch prompt injection?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "No — that catches known injection phrases already present in text, which is useful for scanning untrusted content (like an MCP tool description) but doesn't catch the underlying code vulnerability, which is user input reaching a trusted prompt position with no isolation. An attacker doesn't need to use a well-known phrase; they need the code path to exist. Detecting the vulnerable pattern in code requires tracing data flow, not matching known attack strings."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What's the fix for prompt injection?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Keep system prompts static and pass user-controlled input as a user-role message instead of concatenating it into the system prompt. If untrusted input must inform system-level behavior, treat it as data to be validated or templated with strict boundaries, not as free text merged into the instruction the model treats as most authoritative."
+      }
+    }
+  ]
+}
+</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%2315121e'/%3E%3Ctext x='50' y='68' font-size='58' text-anchor='middle'%3E%F0%9F%A9%BB%3C/text%3E%3C/svg%3E" />
+<style>
+  :root {
+    --ink: #15121e; --paper: #f7f1e4; --violet: #7c5cff; --violet-soft: #efe9ff;
+    --ember: #ff8a3d; --danger: #ef4365; --danger-soft: #fde6ea; --safe: #1f9d63; --safe-soft: #e3f6ec;
+    --bg: var(--paper); --surface: #ffffff; --surface-2: #fbf7ec; --text: #1c1730; --text-muted: #6b6478;
+    --border: #e4dbc8; --mono-bg: #17132a; --mono-text: #f1ece0; --mono-border: #2d2547;
+    --font-display: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+    --font-body: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: var(--ink); --surface: #1e1830; --surface-2: #221b38; --text: #f1ece0; --text-muted: #a79fc0;
+      --border: #342a4f; --violet-soft: #241c42; --danger-soft: #3a1c28; --safe-soft: #14301f;
+      --mono-bg: #0d0a18; --mono-text: #ece6f7; --mono-border: #2d2547; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-body); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: clamp(28px, 5vw, 64px) 20px 80px; display: flex; flex-direction: column; gap: 40px; }
+  .masthead { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
+  .brand { font-family: var(--font-mono); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+  .brand strong { color: var(--violet); }
+  .masthead a { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted); text-decoration: none; border-bottom: 1px solid transparent; }
+  .masthead a:hover, .masthead a:focus-visible { color: var(--violet); border-bottom-color: var(--violet); }
+  .eyebrow { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--violet); display: flex; align-items: center; gap: 8px; }
+  .eyebrow::before { content: ""; width: 22px; height: 1px; background: var(--violet); }
+  h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(1.9rem, 4.2vw, 2.7rem); line-height: 1.12; margin: 14px 0 8px; text-wrap: balance; letter-spacing: -0.01em; }
+  .dek { font-size: 1.06rem; color: var(--text-muted); max-width: 62ch; margin: 0; }
+  article h2 { font-family: var(--font-display); font-size: 1.32rem; margin: 0 0 10px; }
+  article p { margin: 0 0 14px; }
+  article ul, article ol { margin: 0 0 14px; padding-left: 22px; }
+  article li { margin-bottom: 6px; }
+  code { font-family: var(--font-mono); background: var(--mono-bg); color: var(--mono-text); padding: 1px 6px; border-radius: 4px; font-size: 0.88em; }
+  pre { font-family: var(--font-mono); background: var(--mono-bg); color: var(--mono-text); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-size: 0.84rem; line-height: 1.55; margin: 0 0 14px; }
+  pre code { background: none; padding: 0; }
+  .callout { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--violet); border-radius: 8px; padding: 16px 18px; }
+  .callout p:last-child { margin-bottom: 0; }
+  .trace { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 4px 0; }
+  .trace-row { display: grid; grid-template-columns: 70px 1fr; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+  .trace-row:last-child { border-bottom: none; }
+  .trace-label { font-family: var(--font-mono); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--violet); }
+  .faq { display: flex; flex-direction: column; gap: 18px; }
+  .faq-item h3 { font-family: var(--font-body); font-size: 1.02rem; margin: 0 0 6px; }
+  .faq-item p { margin: 0; color: var(--text-muted); }
+  .cta { background: var(--violet-soft); border: 1px solid color-mix(in srgb, var(--violet) 35%, var(--border)); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+  .cta a.btn { align-self: flex-start; font-weight: 600; background: var(--violet); color: #fff; text-decoration: none; padding: 9px 18px; border-radius: 7px; font-size: 0.92rem; }
+  .cta a.btn:hover { background: #6a48ee; }
+  footer { border-top: 1px solid var(--border); padding-top: 20px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  footer p { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
+  footer a { color: var(--violet); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  a:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <div class="brand">SecureAI-<strong>SCAN</strong> · docs</div>
+    <a href="index.html">← MCP X-Ray tool</a>
+  </div>
+
+  <div>
+    <div class="eyebrow">LLM01:2026 · Prompt Injection</div>
+    <h1>How to detect prompt injection in code</h1>
+    <p class="dek">Prompt injection isn't a keyword — it's a dataflow. It exists wherever user-controlled input reaches an LLM call in a position the model treats as an instruction. Here's how to trace that statically, and what a real finding looks like.</p>
+  </div>
+
+  <article>
+    <div class="callout">
+      <p><strong>Short answer:</strong> trace data from a request source (HTTP body, form field, websocket message) forward through your code to see whether it lands in an LLM call's system-role message or gets concatenated into a system prompt string. If it resolves through a real import to a known LLM SDK and reaches that position unscoped, that's the vulnerability — independent of whether any specific attack phrase is present.</p>
+    </div>
+
+    <h2>Why keyword matching doesn't work here</h2>
+    <p>Scanning source code for phrases like "ignore previous instructions" catches text that's already sitting in a file — useful for checking untrusted content like an MCP tool description or a document you're about to feed to a RAG pipeline. It does not catch the underlying code vulnerability, because an attacker doesn't need to plant a famous phrase in your codebase — they need the <em>code path</em> to exist so that whatever they type at runtime lands somewhere the model treats as authoritative. The vulnerability is structural, not lexical.</p>
+
+    <h2>What a traced finding looks like</h2>
+    <p>A dataflow-based finding shows the actual path from an untrusted source, through however many function calls, to the exact LLM SDK call site it reaches:</p>
+    <pre><code>HIGH  Prompt injection via user input
+PROVEN  LLM01:2026 Prompt Injection
+
+source  src/chat.ts:8   request data `req.body.input`
+flow    src/chat.ts:13  passed as `systemPrompt`
+sink    src/chat.ts:10  openai.chat.completions.create — system role (OpenAI)
+
+fix     Keep system prompts static; pass user input as a user-role message.</code></pre>
+    <p>Each line is checkable against the source file — that's what separates a traced finding from a keyword hit. Three things have to be true for this to count as a real (not heuristic) finding:</p>
+    <ul>
+      <li><strong>The sink is import-resolved.</strong> The call has to trace through an actual <code>import</code> to a known LLM SDK (OpenAI, Anthropic, the Vercel AI SDK, LangChain, Bedrock, etc.) — not just a function named something like <code>chat()</code> or <code>complete()</code>.</li>
+      <li><strong>The source is untrusted.</strong> Request bodies, query params, form inputs, websocket messages — not a hardcoded string or a value that only ever comes from your own config.</li>
+      <li><strong>The position matters.</strong> Landing in a system-role message or being concatenated into a system-prompt string carries more trust than landing in a user-role message, which is the whole point — the model treats the two positions differently.</li>
+    </ul>
+
+    <h2>Trace it yourself</h2>
+    <div class="trace">
+      <div class="trace-row"><span class="trace-label">1. Source</span><span>Find where request-controlled data enters your code — an Express handler's <code>req.body</code>, a Next.js route's parsed form data, a webhook payload.</span></div>
+      <div class="trace-row"><span class="trace-label">2. Flow</span><span>Follow it through variable assignments, function parameters, and string concatenation — does it get merged into a prompt-building string anywhere along the way?</span></div>
+      <div class="trace-row"><span class="trace-label">3. Sink</span><span>Check where it lands in the eventual LLM SDK call — a <code>system</code>-role message or a top-level system prompt is the dangerous position; a <code>user</code>-role message is the correct one.</span></div>
+    </div>
+
+    <p>Doing this by hand across a real codebase is slow and easy to miss — a value can pass through several functions before it reaches the sink. <a href="https://github.com/akanthed/SecureAI-Scan">SecureAI-Scan</a> automates exactly this trace via AST analysis (ts-morph for TypeScript/JavaScript, tree-sitter for Python), only flagging calls that resolve through real imports:</p>
+    <p><code>npx secureai-scan@0.9.0 scan .</code></p>
+
+    <div class="cta">
+      <p><strong>Check an MCP tool description or config instead?</strong> That's a related but different check — invisible Unicode and injection phrasing in untrusted text, not code dataflow.</p>
+      <a class="btn" href="mcp-tool-poisoning.html">How to detect MCP tool poisoning →</a>
+    </div>
+
+    <h2>Frequently asked questions</h2>
+    <div class="faq">
+      <div class="faq-item">
+        <h3>What is prompt injection?</h3>
+        <p>Untrusted input reaching an LLM call in a position the model treats as an instruction — a system prompt or similarly elevated-trust position — instead of being clearly scoped as data. It's OWASP's LLM01:2026 category.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Does a "clean" scan mean the code is safe?</h3>
+        <p>It means no traced dataflow from an untrusted source to a resolved LLM sink was found by the specific checks that ran. Static analysis is a filter, not proof of runtime safety — it can't see behavior that only emerges from how a model actually responds to a given input.</p>
+      </div>
+      <div class="faq-item">
+        <h3>What's the fix?</h3>
+        <p>Keep system prompts static; pass user-controlled input as a user-role message rather than concatenating it into the system prompt.</p>
+      </div>
+    </div>
+  </article>
+
+  <footer>
+    <p>Part of <a href="https://github.com/akanthed/SecureAI-Scan">SecureAI-Scan</a>, an open-source static scanner for LLM, MCP, and RAG security risks.</p>
+    <a href="index.html">← Try the MCP X-Ray tool</a>
+  </footer>
+
+</div>
+</body>
+</html>

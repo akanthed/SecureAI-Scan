@@ -62,6 +62,10 @@ export const RULES: Rule[] = [
 // Config-file rules implemented outside the AST rule engine (mcp-config-scanner).
 export const CONFIG_RULE_IDS = ["MCP004", "MCP005", "MCP006"];
 
+// LiteLLM proxy config.yaml rules implemented outside the AST rule engine
+// (litellm-config-scanner).
+export const LITELLM_CONFIG_RULE_IDS = ["LLC001", "LLC002", "LLC003"];
+
 // Agent Skill (SKILL.md) rules implemented outside the AST rule engine (skill-scanner).
 export const SKILL_RULE_IDS = [
   "SKL001", "SKL002", "SKL003", "SKL004", "SKL005", "SKL006", "SKL007", "SKL008", "SKL009", "SKL010",
@@ -75,6 +79,7 @@ export const DEPENDENCY_RULE_IDS = ["DEP001", "DEP002", "DEP003"];
 export const AVAILABLE_RULE_IDS = [
   ...RULES.map((rule) => rule.id),
   ...CONFIG_RULE_IDS,
+  ...LITELLM_CONFIG_RULE_IDS,
   ...SKILL_RULE_IDS,
   ...DEPENDENCY_RULE_IDS,
 ];
