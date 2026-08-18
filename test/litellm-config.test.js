@@ -77,3 +77,32 @@ test("litellm config scanner ignores model_list entries without litellm_params",
 
   assert.deepEqual(scanLiteLlmConfigs(dir), []);
 });
+
+// Regression: found scanning BerriAI/litellm itself. A repo with many
+// model_list entries repeats the key name "api_key" dozens of times; the
+// finding must anchor to the line holding the actual literal secret, not
+// the first line in the file containing the word "api_key".
+test("litellm config scanner anchors LLC001 to the offending value's line, not the first key match in the file", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-litellm-lineattrib-"));
+  fs.writeFileSync(
+    path.join(dir, "config.yaml"),
+    [
+      "model_list:",
+      "  - model_name: safe-one",
+      "    litellm_params:",
+      "      model: azure/gpt-4",
+      "      api_key: os.environ/AZURE_API_KEY",
+      "  - model_name: leaky-one",
+      "    litellm_params:",
+      "      model: openai/gpt-4",
+      "      api_key: sk-live-4f9a8b7c6d5e4f3a2b1c",
+      "guardrails:",
+      "  - guardrail_name: pii-mask",
+    ].join("\n"),
+  );
+
+  const findings = scanLiteLlmConfigs(dir);
+  const llc001 = findings.filter((f) => f.rule_id === "LLC001");
+  assert.equal(llc001.length, 1);
+  assert.equal(llc001[0].line, 9, "must point at the literal-secret line, not the env-ref line above it");
+});

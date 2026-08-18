@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { load as yamlLoad } from "js-yaml";
 import type { Finding } from "./types.js";
-import { evidenceConfidence } from "./confidence.js";
+import { evidenceConfidence, identifierTokens } from "./confidence.js";
 import { stripBom } from "../utils/text.js";
 
 /**
@@ -139,11 +139,54 @@ function lineOf(lines: string[], needle: string): number {
 const CREDENTIAL_FIELD = /(^api_key$|^master_key$|^salt_key$|(_api_key|_key|_token)$)/i;
 const ENV_REFERENCE = /^os\.environ\//;
 
+// LiteLLM's own docs/tests inline placeholder values like "fake-key",
+// "my-fake-key", "sk-lar1-demo" to demonstrate config shape — not real
+// secrets. Found scanning BerriAI/litellm itself (regression). A value built
+// entirely from ordinary placeholder words, with no other content, isn't
+// evidence of a leaked credential.
+const PLACEHOLDER_TOKENS = new Set([
+  "fake",
+  "dummy",
+  "test",
+  "tests",
+  "demo",
+  "sample",
+  "example",
+  "examples",
+  "placeholder",
+  "changeme",
+  "todo",
+  "tbd",
+  "xxx",
+  "redacted",
+  "mock",
+  "stub",
+  "insert",
+  "notreal",
+  "your",
+]);
+
+function isPlaceholderValue(value: string): boolean {
+  const tokens = identifierTokens(value);
+  if (tokens.length > 0 && tokens.every((t) => PLACEHOLDER_TOKENS.has(t))) return true;
+
+  // Real credentials are one long, effectively random alphanumeric run
+  // (sometimes with a short vendor prefix like "sk-"/"AKIA" split off by a
+  // hyphen). Hyphen/underscore-joined human phrases — "sk-lar1-demo" — never
+  // produce a long unbroken run even when no individual word is on the deny
+  // list above. Below this length, treat it as not credential-shaped.
+  const runs = value.match(/[A-Za-z0-9]+/g) ?? [];
+  const longestRun = Math.max(0, ...runs.map((r) => r.length));
+  return longestRun < 12;
+}
+
 function isLiteralSecret(key: string, value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (!CREDENTIAL_FIELD.test(key)) return false;
-  if (value.trim().length < 8) return false;
-  if (ENV_REFERENCE.test(value.trim())) return false;
+  const trimmed = value.trim();
+  if (trimmed.length < 8) return false;
+  if (ENV_REFERENCE.test(trimmed)) return false;
+  if (isPlaceholderValue(trimmed)) return false;
   return true;
 }
 
@@ -182,7 +225,11 @@ export function scanLiteLlmConfigs(rootPath: string, skipPaths?: string[]): Find
           title: "Hardcoded secret in LiteLLM config",
           severity: "critical",
           file: relFile,
-          line: lineOf(lines, key),
+          // Search by the literal value, not the key: key names like "api_key"
+          // repeat across every model_list entry, so a key-only search can
+          // anchor the finding to an unrelated (possibly safe) line with the
+          // same key. The flagged value itself is what's unique.
+          line: lineOf(lines, value),
           summary: `"${label}" has a literal value for "${key}" instead of an os.environ/ reference.`,
           description:
             "LiteLLM proxy config files are routinely committed and shared across a team. A credential written directly into the config, rather than referenced via LiteLLM's os.environ/VAR_NAME convention, is exposed to everyone with repo access and to any process that reads the file.",

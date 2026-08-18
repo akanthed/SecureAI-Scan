@@ -39,7 +39,18 @@ export function scanRepositoryDetailed(
   const activeRules = selectRules(RULES, options?.rules, options?.blockedRules);
 
   for (const rule of activeRules) {
-    findings.push(...rule.run(context));
+    try {
+      findings.push(...rule.run(context));
+    } catch (err) {
+      // A crash in one rule (e.g. a ts-morph type-checker failure on an
+      // unusual file in a large multi-tsconfig monorepo) must not silently
+      // discard every other rule's findings for the whole repository —
+      // found scanning BerriAI/litellm, where a single dashboard file
+      // crashed AI001 and took the entire scan down with it.
+      console.error(
+        `Warning: rule ${rule.id} failed and was skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   // Python scanning — merged into same findings list
