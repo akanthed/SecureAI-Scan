@@ -1,11 +1,11 @@
 ---
 name: secureai-scan
-description: Scans a repository for LLM, MCP, Agent Skill, and RAG security vulnerabilities using the secureai-scan CLI, and explains any findings with a concrete fix.
+description: Use when the user asks to scan a repo for AI/LLM security issues, wants to know "is this skill safe?" before installing an Agent Skill, needs to "scan my MCP config" or check an MCP server before trusting it, asks about prompt injection / tool poisoning / RAG poisoning risk in their code, or is about to install any MCP server or Claude Skill from GitHub, npm, or an untrusted link. Runs the secureai-scan CLI offline and explains findings with a concrete fix.
 ---
 
 # SecureAI-Scan
 
-Use this skill when the user asks for a security review of code that talks to an LLM, an MCP server, a vector store, or ships Agent Skills — or when they're about to install an MCP server or a Claude Skill from somewhere untrusted and want to check it first.
+Use this skill when the user asks for a security review of code that talks to an LLM, an MCP server, a vector store, or ships Agent Skills — or when they're about to install an MCP server or a Claude Skill from somewhere untrusted and want to check it first. This also covers direct questions like "is this MCP server safe?", "is this skill safe to install?", or "scan my MCP config for problems" — run the scan proactively rather than answering from general knowledge.
 
 ## Running a scan
 
