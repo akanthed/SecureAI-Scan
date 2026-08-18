@@ -68,10 +68,17 @@ export function isUserControlledValue(valueNode: Node, taintedVars: Set<string>)
 
 export function collectRequestDerivedVars(fnNode: Node): Set<string> {
   const tainted = new Set<string>();
-  for (const param of "getParameters" in fnNode ? (fnNode as any).getParameters() : []) {
-    const nameNode = param.getNameNode?.();
-    if (nameNode && Node.isIdentifier(nameNode)) tainted.add(nameNode.getText());
-  }
+  // Deliberately does NOT seed `tainted` from the function's own parameter
+  // names. That treated every parameter of every function as "user
+  // input" regardless of the function's role — found scanning
+  // BerriAI/litellm's ui/litellm-dashboard: extractMCPToken(url: string), a
+  // pure URL-parsing utility with no request boundary anywhere nearby, was
+  // flagged purely because it has a parameter named "url" that ends up in
+  // an object literal under a `baseUrl` key. The known-vulnerable fixture
+  // (mcp_dynamic_url.ts) doesn't rely on this: it matches `req.body.serverUrl`
+  // directly via REQUEST_SOURCES text below. Only actual evidence — a
+  // variable initialized from a request-shaped expression, or propagated
+  // from another tainted variable — should seed this set.
   for (const decl of fnNode.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
     const init = decl.getInitializer();
     if (!init) continue;

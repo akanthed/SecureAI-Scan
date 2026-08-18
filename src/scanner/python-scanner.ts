@@ -124,7 +124,12 @@ const VECTOR_SEARCH_PATTERNS = [
   /\.\s*as_retriever\s*\(/,
   /index\s*\.\s*query\s*\(/,
   /collection\s*\.\s*query\s*\(/,
-  /\.\s*search\s*\(\s*[^)]*vector/i,
+  // Excludes `re.search(...)`/`regex.search(...)` — Python's stdlib regex
+  // search, unrelated to vector stores. Found scanning BerriAI/litellm:
+  // `re.search(r"/vector_stores/([^/]+)/", path)` (URL-path parsing) matched
+  // only because the *regex pattern string* happened to contain the
+  // substring "vector", nothing to do with a vector-store client.
+  /(?<!\bre)(?<!\bregex)\.\s*search\s*\(\s*[^)]*vector/i,
 ];
 
 const VECTOR_INGEST_PATTERNS = [
@@ -276,6 +281,17 @@ const AUTH_DECORATORS = [
   /HTTPBearer/,
   /OAuth2PasswordBearer/,
   /Depends\s*\(\s*get_current/,
+  // FastAPI's idiomatic route auth is a `Depends(...)` dependency — either
+  // in the decorator's `dependencies=[...]` kwarg, or (more commonly) as a
+  // parameter default (`user: X = Depends(auth_fn)`), which previously
+  // wasn't scanned at all: only the decorator and function body were
+  // checked, never the parameter list. Found scanning BerriAI/litellm,
+  // where every health-check route uses `dependencies=[Depends(user_api_key_auth)]`
+  // plus `user_api_key_dict: UserAPIKeyAuth = Depends(user_api_key_auth)` and
+  // was still flagged as unauthenticated. Matches by dependency-name/type
+  // shape rather than a fixed name list, since real projects name their
+  // auth dependency anything.
+  /Depends\s*\(\s*\w*(?:auth|token|current_user|api_key|verify|login|session|principal)\w*\s*\)/i,
 ];
 
 // ── Injection phrases in strings ──────────────────────────────────────────
@@ -459,6 +475,11 @@ function checkAI003(src: PythonSource, i: number, file: string, ctx: FileContext
   if (!handlerCalls.some(ctx.isLlmCallNode)) return null;
   if (fn.decorators.some((decorator) => matchesAny(decorator.text, AUTH_DECORATORS))) return null;
   if (matchesAny(fn.body.text, AUTH_DECORATORS)) return null;
+  // The parameter list is where FastAPI auth most commonly lives — a
+  // `Depends(...)` default value, invisible to the decorator/body checks
+  // above.
+  const parameters = fn.node.childForFieldName("parameters");
+  if (parameters && matchesAny(parameters.text, AUTH_DECORATORS)) return null;
 
   return {
     ...findingBase("AI003", "LLM call before authentication", "critical", file, i + 1),
@@ -787,6 +808,27 @@ function descriptionValueAtLine(src: PythonSource, line: number): PythonNode | u
   });
 }
 
+// `pythonScope` falls back to the whole module when a node isn't inside a
+// function — fine for taint scoping, but wrong here: a module-level dict
+// literal (e.g. an admin-UI settings schema) in a large file inherits "the
+// entire file mentions MCP somewhere" as context, which is true of nearly
+// any sizeable proxy/server file that also implements real MCP endpoints.
+// Found scanning BerriAI/litellm's 17k-line proxy_server.py, where an
+// unrelated settings-schema description ("...adds cache_control to the
+// system prompt...") matched only because "mcp_tools" appears elsewhere in
+// the same file. Cap the module-level fallback to a small line window
+// around the description instead of the full file.
+const MCP001_MODULE_WINDOW_LINES = 40;
+
+function mcp001Context(src: PythonSource, description: PythonNode, line: number): string {
+  const fn = src.ast.enclosingFunction(description);
+  if (fn) return fn.body.text;
+  const lines = src.ast.root.text.split(/\r?\n/);
+  const start = Math.max(0, line - MCP001_MODULE_WINDOW_LINES);
+  const end = Math.min(lines.length, line + 5);
+  return lines.slice(start, end).join("\n");
+}
+
 function checkMCP001(src: PythonSource, i: number, file: string): Finding | null {
   const description = descriptionValueAtLine(src, i);
   if (!description) return null;
@@ -794,7 +836,7 @@ function checkMCP001(src: PythonSource, i: number, file: string): Finding | null
   const matched = INJECTION_PHRASES.find((phrase) => lower.includes(phrase));
   if (!matched) return null;
 
-  const ctx = pythonScope(src, description).text;
+  const ctx = mcp001Context(src, description, i);
   if (!MCP_LISTING_HINT.test(ctx)) return null;
 
   return {
