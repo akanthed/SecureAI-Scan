@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.10.0 — 2026-08-19
+
+Static config scanning for LiteLLM Proxy, plus six false-positive/robustness bugs found and fixed by adding a large real-world repo (BerriAI/litellm) to the regression gate.
+
+### Added
+- **LLC001–LLC003: LiteLLM Proxy `config.yaml` scanning.** New off-disk scanner (`src/scanner/litellm-config-scanner.ts`), following the same pattern as `mcp-config-scanner.ts`. Gated behind a structural check (`model_list` + `litellm_params`) so unrelated YAML files are never touched.
+  - **LLC001** (`proven`, critical): a hardcoded secret in `litellm_params`/`general_settings` instead of an `os.environ/VAR_NAME` reference.
+  - **LLC002** (`proven`, high): a provider `api_base` reachable over plaintext `http://` (non-localhost).
+  - **LLC003** (`heuristic`, low, `--paranoid` only): no `guardrails:` section configured at all — absence of an optional control, not a proven gap.
+  - New dependency: `js-yaml` (default-schema `load()`, no unsafe deserialization tags).
+
+### Fixed
+Found by adding BerriAI/litellm — the official repo, ~7,000 TS/JS files plus a large Python codebase — to `npm run regression`, specifically to get real coverage for the new LLC rules (none of the existing regression repos ship a LiteLLM proxy config):
+
+- **LLC001 line misattribution.** Anchored findings to the first line containing the key name (`api_key`) rather than the flagged value — in a config with many `api_key:` entries, this could point at an unrelated `os.environ/` reference. Now anchors on the value itself.
+- **LLC001 placeholder-value false positives.** LiteLLM's own docs/tests use dummy values like `fake-key`, `sk-lar1-demo` to demonstrate config shape. Added a placeholder-word check plus a "longest unbroken alphanumeric run" heuristic to distinguish a random credential blob from a human-typed phrase.
+- **A rule crash was silently discarding every other rule's findings.** A ts-morph type-checker failure on one file (a large multi-`tsconfig.json` monorepo edge case) took down the entire scan, not just the failing rule — a scan that goes quiet instead of erroring is indistinguishable from "clean," which is worse than any false positive. Each rule's `run()` is now isolated in `scan.ts`; a failure logs a warning and the rest of the scan continues.
+- **MCP001 (Python) module-scope false positive.** An admin-UI settings description containing the words "system prompt" was treated as MCP tool metadata because the scoping guard fell back to the whole file (17k lines) when the match wasn't inside a function — "the file mentions MCP somewhere" is true of nearly any file that size in a proxy codebase. Capped the module-level fallback to a small line window.
+- **MCP002 (TypeScript) blanket parameter taint.** Every function parameter was treated as "user-controlled input" regardless of whether the function had anything to do with request handling, flagging a pure URL-parsing utility (`extractMCPToken(url: string)`) purely because it has a parameter named `url`. The known-vulnerable fixture never relied on this. Removed the blanket taint.
+- **VEC001 (Python) `re.search` collision.** Python's stdlib `re.search(r"/vector_stores/([^/]+)/", path)` — ordinary URL-path parsing — matched as a vector-store similarity search because the regex pattern string contained the substring "vector." Excluded `re.search`/`regex.search`.
+- **AI003 (Python) missed FastAPI's idiomatic auth pattern.** `Depends(...)` in a route's parameter list (the standard place FastAPI auth lives, e.g. `user: X = Depends(user_api_key_auth)`) was never checked — only the decorator and function body were. Every health-check route in litellm's own proxy was flagged as unauthenticated despite being authenticated two different ways. Now scans the parameter list too, matching by dependency-name/type shape instead of a fixed name list.
+
+All six fixes shipped with a permanent fixture under `test-fixtures/safe/`.
+
+### Also
+- Skill/MCP-server tool descriptions rewritten with explicit trigger phrasing ("is this skill safe?", "scan my MCP config") for better auto-suggestion in Claude/Cursor.
+- `docs/RealWorldFindings.md` updated with the full litellm regression story.
+
 ## 0.9.0 — 2026-08-12
 
 Support for the official OWASP Top 10 for LLM Applications 2026, plus five new Agent Skill detection rules.

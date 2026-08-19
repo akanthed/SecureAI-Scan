@@ -18,7 +18,7 @@ Covers the official [OWASP Top 10 for LLM Applications 2026](https://genai.owasp
 ## Get started in 30 seconds
 
 ```bash
-npx --yes secureai-scan@0.9.0 scan .
+npx --yes secureai-scan@0.10.0 scan .
 ```
 
 No account, cloud upload, Python interpreter, or configuration required. TypeScript, JavaScript, Python, MCP configs, and Agent Skill bundles are detected automatically.
@@ -191,9 +191,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: akanthed/SecureAI-Scan@v0.9.0
+      - uses: akanthed/SecureAI-Scan@v0.10.0
         with:
-          scanner-version: 0.9.0
+          scanner-version: 0.10.0
           fail-on: high
 ```
 

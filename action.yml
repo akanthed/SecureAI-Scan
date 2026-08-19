@@ -9,7 +9,7 @@ inputs:
   scanner-version:
     description: "Exact secureai-scan npm version to install"
     required: false
-    default: "0.9.0"
+    default: "0.10.0"
   path:
     description: "Path to scan"
     required: false
