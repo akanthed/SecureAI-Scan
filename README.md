@@ -9,11 +9,11 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D22.12-brightgreen)](https://nodejs.org)
 [![OWASP](https://img.shields.io/badge/OWASP-LLM%20%C2%B7%20ASI%20%C2%B7%20MCP%20Top%2010-000000)](#rules)
 
-**The AI security scanner that proves its findings.**
+**Offline CLI that scans TypeScript, JavaScript, and Python for LLM, MCP, Agent Skill, and RAG risks — import-resolved dataflow evidence, zero default false positives, mapped to OWASP LLM/ASI/MCP Top 10.**
 
-SecureAI-Scan finds LLM, MCP, Agent Skill, and RAG vulnerabilities in **TypeScript, JavaScript, and Python** — and shows you the evidence: the exact source → flow → sink path for every dataflow finding, resolved through real imports, not keyword matching.
+Most scanners in this space pattern-match a keyword and call it a finding. SecureAI-Scan traces the actual source → flow → sink path through real, import-resolved code — and a default scan shows you only what it can prove. No account, no cloud upload, nothing leaves your machine.
 
-It provides launch-week support for the official [OWASP Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/), alongside the [Top 10 for Agentic Applications (2026)](https://genai.owasp.org/) and the [MCP Top 10](https://owasp.org/www-project-mcp-top-10/). Every threat model distinguishes static coverage from runtime concerns.
+Covers the official [OWASP Top 10 for LLM Applications 2026](https://genai.owasp.org/resource/owasp-genai-llm-top-10-2026/), [Top 10 for Agentic Applications (2026)](https://genai.owasp.org/), and the [MCP Top 10](https://owasp.org/www-project-mcp-top-10/) from launch week.
 
 ## Get started in 30 seconds
 
@@ -38,6 +38,8 @@ No account, cloud upload, Python interpreter, or configuration required. TypeScr
 
 **Is this for you?** SecureAI-Scan is scoped deliberately to LLM, MCP, and RAG/agent risks — prompt injection, tool poisoning, unsafe output handling, vector-store access control, agent-skill poisoning. It is not a general SAST or secrets scanner, and doesn't try to be one; a known-malicious package with no LLM-shaped payload (e.g. a hardcoded exfiltration address in an email API call) is caught by the offline advisory list (`DEP003`), not a pattern rule. If your codebase talks to an LLM, an MCP server, a vector store, or ships Agent Skills, this is built for you.
 
+<sub>New: static config scanning for LiteLLM Proxy (`config.yaml`) — hardcoded secrets, plaintext provider endpoints, missing guardrails. See [Rules](#rules) (LLC001–LLC003).</sub>
+
 ## Contents
 
 - [Why this scanner is different](#why-this-scanner-is-different)
@@ -60,7 +62,7 @@ No account, cloud upload, Python interpreter, or configuration required. TypeScr
 
 - **Evidence tiers, not noise.** Every finding is `proven` (traced dataflow or parsed config fact), `likely` (resolved sink, one heuristic hop), or `heuristic`. **A default scan shows only proven + likely.** Heuristics are opt-in via `--paranoid`.
 - **Import-resolved detection.** A call is only an "LLM call" if it resolves to a real SDK import (`openai`, `@anthropic-ai/sdk`, `ai`, `@google/genai`, LangChain, Bedrock, …). Your Google Maps client will never be flagged as an LLM again.
-- **Precision-gated, and benchmarked against real repos.** The test suite asserts every vulnerable fixture fires *and* every safe fixture stays clean — a false positive on the safe corpus fails the build. Beyond that, `npm run regression` scans real public repos (OpenAI/Anthropic/Vercel AI SDKs, official MCP servers, LlamaIndex) against a committed, hand-reviewed baseline and **fails on any new `proven`/`likely` finding**. See [Testing & benchmarking](#testing--benchmarking) for the actual before/after numbers, or [What we found scanning real repos](docs/RealWorldFindings.md) for the story behind them — a 6/6 catch rate on a labeled malicious-skill corpus, and why we're *not* calling llama_index "vulnerable" over an honest library-level finding.
+- **Precision-gated, and benchmarked against real repos.** The test suite asserts every vulnerable fixture fires *and* every safe fixture stays clean — a false positive on the safe corpus fails the build. Beyond that, `npm run regression` scans real public repos (OpenAI/Anthropic/Vercel AI SDKs, official MCP servers, LlamaIndex) against a committed, hand-reviewed baseline and **fails on any new `proven`/`likely` finding**. See [Testing & benchmarking](#testing--benchmarking) for the actual before/after numbers, or [What we found scanning real repos](docs/RealWorldFindings.md) for the story behind them — a 6/6 catch rate on a labeled malicious-skill corpus, and why we're *not* calling llama_index "vulnerable" over an honest library-level finding. [Discussion write-up →](https://github.com/akanthed/SecureAI-Scan/discussions/19)
 - **SARIF for GitHub code scanning.** `--output report.sarif` puts findings inline on pull requests and in the Security tab.
 - **AI-BOM.** `secureai-scan bom .` builds a syntax-derived inventory of SDKs, model IDs, vector stores, agent frameworks, and MCP servers, mapped to OWASP LLM Top 10 / EU AI Act documentation needs.
 - **MCP config scanning.** Parses `.mcp.json`, `claude_desktop_config.json`, `.cursor/mcp.json`: unpinned `npx -y` servers, inline secrets, plaintext HTTP transports.
@@ -205,7 +207,7 @@ Scanning clean? Add the badge to your own README:
 
 ## Rules
 
-**39 rules**, mapped to the official OWASP Top 10 for LLM Applications (2026) — plus, where applicable, the OWASP Top 10 for Agentic Applications (2026, ASI), the OWASP MCP Top 10 (2025), and an EU AI Act article. See the [versioned 2026 coverage and limits](docs/OWASP2026.md); `threat-model` renders the matrix for each scanned project.
+**42 rules**, mapped to the official OWASP Top 10 for LLM Applications (2026) — plus, where applicable, the OWASP Top 10 for Agentic Applications (2026, ASI), the OWASP MCP Top 10 (2025), and an EU AI Act article. See the [versioned 2026 coverage and limits](docs/OWASP2026.md); `threat-model` renders the matrix for each scanned project.
 
 | Rule | What it proves | OWASP |
 |------|----------------|-------|
@@ -248,6 +250,9 @@ Scanning clean? Add the badge to your own README:
 | DEP001 | Dependency name not found in the registry (opt-in `--check-dependencies`) | LLM04 |
 | DEP002 | Dependency name one edit away from a popular package (opt-in) | LLM04 |
 | DEP003 | Dependency with a documented malicious release or critical CVE — checked offline on every scan, version-range aware (postmark-mcp, mcp-remote CVE-2025-6514, …) | LLM04 · MCP04 |
+| LLC001 | Hardcoded secret in a LiteLLM proxy `config.yaml` | LLM02 |
+| LLC002 | LiteLLM proxy `api_base` reachable over plaintext HTTP | LLM04 |
+| LLC003 | LiteLLM proxy config has no `guardrails:` section (heuristic, `--paranoid` only) | LLM03 |
 
 `secureai-scan explain <RULE_ID>` gives the exploit walkthrough and a before/after code example for any rule.
 

@@ -67,7 +67,7 @@ const TOOLS = [
   {
     name: "scan_repository",
     description:
-      "Scan a local repository for AI/LLM security vulnerabilities with evidence-tiered findings (proven/likely/heuristic). Detects prompt injection (with source→sink dataflow traces), MCP supply-chain issues, RAG data poisoning, and agent trust violations in TypeScript/JS, Python, and MCP config files.",
+      "Scan a local repository for AI/LLM security vulnerabilities with evidence-tiered findings (proven/likely/heuristic). Detects prompt injection (with source→sink dataflow traces), MCP supply-chain issues, RAG data poisoning, and agent trust violations in TypeScript/JS, Python, and MCP config files. Use for requests like 'scan my MCP config', 'check this repo for prompt injection risk', or any AI/LLM security review of local code.",
     inputSchema: {
       type: "object",
       properties: {
@@ -130,7 +130,7 @@ const TOOLS = [
   {
     name: "scan_untrusted_target",
     description:
-      "Fetch and scan a single Agent Skill or MCP server BEFORE it is trusted/installed — no repo, no config. Accepts a local path, a git URL, a GitHub \"owner/repo\" shorthand, or (for MCP servers) a bare npm package name. Nothing fetched is ever executed: npm targets are downloaded with 'npm pack' (tarball only, no install, no lifecycle scripts), git targets with 'git clone --depth 1'. Use this before recommending or installing any third-party skill or MCP server.",
+      "Fetch and scan a single Agent Skill or MCP server BEFORE it is trusted/installed — no repo, no config. Accepts a local path, a git URL, a GitHub \"owner/repo\" shorthand, or (for MCP servers) a bare npm package name. Nothing fetched is ever executed: npm targets are downloaded with 'npm pack' (tarball only, no install, no lifecycle scripts), git targets with 'git clone --depth 1'. Use this before recommending or installing any third-party skill or MCP server, or whenever the user asks 'is this skill safe?', 'is this MCP server safe to install?', or wants a third-party skill/MCP server checked before trusting it.",
     inputSchema: {
       type: "object",
       properties: {

@@ -56,6 +56,10 @@ const REPOS = [
   { name: "llama_index", url: "https://github.com/run-llama/llama_index.git" },
   { name: "anthropic-skills", url: "https://github.com/anthropics/skills.git" },
   { name: "cisco-skill-scanner", url: "https://github.com/cisco-ai-defense/skill-scanner.git" },
+  // litellm added for LLC001-003 (litellm-config-scanner): the official repo
+  // ships real proxy config.yaml examples under litellm/proxy/example_config_yaml
+  // and docs, the only repo in this set that exercises those rules at all.
+  { name: "litellm", url: "https://github.com/BerriAI/litellm.git" },
 ];
 
 const fresh = process.argv.includes("--fresh");

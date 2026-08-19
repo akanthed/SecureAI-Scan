@@ -1,0 +1,11 @@
+model_list:
+  - model_name: internal-llm
+    litellm_params:
+      model: openai/internal-llm
+      api_key: os.environ/INTERNAL_LLM_API_KEY
+      api_base: http://internal-llm.example.com/v1
+guardrails:
+  - guardrail_name: pii-mask
+    litellm_params:
+      guardrail: presidio
+      mode: pre_call

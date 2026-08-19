@@ -1,6 +1,6 @@
 {
   "note": "Reviewed proven/likely findings from scripts/regression-scan.js. Only add entries you have read against their source line.",
-  "updated": "2026-08-04",
+  "updated": "2026-08-19",
   "fingerprints": [
     "cisco-skill-scanner|SKL001|evals/test_skills/malicious/ascii-smuggling/SKILL.md",
     "cisco-skill-scanner|SKL002|evals/skills/prompt-injection/jailbreak-override/SKILL.md",
@@ -9,6 +9,7 @@
     "cisco-skill-scanner|SKL005|evals/skills/data-exfiltration/environment-secrets/get_info.py",
     "cisco-skill-scanner|SKL005|evals/skills/obfuscation/base64-payload/process.py",
     "cisco-skill-scanner|SKL005|evals/test_skills/malicious/prompt-injection/SKILL.md",
+    "litellm|LLC002|litellm/proxy/_super_secret_config.yaml",
     "llama_index|VEC001|llama-index-core/llama_index/core/indices/base.py",
     "llama_index|VEC001|llama-index-core/llama_index/core/indices/keyword_table/rake_base.py",
     "llama_index|VEC001|llama-index-core/llama_index/core/indices/keyword_table/simple_base.py",
@@ -28,13 +29,10 @@
     "llama_index|VEC001|llama-index-integrations/retrievers/llama-index-retrievers-alletra-x10000/llama_index/retrievers/alletra_x10000_retriever/base.py",
     "llama_index|VEC001|llama-index-integrations/vector_stores/llama-index-vector-stores-baiduvectordb/llama_index/vector_stores/baiduvectordb/base.py",
     "llama_index|VEC001|llama-index-integrations/vector_stores/llama-index-vector-stores-chroma/llama_index/vector_stores/chroma/base.py",
-    "llama_index|VEC001|llama-index-integrations/vector_stores/llama-index-vector-stores-dashvector/llama_index/vector_stores/dashvector/base.py",
     "llama_index|VEC001|llama-index-integrations/vector_stores/llama-index-vector-stores-databricks/llama_index/vector_stores/databricks/base.py",
     "llama_index|VEC001|llama-index-integrations/vector_stores/llama-index-vector-stores-jaguar/llama_index/vector_stores/jaguar/base.py",
-    "llama_index|VEC001|llama-index-integrations/vector_stores/llama-index-vector-stores-pinecone/llama_index/vector_stores/pinecone/base.py",
     "llama_index|VEC001|llama-index-integrations/vector_stores/llama-index-vector-stores-redis/llama_index/vector_stores/redis/base.py",
     "llama_index|VEC001|llama-index-integrations/vector_stores/llama-index-vector-stores-supabase/llama_index/vector_stores/supabase/base.py",
-    "llama_index|VEC001|llama-index-integrations/vector_stores/llama-index-vector-stores-tencentvectordb/llama_index/vector_stores/tencentvectordb/base.py",
-    "llama_index|VEC001|llama-index-integrations/vector_stores/llama-index-vector-stores-vespa/llama_index/vector_stores/vespa/base.py"
+    "llama_index|VEC001|llama-index-integrations/vector_stores/llama-index-vector-stores-tencentvectordb/llama_index/vector_stores/tencentvectordb/base.py"
   ]
 }

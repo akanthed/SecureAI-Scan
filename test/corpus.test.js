@@ -39,6 +39,8 @@ const EXPECTED_VULNERABLE = [
   ["MCP004", "vulnerable/mcp/.mcp.json"],
   ["MCP005", "vulnerable/mcp/.mcp.json"],
   ["MCP006", "vulnerable/mcp/.mcp.json"],
+  ["LLC001", "vulnerable/litellm-config-secret.yaml"],
+  ["LLC002", "vulnerable/litellm-config-http.yaml"],
   ["MCP007", "vulnerable/tool_poisoning.ts"],
   ["MCP008", "vulnerable/tool_poisoning.ts"],
   ["MCP009", "vulnerable/tool_poisoning.ts"],

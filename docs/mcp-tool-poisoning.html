@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How to Detect MCP Tool Poisoning — Checklist &amp; Free Scanner</title>
+<meta name="description" content="MCP tool poisoning hides instructions inside a tool's description field, not its code, so agents read them but you don't. Here's what to check for, and a free browser tool that checks it for you." />
+<meta name="keywords" content="MCP tool poisoning, MCP security, Model Context Protocol security, prompt injection MCP, tool description injection, MCP scanner" />
+<link rel="canonical" href="https://akanthed.github.io/SecureAI-Scan/mcp-tool-poisoning.html" />
+<meta property="og:type" content="article" />
+<meta property="og:title" content="How to Detect MCP Tool Poisoning" />
+<meta property="og:description" content="MCP tool poisoning hides instructions in a tool's description field. Here's what to check for, plus a free browser tool that checks it for you." />
+<meta property="og:url" content="https://akanthed.github.io/SecureAI-Scan/mcp-tool-poisoning.html" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="How to Detect MCP Tool Poisoning" />
+<meta name="twitter:description" content="What MCP tool poisoning looks like, and how to check for it before you run a server." />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Article",
+  "headline": "How to Detect MCP Tool Poisoning",
+  "description": "MCP tool poisoning hides instructions inside a tool's description field, not its code. What to check for, and how to check it.",
+  "author": { "@type": "Organization", "name": "SecureAI-Scan" },
+  "mainEntityOfPage": "https://akanthed.github.io/SecureAI-Scan/mcp-tool-poisoning.html",
+  "url": "https://akanthed.github.io/SecureAI-Scan/mcp-tool-poisoning.html"
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "What is MCP tool poisoning?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "MCP tool poisoning is an attack where an MCP server's tool description — the text field an AI agent reads to decide how and when to call the tool — contains hidden instructions aimed at the agent instead of documentation for the user. Because the description is loaded into the model's context on every call, an agent can be steered into reading credential files, exfiltrating data, or ignoring its system prompt without the human operator ever seeing it, since the payload lives in metadata most people never read."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I detect MCP tool poisoning?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Check every tool description for three things: invisible Unicode characters (zero-width joiners, bidirectional overrides, or the Unicode tags block) that hide text from a human reader while a model still parses it; agent-directed phrasing such as 'ignore previous instructions' or 'do not tell the user'; and instructions to read credential files or send data to an external URL. Do this before you run the server, not after, since the payload executes the moment the agent reads the description into context."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can tool poisoning happen without changing the tool's code?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes, and that's what makes it effective — a server can ship a completely benign implementation while the tool's description string carries the payload. Code review that only reads the handler function misses it entirely, because the description is just a string literal passed to the tool registration call."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is this the same as the WhatsApp MCP rug-pull or the postmark-mcp backdoor?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Related but distinct. The postmark-mcp incident was a malicious code change in a package update (a backdoor that BCC'd every outgoing email). Tool poisoning is the description-field attack specifically — no code change required, just text an agent reads and a human doesn't."
+      }
+    }
+  ]
+}
+</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%2315121e'/%3E%3Ctext x='50' y='68' font-size='58' text-anchor='middle'%3E%F0%9F%A9%BB%3C/text%3E%3C/svg%3E" />
+<style>
+  :root {
+    --ink: #15121e; --paper: #f7f1e4; --violet: #7c5cff; --violet-soft: #efe9ff;
+    --ember: #ff8a3d; --danger: #ef4365; --danger-soft: #fde6ea; --safe: #1f9d63; --safe-soft: #e3f6ec;
+    --bg: var(--paper); --surface: #ffffff; --surface-2: #fbf7ec; --text: #1c1730; --text-muted: #6b6478;
+    --border: #e4dbc8; --mono-bg: #17132a; --mono-text: #f1ece0; --mono-border: #2d2547;
+    --font-display: Georgia, "Iowan Old Style", "Palatino Linotype", "Times New Roman", serif;
+    --font-body: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: var(--ink); --surface: #1e1830; --surface-2: #221b38; --text: #f1ece0; --text-muted: #a79fc0;
+      --border: #342a4f; --violet-soft: #241c42; --danger-soft: #3a1c28; --safe-soft: #14301f;
+      --mono-bg: #0d0a18; --mono-text: #ece6f7; --mono-border: #2d2547; }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-body); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: clamp(28px, 5vw, 64px) 20px 80px; display: flex; flex-direction: column; gap: 40px; }
+  .masthead { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--border); padding-bottom: 14px; }
+  .brand { font-family: var(--font-mono); font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+  .brand strong { color: var(--violet); }
+  .masthead a { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted); text-decoration: none; border-bottom: 1px solid transparent; }
+  .masthead a:hover, .masthead a:focus-visible { color: var(--violet); border-bottom-color: var(--violet); }
+  .eyebrow { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--violet); display: flex; align-items: center; gap: 8px; }
+  .eyebrow::before { content: ""; width: 22px; height: 1px; background: var(--violet); }
+  h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(1.9rem, 4.2vw, 2.7rem); line-height: 1.12; margin: 14px 0 8px; text-wrap: balance; letter-spacing: -0.01em; }
+  .dek { font-size: 1.06rem; color: var(--text-muted); max-width: 62ch; margin: 0; }
+  article h2 { font-family: var(--font-display); font-size: 1.32rem; margin: 0 0 10px; }
+  article p { margin: 0 0 14px; }
+  article ul, article ol { margin: 0 0 14px; padding-left: 22px; }
+  article li { margin-bottom: 6px; }
+  code { font-family: var(--font-mono); background: var(--mono-bg); color: var(--mono-text); padding: 1px 6px; border-radius: 4px; font-size: 0.88em; }
+  .callout { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--violet); border-radius: 8px; padding: 16px 18px; }
+  .callout p:last-child { margin-bottom: 0; }
+  .signals { display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .signal { background: var(--surface); padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; border-left: 3px solid var(--danger); }
+  .signal:nth-child(2) { border-left-color: var(--ember); }
+  .signal:nth-child(3) { border-left-color: var(--violet); }
+  .signal .rule-id { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em; color: var(--text-muted); text-transform: uppercase; }
+  .signal h3 { margin: 0; font-size: 1rem; font-family: var(--font-body); }
+  .signal p { margin: 0; font-size: 0.9rem; color: var(--text-muted); }
+  .faq { display: flex; flex-direction: column; gap: 18px; }
+  .faq-item h3 { font-family: var(--font-body); font-size: 1.02rem; margin: 0 0 6px; }
+  .faq-item p { margin: 0; color: var(--text-muted); }
+  .cta { background: var(--violet-soft); border: 1px solid color-mix(in srgb, var(--violet) 35%, var(--border)); border-radius: 10px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px; }
+  .cta a.btn { align-self: flex-start; font-weight: 600; background: var(--violet); color: #fff; text-decoration: none; padding: 9px 18px; border-radius: 7px; font-size: 0.92rem; }
+  .cta a.btn:hover { background: #6a48ee; }
+  footer { border-top: 1px solid var(--border); padding-top: 20px; display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  footer p { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
+  footer a { color: var(--violet); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  a:focus-visible { outline: 2px solid var(--violet); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <div class="brand">SecureAI-<strong>SCAN</strong> · docs</div>
+    <a href="index.html">← MCP X-Ray tool</a>
+  </div>
+
+  <div>
+    <div class="eyebrow">MCP security</div>
+    <h1>How to detect MCP tool poisoning</h1>
+    <p class="dek">MCP tool poisoning hides an instruction to the agent inside a tool's description field — the text a model reads to decide how to call a tool, not the code you'd normally review. Here's what to look for and how to check it before you run a server.</p>
+  </div>
+
+  <article>
+    <div class="callout">
+      <p><strong>Short answer:</strong> read every tool description for invisible Unicode, phrasing directed at the agent instead of the user ("ignore previous instructions," "don't tell the user"), and instructions to read credential files or send data to a URL. Do this before the server runs — the payload activates the moment an agent loads the description into context, regardless of whether you ever call the tool it's attached to.</p>
+    </div>
+
+    <h2>Why this bypasses normal code review</h2>
+    <p>A tool's handler function can be completely benign while its <code>description</code> string carries the attack. MCP clients pass that description straight into the model's context on every turn so the agent knows when the tool is relevant — which means the description is executable in the sense that matters: a capable model treats plausible-sounding instructions in its context as instructions, regardless of which field they came from. Reviewing only the function body misses this entirely, because nothing in the handler changed.</p>
+
+    <h2>The three signals to check for</h2>
+    <div class="signals">
+      <div class="signal">
+        <span class="rule-id">Invisible Unicode</span>
+        <h3>Characters your eyes skip, the model doesn't</h3>
+        <p>Zero-width joiners (U+200B–U+200D), bidirectional override characters (U+202A–U+202E), and the Unicode tags block (U+E0000–U+E007F) can splice hidden text into an otherwise normal-looking description. It renders as nothing or as ordinary text in most editors, but the tokenizer still sees it.</p>
+      </div>
+      <div class="signal">
+        <span class="rule-id">Agent-directed phrasing</span>
+        <h3>Instructions aimed at the model, not you</h3>
+        <p>Real documentation explains what a tool does. Poisoned descriptions instead say things like "ignore previous instructions," "do not mention this to the user," or wrap directives in pseudo-system tags like <code>&lt;IMPORTANT&gt;</code> — language with no reason to exist except to steer the agent's next action.</p>
+      </div>
+      <div class="signal">
+        <span class="rule-id">Credential reads / exfil instructions</span>
+        <h3>The actual payload</h3>
+        <p>Look for instructions to read <code>~/.ssh/id_rsa</code>, <code>.env</code>, or <code>.aws/credentials</code>, paired with an instruction to send the result to an external URL. This pairing — read, then send — is the shape of nearly every real tool-poisoning incident, not two unrelated red flags.</p>
+      </div>
+    </div>
+
+    <h2>Check it yourself</h2>
+    <p>Paste a tool description, an <code>.mcp.json</code>, or server code into <a href="index.html">MCP X-Ray</a> — a free browser tool that runs these three checks client-side, nothing you paste leaves the page. For scanning an entire repository or MCP server before installing it, the <a href="https://github.com/akanthed/SecureAI-Scan">SecureAI-Scan</a> CLI runs the same checks (plus prompt-injection dataflow tracing and dependency advisories) with a single command:</p>
+    <p><code>npx secureai-scan@0.9.0 mcp owner/repo</code></p>
+
+    <div class="cta">
+      <p><strong>Try it now</strong> — paste a tool description and see the checks run in real time, entirely in your browser.</p>
+      <a class="btn" href="index.html">Open MCP X-Ray →</a>
+    </div>
+
+    <h2>Frequently asked questions</h2>
+    <div class="faq">
+      <div class="faq-item">
+        <h3>What is MCP tool poisoning?</h3>
+        <p>An attack where an MCP server's tool description contains hidden instructions aimed at the agent reading it, not documentation for the human operator. Because the description loads into the model's context on every relevant call, it can steer an agent into reading credentials or exfiltrating data without the payload ever touching the tool's actual code.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Can this happen without changing the tool's code?</h3>
+        <p>Yes — that's what makes it hard to catch with normal code review. The handler function can stay untouched while the description string carries the entire attack.</p>
+      </div>
+      <div class="faq-item">
+        <h3>Is this the same as the postmark-mcp backdoor?</h3>
+        <p>Related but different. postmark-mcp was a malicious code change shipped in a package update. Tool poisoning is the description-field attack specifically — no code change required.</p>
+      </div>
+    </div>
+  </article>
+
+  <footer>
+    <p>Part of <a href="https://github.com/akanthed/SecureAI-Scan">SecureAI-Scan</a>, an open-source static scanner for LLM, MCP, and RAG security risks.</p>
+    <a href="prompt-injection-detection.html">Next: how to detect prompt injection →</a>
+  </footer>
+
+</div>
+</body>
+</html>

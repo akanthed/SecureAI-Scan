@@ -617,6 +617,52 @@ setup: "run npm install"`,
 // Good — advisory-checked alternative, pinned
 "dependencies": { "postmark": "4.0.5" }`,
   },
+  LLC001: {
+    summary: "A LiteLLM proxy config.yaml has a literal secret value instead of an env reference.",
+    whyRisky:
+      "LiteLLM proxy config files are routinely committed and shared across a team. A credential written directly into the config is exposed to everyone with repo access and every process that reads the file.",
+    howExploited:
+      "Anyone who clones the repo (or any tool that reads config.yaml) obtains a live provider API key, proxy master key, or salt key.",
+    howToFix:
+      "Reference the environment via LiteLLM's os.environ/VAR_NAME convention instead of inlining, and rotate the exposed credential immediately.",
+    codeExample: `# Bad (config.yaml)
+litellm_params:
+  api_key: "sk-live-4f9a8b7c6d5e4f3a2b1c"
+
+# Good
+litellm_params:
+  api_key: os.environ/OPENAI_API_KEY`,
+  },
+  LLC002: {
+    summary: "A LiteLLM proxy routes to a provider api_base over plaintext HTTP.",
+    whyRisky:
+      "Requests, responses, and header credentials to a non-localhost endpoint travel unencrypted. An on-path attacker can read the traffic or tamper with it.",
+    howExploited:
+      "On a shared network, an attacker intercepts the HTTP traffic between the proxy and the provider, reading API keys and prompt/completion content.",
+    howToFix: "Use https:// for every non-localhost provider api_base URL.",
+    codeExample: `# Bad (config.yaml)
+litellm_params:
+  api_base: "http://internal-llm.example.com/v1"
+
+# Good
+litellm_params:
+  api_base: "https://internal-llm.example.com/v1"`,
+  },
+  LLC003: {
+    summary: "A LiteLLM proxy config.yaml has no guardrails: section.",
+    whyRisky:
+      "This proxy routes models with no pre/post-call checks for PII, prompt injection, or content moderation. Absence of an optional feature is a nudge, not a proven gap — shown only with --paranoid.",
+    howExploited:
+      "Not directly exploitable on its own; it's the absence of a mitigating control that a proxy handling untrusted input would benefit from.",
+    howToFix:
+      "Add a guardrails: section (top-level or under litellm_settings) if this proxy handles untrusted input.",
+    codeExample: `# Good (config.yaml)
+guardrails:
+  - guardrail_name: "pii-mask"
+    litellm_params:
+      guardrail: presidio
+      mode: pre_call`,
+  },
 };
 
 export class StaticExplainer implements Explainer {

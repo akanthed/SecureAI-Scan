@@ -4,4 +4,12 @@
     <loc>https://akanthed.github.io/SecureAI-Scan/</loc>
     <lastmod>2026-08-05</lastmod>
   </url>
+  <url>
+    <loc>https://akanthed.github.io/SecureAI-Scan/mcp-tool-poisoning.html</loc>
+    <lastmod>2026-08-14</lastmod>
+  </url>
+  <url>
+    <loc>https://akanthed.github.io/SecureAI-Scan/prompt-injection-detection.html</loc>
+    <lastmod>2026-08-14</lastmod>
+  </url>
 </urlset>
