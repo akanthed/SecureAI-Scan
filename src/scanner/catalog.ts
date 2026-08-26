@@ -330,6 +330,15 @@ export const RULE_CATALOG: Record<string, RuleCatalogEntry> = {
     "Keep MCP server commands and arguments in static, server-side configuration; never build them from request data.",
     "Art. 15 (cybersecurity)",
   ),
+  MCP011: entry(
+    "MCP011",
+    "External data returned as MCP tool result without validation",
+    "high",
+    "LLM01",
+    "A malicious or compromised external source (webhook, unauthenticated ingest endpoint, error-tracking DSN) can inject instructions through a tool response the agent treats as trusted output.",
+    "Validate and sanitize external response content before returning it as a tool result; restrict the return shape with a schema.",
+    "Art. 15 (cybersecurity)",
+  ),
   SKL001: entry(
     "SKL001",
     "Invisible Unicode in agent skill file",

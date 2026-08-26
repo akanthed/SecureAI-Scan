@@ -22,6 +22,7 @@ import {
   ruleMcpInjectionPhrases,
   ruleMcpInvisibleUnicode,
 } from "./mcp-tool-poisoning.js";
+import { ruleMcpUntrustedToolSource } from "./mcp-untrusted-tool-source.js";
 // Vector/RAG rules
 import { ruleVecSearchNoAccessControl } from "./vec-search-no-access-control.js";
 import { ruleVecUnboundedSearch } from "./vec-unbounded-search.js";
@@ -52,6 +53,8 @@ export const RULES: Rule[] = [
   ruleMcpInvisibleUnicode,
   ruleMcpInjectionPhrases,
   ruleMcpCrossToolShadowing,
+  // MCP tool-source rule (MCP011)
+  ruleMcpUntrustedToolSource,
   // Vector/RAG rules (VEC001–VEC004)
   ruleVecSearchNoAccessControl,
   ruleVecUnboundedSearch,

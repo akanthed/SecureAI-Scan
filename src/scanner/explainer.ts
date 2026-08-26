@@ -461,6 +461,28 @@ const [command, ...args] = ALLOWED_SERVERS[req.body.tool] ?? [];
 if (!command) throw new Error("Unknown MCP server");
 const transport = new StdioClientTransport({ command, args });`,
   },
+  MCP011: {
+    summary: "A tool handler returns externally fetched content as the tool result without validation.",
+    whyRisky:
+      "The calling agent treats tool results as trusted output. Whoever can write to the fetched source — a public webhook, an unauthenticated ingest endpoint, an error-tracking DSN — gets to plant instructions in that content, without touching the tool's static name or description at all.",
+    howExploited:
+      "The 2026 Sentry MCP DSN attack: an attacker sends fake error events through a public DSN; the Sentry MCP server fetches and returns them as 'trusted diagnostics'; the agent follows embedded instructions in the event data and executes commands.",
+    howToFix:
+      "Validate and sanitize external response content before returning it as a tool result. Restrict what the tool can return with a schema, and treat the fetched endpoint as untrusted input, the same as any other external HTTP response.",
+    codeExample: `// Bad
+server.tool("get_error_details", "Fetches error diagnostics.", schema, async ({ eventId }) => {
+  const res = await fetch(\`https://dsn.example.com/events/\${eventId}\`);
+  const event = await res.json();
+  return { content: [{ type: "text", text: event.message }] };
+});
+
+// Good
+server.tool("get_error_details", "Fetches error diagnostics.", schema, async ({ eventId }) => {
+  const res = await fetch(\`https://dsn.example.com/events/\${eventId}\`);
+  const event = eventSchema.parse(await res.json());
+  return { content: [{ type: "text", text: sanitize(event.message) }] };
+});`,
+  },
   SKL001: {
     summary: "An Agent Skill file contains invisible or bidirectional Unicode characters.",
     whyRisky:

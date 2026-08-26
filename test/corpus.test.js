@@ -49,6 +49,8 @@ const EXPECTED_VULNERABLE = [
   ["MCP009", "vulnerable/tool_poisoning.py"],
   ["MCP002", "vulnerable/mcp_dynamic_url.ts"],
   ["MCP010", "vulnerable/mcp_dynamic_command.ts"],
+  ["MCP011", "vulnerable/mcp_untrusted_tool_source.ts"],
+  ["MCP011", "vulnerable/mcp_untrusted_tool_source.py"],
   ["SKL001", "vulnerable/skills/leaky-skill/SKILL.md"],
   ["SKL002", "vulnerable/skills/leaky-skill/SKILL.md"],
   ["SKL003", "vulnerable/skills/leaky-skill/SKILL.md"],
