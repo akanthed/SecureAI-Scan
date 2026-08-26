@@ -53,13 +53,29 @@ const REPOS = [
   { name: "typescript-sdk", url: "https://github.com/modelcontextprotocol/typescript-sdk.git" },
   { name: "servers", url: "https://github.com/modelcontextprotocol/servers.git" },
   { name: "ai", url: "https://github.com/vercel/ai.git" },
-  { name: "llama_index", url: "https://github.com/run-llama/llama_index.git" },
   { name: "anthropic-skills", url: "https://github.com/anthropics/skills.git" },
   { name: "cisco-skill-scanner", url: "https://github.com/cisco-ai-defense/skill-scanner.git" },
   // litellm added for LLC001-003 (litellm-config-scanner): the official repo
   // ships real proxy config.yaml examples under litellm/proxy/example_config_yaml
   // and docs, the only repo in this set that exercises those rules at all.
-  { name: "litellm", url: "https://github.com/BerriAI/litellm.git" },
+  // Sparse-checked to litellm/proxy/ only (~1.7k files vs. ~5.7k for the full
+  // monorepo) — the proxy subsystem is both where the LLC config examples live
+  // and where the historical AI003/MCP001/MCP002/VEC001 false positives were
+  // found (see CHANGELOG 0.10.0), so this keeps the same coverage that has
+  // actually produced findings without scanning the unrelated provider
+  // integrations, docs, and test suites that make up most of the repo.
+  { name: "litellm", url: "https://github.com/BerriAI/litellm.git", sparsePaths: ["litellm/proxy"] },
+  // llama_index sparse-checked to llama-index-core (the shared indexing/query
+  // engine code, where most VEC001 baseline findings live) plus
+  // llama-index-integrations/vector_stores (the subpackage VEC001 exists to
+  // cover) — skips llms/readers/embeddings/graph_stores/indices/retrievers
+  // integrations and docs, which make up the bulk of the ~10k-file monorepo
+  // but have never produced a VEC001 finding outside vector_stores/core.
+  {
+    name: "llama_index",
+    url: "https://github.com/run-llama/llama_index.git",
+    sparsePaths: ["llama-index-core", "llama-index-integrations/vector_stores"],
+  },
 ];
 
 const fresh = process.argv.includes("--fresh");
@@ -94,7 +110,13 @@ for (const repo of targets) {
   }
   if (!fs.existsSync(dest)) {
     console.log(`Cloning ${repo.name}...`);
-    execSync(`git clone --depth 1 ${repo.url} "${dest}"`, { stdio: "inherit" });
+    if (repo.sparsePaths) {
+      execSync(`git clone --filter=blob:none --no-checkout --depth 1 ${repo.url} "${dest}"`, { stdio: "inherit" });
+      execSync(`git sparse-checkout set ${repo.sparsePaths.map((p) => `"${p}"`).join(" ")}`, { cwd: dest, stdio: "inherit" });
+      execSync(`git checkout`, { cwd: dest, stdio: "inherit" });
+    } else {
+      execSync(`git clone --depth 1 ${repo.url} "${dest}"`, { stdio: "inherit" });
+    }
   }
 
   console.log(`\n${"=".repeat(70)}\nScanning ${repo.name}\n${"=".repeat(70)}`);
