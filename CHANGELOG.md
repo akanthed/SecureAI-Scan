@@ -12,6 +12,7 @@ Found by scanning real third-party MCP servers (upstash/context7, cloudflare/mcp
 - **MCP009/SKL003** cross-tool-reference detection resolved all 7 residual false positives by requiring the referenced tool name to sit between the trigger word and the verb (a redirect), not merely appear anywhere in the sentence (a normal "use X for Y" mention).
 
 ### Added
+- **MCP011: untrusted tool source.** Flags an MCP tool handler that fetches from an external/unauthenticated source and returns the response as the tool result with no sanitization in between — the Sentry-MCP-DSN attack shape, where the tool server itself is the injection vector rather than the tool's static name/description (MCP007/MCP008).
 - **Pre-commit hook** (`.pre-commit-hooks.yaml`) — run this scanner as a pre-commit.com hook, catching findings before push instead of after.
 - **VS Code extension scaffold** (`vscode-extension/`) — wraps the CLI and reports findings as Problems-panel diagnostics; local-build install only, not yet published to the Marketplace.
 - Example compliance artifact (`docs/examples/THREAT_MODEL.example.md`) and a real terminal-recording demo.
