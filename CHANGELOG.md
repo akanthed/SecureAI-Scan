@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.11.0 — 2026-08-27
+
+Ecosystem audit of public MCP servers turns up and fixes five precision bugs, plus a pre-commit hook and a VS Code extension scaffold for the distribution roadmap.
+
+### Fixed
+Found by scanning real third-party MCP servers (upstash/context7, cloudflare/mcp-server-cloudflare, stripe/agent-toolkit, awslabs/mcp):
+- **AI002** flagged secrets outside any LLM context (missing `llmFile` gate on the "secret" branch) — fired on a bcrypt hash logged in a plain demo app and a non-secret constant merely named with "KEY".
+- **isTestFilePath** didn't recognize `eval(s)` as a non-production path segment, so an LLM-as-judge eval harness (vitest-evals) was scanned as a real request handler.
+- **MCP001** compared a system-prompt string against a tainted variable name with a plain substring search instead of requiring a real identifier reference, producing a `proven`/critical false positive on prose that merely used the word "tools".
+- **MCP009/SKL003** cross-tool-reference detection resolved all 7 residual false positives by requiring the referenced tool name to sit between the trigger word and the verb (a redirect), not merely appear anywhere in the sentence (a normal "use X for Y" mention).
+
+### Added
+- **Pre-commit hook** (`.pre-commit-hooks.yaml`) — run this scanner as a pre-commit.com hook, catching findings before push instead of after.
+- **VS Code extension scaffold** (`vscode-extension/`) — wraps the CLI and reports findings as Problems-panel diagnostics; local-build install only, not yet published to the Marketplace.
+- Example compliance artifact (`docs/examples/THREAT_MODEL.example.md`) and a real terminal-recording demo.
+
+### Also
+- `docs/RealWorldFindings.md` updated with the full ecosystem-audit writeup.
+- Roadmap corrected on competitive positioning (Invariant Labs/MCP-Scan → Snyk Agent Scan).
+
 ## 0.10.0 — 2026-08-19
 
 Static config scanning for LiteLLM Proxy, plus six false-positive/robustness bugs found and fixed by adding a large real-world repo (BerriAI/litellm) to the regression gate.
