@@ -169,7 +169,7 @@ secureai-scan mcp owner/mcp-server-repo        # or git, same as `skill`
 ```bash
 secureai-scan bom . --output AI_BOM.md   # AI Bill of Materials
 secureai-scan explain AI001              # why + exploit + fix example, for any rule
-secureai-scan threat-model .             # THREAT_MODEL.md with the OWASP coverage matrix
+secureai-scan threat-model .             # THREAT_MODEL.md with the OWASP coverage matrix — example: docs/examples/THREAT_MODEL.example.md
 secureai-scan init                       # policy file + CI workflow, one-time setup
 ```
 
