@@ -40,7 +40,15 @@ function isFetchLikeCall(node: Node): boolean {
   return FETCH_PATTERNS.some((p) => text.includes(p.replace("(", "")));
 }
 
-function collectFetchDerivedIdentifiers(functionNode: Node): Set<string> {
+/**
+ * Exported for mcp-untrusted-tool-source.ts (MCP011), which needs the same
+ * "resolved fetch call -> derived vars, multi-hop" derivation for MCP tool
+ * handlers. Reusing this instead of a rule-local reimplementation is the
+ * documented convention (see llm-rule-utils.ts's getPromptParts) — a
+ * rule-specific rewrite of the same logic is exactly what caused the AI007
+ * false-positive class.
+ */
+export function collectFetchDerivedIdentifiers(functionNode: Node): Set<string> {
   const derived = new Set<string>();
 
   // Iterate to a fixed point so multi-hop chains (page = await fetch(url);
