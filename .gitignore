@@ -11,6 +11,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.tgz
+*.vsix
 report.md
 report.html
 MARKETING.md

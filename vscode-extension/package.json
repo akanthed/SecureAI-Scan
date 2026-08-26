@@ -1,0 +1,99 @@
+{
+  "name": "secureai-scan-vscode",
+  "displayName": "SecureAI-Scan",
+  "description": "Offline LLM/MCP/RAG security scanner — prompt injection, tool poisoning, RAG misconfig — with dataflow evidence, right in the editor.",
+  "version": "0.1.0",
+  "publisher": "akanthed",
+  "license": "MIT",
+  "author": "Akshay Kanthed",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/akanthed/SecureAI-Scan.git",
+    "directory": "vscode-extension"
+  },
+  "homepage": "https://github.com/akanthed/SecureAI-Scan#readme",
+  "bugs": {
+    "url": "https://github.com/akanthed/SecureAI-Scan/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0",
+    "node": ">=22.12"
+  },
+  "categories": ["Linters", "Programming Languages"],
+  "keywords": [
+    "security",
+    "ai",
+    "llm",
+    "prompt-injection",
+    "mcp",
+    "model-context-protocol",
+    "rag",
+    "owasp",
+    "agent-security"
+  ],
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onLanguage:python",
+    "workspaceContains:**/.mcp.json",
+    "workspaceContains:**/SKILL.md"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "secureaiScan.scanWorkspace",
+        "title": "SecureAI-Scan: Scan Workspace"
+      },
+      {
+        "command": "secureaiScan.scanFile",
+        "title": "SecureAI-Scan: Scan Current File's Project"
+      },
+      {
+        "command": "secureaiScan.clearFindings",
+        "title": "SecureAI-Scan: Clear Findings"
+      }
+    ],
+    "configuration": {
+      "title": "SecureAI-Scan",
+      "properties": {
+        "secureaiScan.scanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Re-run the scan whenever a TS/JS/Python/MCP-config/Agent-Skill file is saved."
+        },
+        "secureaiScan.paranoid": {
+          "type": "boolean",
+          "default": false,
+          "description": "Include heuristic-tier findings (matches the CLI's --paranoid flag). Off by default — same precision contract as the CLI."
+        },
+        "secureaiScan.minSeverity": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"],
+          "default": "low",
+          "description": "Only show findings at or above this severity."
+        },
+        "secureaiScan.cliPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a secureai-scan CLI entry point (e.g. dist/index.js) to use instead of the version bundled with this extension. Leave empty to use the bundled CLI."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "package": "npm run build && vsce package -o secureai-scan.vsix"
+  },
+  "dependencies": {
+    "secureai-scan": "^0.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.7.0"
+  }
+}
