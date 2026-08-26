@@ -101,7 +101,7 @@ If you already run Semgrep or GHAS, keep them — add SecureAI-Scan for the risk
 
 `secureai-scan scan .` end to end, real output against a real (small, deliberately vulnerable) file — [source](docs/demo-source):
 
-<img src="docs/demo.svg" alt="Terminal recording of secureai-scan scan . finding a traced prompt-injection vulnerability" width="700">
+<img src="docs/secure.gif" alt="Terminal recording of secureai-scan scan . finding a traced prompt-injection vulnerability" width="700">
 
 Attack shapes the scanner traces end to end:
 
