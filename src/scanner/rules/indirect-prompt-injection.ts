@@ -5,19 +5,19 @@ import { isLikelyLlmCall } from "./llm-rule-utils.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath, hasSanitizationNearby } from "../confidence.js";
 import type { Evidence } from "../types.js";
 
-// HTTP client patterns that fetch external content
-const FETCH_PATTERNS = [
-  "fetch(",
-  "axios.get",
-  "axios.post",
-  "axios.request",
-  "http.get",
-  "https.get",
-  "got(",
-  "request(",
-  "superagent",
-  "ky(",
-];
+// HTTP client functions callable bare: fetch(url), got(url), ky(url), request(url, cb).
+const BARE_FETCH_NAMES = new Set(["fetch", "got", "ky", "request"]);
+
+// HTTP client method calls: base object -> allowed method names. A Map, not
+// a plain object — a base identifier literally named `constructor`,
+// `toString`, etc. (seen in minified bundled JS) resolves to an
+// Object.prototype value on a plain-object lookup instead of undefined.
+const PROPERTY_FETCH_CALLS: Map<string, Set<string>> = new Map([
+  ["axios", new Set(["get", "post", "put", "patch", "delete", "request"])],
+  ["http", new Set(["get", "request"])],
+  ["https", new Set(["get", "request"])],
+  ["superagent", new Set(["get", "post", "put", "patch", "delete"])],
+]);
 
 // Response extraction — property/method names for content pulled off an
 // HTTP response object.
@@ -30,14 +30,24 @@ function unwrapAwait(node: Node): Node {
 
 /**
  * True only for an actual call expression whose callee is a known HTTP
- * client function/method — not a substring match against arbitrary
- * initializer text (which previously matched things like `{ fetch: true }`
- * or a var named `prefetchedIds`).
+ * client function/method, matched by exact identifier/property name — not
+ * a substring match against the callee's text. A substring check on
+ * "request" previously matched `extra.sendRequest(...)` (an MCP
+ * protocol call to the client, e.g. sampling/elicitation), because
+ * "sendRequest" contains "request" as a substring.
  */
 function isFetchLikeCall(node: Node): boolean {
   if (!Node.isCallExpression(node)) return false;
-  const text = node.getExpression().getText().toLowerCase();
-  return FETCH_PATTERNS.some((p) => text.includes(p.replace("(", "")));
+  const expr = node.getExpression();
+  if (Node.isIdentifier(expr)) {
+    return BARE_FETCH_NAMES.has(expr.getText());
+  }
+  if (Node.isPropertyAccessExpression(expr)) {
+    const baseText = expr.getExpression().getText().split(".").pop() ?? "";
+    const allowedMethods = PROPERTY_FETCH_CALLS.get(baseText.toLowerCase());
+    return allowedMethods?.has(expr.getName().toLowerCase()) ?? false;
+  }
+  return false;
 }
 
 /**
