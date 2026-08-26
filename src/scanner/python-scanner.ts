@@ -17,6 +17,7 @@ import {
   pythonNodeContainsText,
   pythonTargetText,
   type PythonCallNode,
+  type PythonFunctionNode,
   type PythonNode,
 } from "./python-ast.js";
 
@@ -208,12 +209,16 @@ function pythonStringValue(node: PythonNode): string {
   return text.slice(start, end);
 }
 
+const MCP_TOOL_DECORATOR = /@\s*[\w.]*\.?tool(?:\s*\(|\s*$)/;
+
+function isMcpToolFunction(fn: PythonFunctionNode): boolean {
+  return fn.decorators.some((d) => MCP_TOOL_DECORATOR.test(d.text));
+}
+
 function collectPyTools(src: PythonSource): PyToolDefinition[] {
   const tools: PyToolDefinition[] = [];
   for (const fn of src.ast.functions) {
-    const decorator = fn.decorators.find((candidate) =>
-      /@\s*[\w.]*\.?tool(?:\s*\(|\s*$)/.test(candidate.text),
-    );
+    const decorator = fn.decorators.find((candidate) => MCP_TOOL_DECORATOR.test(candidate.text));
     if (!decorator) continue;
 
     let name = fn.name;
@@ -908,6 +913,93 @@ function checkMCP008(src: PythonSource, i: number, file: string, ctx: FileContex
   return null;
 }
 
+/**
+ * Fixed-point propagation from a seed set of variable names through
+ * assignments in `scope` — e.g. `resp = requests.get(url)` seeds `resp`,
+ * then `data = resp.json()` picks up `data` because its RHS references
+ * `resp`. Same shape as collectRequestTaintedVars above, seeded from a
+ * specific fetch call's assignment targets instead of REQUEST_PATTERNS.
+ */
+function collectPyDerivedFromVar(
+  src: PythonSource,
+  scope: PythonNode,
+  seed: Set<string>,
+  upToLine: number,
+): Set<string> {
+  const derived = new Set(seed);
+  const assignments = src.ast.assignments.filter(
+    (a) =>
+      a.node.startIndex >= scope.startIndex &&
+      a.node.endIndex <= scope.endIndex &&
+      a.node.startPosition.row <= upToLine,
+  );
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    for (const assignment of assignments) {
+      if (![...derived].some((v) => pythonNodeContainsText(assignment.value, v))) continue;
+      for (const target of assignment.targets) {
+        const t = pythonTargetText(target);
+        if (derived.has(t)) continue;
+        derived.add(t);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return derived;
+}
+
+function checkMCP011(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
+  if (!ctx.fileHasMcpServer) return null;
+  const fetchCall = src.ast.callsAtLine(i).find((call) =>
+    /^(?:requests|httpx|urllib)(?:\.[\w]+)*\.(?:get|post|request)$/.test(pythonCallName(call)),
+  );
+  if (!fetchCall) return null;
+
+  const fn = src.ast.enclosingFunction(fetchCall.node);
+  if (!fn || !isMcpToolFunction(fn)) return null;
+
+  const assignment = src.ast.assignments.find(
+    (candidate) =>
+      candidate.node.startIndex <= fetchCall.node.startIndex &&
+      candidate.node.endIndex >= fetchCall.node.endIndex,
+  );
+  const seed = new Set<string>(assignment ? assignment.targets.map(pythonTargetText) : []);
+  const derived = collectPyDerivedFromVar(src, fn.body, seed, fn.body.endPosition.row);
+
+  const sinkReturn = pythonDescendants(fn.body, "return_statement").find((ret) => {
+    if (ret.startPosition.row < i) return false;
+    const containsFetchInline =
+      fetchCall.node.startIndex >= ret.startIndex && fetchCall.node.endIndex <= ret.endIndex;
+    const containsDerived = [...derived].some((v) => pythonNodeContainsText(ret, v));
+    return containsFetchInline || containsDerived;
+  });
+  if (!sinkReturn) return null;
+
+  const between = fn.body.text.slice(
+    Math.max(0, fetchCall.node.startIndex - fn.body.startIndex),
+    Math.max(0, sinkReturn.endIndex - fn.body.startIndex),
+  );
+  if (hasSanitization(between)) return null;
+
+  return {
+    ...findingBase(
+      "MCP011",
+      "External data returned as MCP tool result without validation",
+      "high",
+      file,
+      sinkReturn.startPosition.row + 1,
+    ),
+    summary: "MCP tool handler returns externally fetched content as the tool result without sanitization.",
+    description:
+      "The tool handler fetches from an external source and returns the response directly as the tool result. Whoever controls that source (a public webhook, an unauthenticated ingest endpoint, an error-tracking DSN) can inject instructions the calling agent treats as trusted tool output.",
+    recommendation:
+      "Validate and sanitize external response content before returning it as a tool result. Restrict the return shape with a schema, and treat the fetched endpoint as untrusted input.",
+    confidence: evidenceConfidence("likely"),
+    evidence: "likely",
+  };
+}
+
 function checkMCP009(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
   if (!ctx.fileHasMcpServer || !ctx.mcpToolNames || ctx.mcpToolNames.size < 2) return null;
   const def = ctx.mcpTools?.find((tool) => tool.decoratorLine === i);
@@ -959,6 +1051,7 @@ const PYTHON_RULES: RuleChecker[] = [
   checkMCP007,
   checkMCP008,
   checkMCP009,
+  checkMCP011,
 ];
 
 // ── File discovery ────────────────────────────────────────────────────────

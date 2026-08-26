@@ -24,13 +24,13 @@ const MCP_SERVER_MODULES = [
   (s: string) => s === "fastmcp",
 ];
 
-const TOOL_METHODS = new Set(["tool", "registertool", "addtool"]);
+export const TOOL_METHODS = new Set(["tool", "registertool", "addtool"]);
 
 function isMcpServerModule(spec: string): boolean {
   return MCP_SERVER_MODULES.some((test) => test(spec));
 }
 
-function fileImportsMcpServerSdk(sourceFile: SourceFile): boolean {
+export function fileImportsMcpServerSdk(sourceFile: SourceFile): boolean {
   for (const imp of sourceFile.getImportDeclarations()) {
     if (isMcpServerModule(imp.getModuleSpecifierValue())) return true;
   }
