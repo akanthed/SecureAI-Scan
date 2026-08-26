@@ -59,6 +59,8 @@ Cannot out-engineer Cisco/Snyk on headcount. Can out-trust them on process.
 
 **Ecosystem audit.** Scan every public MCP server and published skill; publish results as a standing, dated report. This is how MCP-Scan built its following, it doubles as marketing, and it feeds the advisory list — the one asset that compounds and that a competitor can't shortcut without doing the same legwork. Today's `vercel/ai` triage is a miniature proof of this: a few hours of pointing the scanner at real code found five real, fixable bugs.
 
+First real round shipped 2026-08-26: six independent MCP servers not in the regression corpus (context7, mcp-server-cloudflare, supabase-mcp, firecrawl-mcp-server, agent-toolkit, awslabs/mcp), four more root-cause bugs found and fixed — including a `proven`/critical false positive, the worst-possible-tier miss — plus real confirmed findings (unpinned `@latest` MCP configs and a tenant-filter gap in `awslabs/mcp`) and two honestly-documented not-yet-fixed false-positive shapes. Full writeup in [`docs/RealWorldFindings.md`](docs/RealWorldFindings.md#an-ecosystem-audit-of-public-mcp-servers-found-three-more-false-positive-classes--and-one-provencritical-one). Not yet turned into the "standing" part — a recurring, dated cadence, and a decision on whether audited repos join the permanent `npm run regression` corpus, are still open.
+
 **Compliance packaging.** The OWASP LLM/ASI/MCP triple mapping and auto-generated `threat-model` coverage matrix already exist and are underused as a selling point — EU AI Act evidence generation is badly underserved by US-centric competitors. "Produces the artifact your auditor asks for" sells independently of rule-count comparisons.
 
 ## Honest competitive position
