@@ -64,12 +64,22 @@ Cannot out-engineer Cisco/Snyk on headcount. Can out-trust them on process.
 
 ## Honest competitive position
 
+**Correction (2026-08-26):** MCP-Scan (Invariant Labs) and Snyk agent-scan are not two competitors — Invariant Labs was acquired by Snyk in June 2025, and MCP-Scan was rebranded into Snyk's Agent Scan product. That's one competitor with both the 2k+-star open-source mindshare *and* Snyk's enterprise sales/distribution behind it, not two separate smaller ones. Treat it as a single combined entry below.
+
 | | Edge | Gap |
 |---|---|---|
-| Cisco skill-scanner | zero-config npm install, no cloud dependency, precision discipline | multi-engine behavioral + LLM analysis, funded team |
-| MCP-Scan (Invariant Labs) | broader scope (skills + RAG + code, not MCP-only), evidence tiers | mindshare, first-mover, 2k+ stars |
-| Snyk agent-scan | open source, transparent rules, no seat pricing | enterprise distribution, existing customer base |
+| Snyk Agent Scan (formerly MCP-Scan, Invariant Labs — acquired June 2025) | broader static scope (skills + RAG + code, not MCP-only), evidence tiers | mindshare (2k+ stars vs. our 19), first-mover, Snyk's existing enterprise customer base and sales motion |
+| Cisco skill-scanner / DefenseClaw | zero-config npm install, no cloud dependency, precision discipline | multi-engine behavioral + LLM-adjudicated analysis, a shipped VS Code extension, 6 output formats, bundled into Cisco's broader agent-governance platform, funded team, RSA 2026 launch visibility |
 
 **Not worth attempting:** a runtime/behavioral engine, general-purpose SAST/secret-scanning (explicitly out of scope — see `CLAUDE.md`), competing on raw rule count. Each loses on resources against funded competitors.
 
 **Positioning:** the scanner whose findings don't need triaging, that runs before you install anything, and that hands your auditor a document — not the scanner with the most rules.
+
+### Adoption gap (as of 2026-08-26)
+
+The technical comparison above still favors us on precision and dataflow-traced evidence. The gap that actually explains low adoption is distribution and trust signal, not detection quality:
+
+- **19 GitHub stars** (repo created 2026-02-05) vs. 2,000+ for Snyk Agent Scan. There is essentially no organic mindshare — no third-party blog coverage, no HN/Reddit threads, no comparison articles that mention this project unprompted.
+- **No IDE presence.** Cisco's scanner already ships a VS Code extension; ours is CLI/GitHub-Action only. The "ecosystem audit" and "VS Code / Cursor extension" items below are still the two highest-leverage unshipped items in this file for exactly that reason — they're the cheapest way to generate both external citations and an in-editor discovery moment.
+- **Single-maintainer trust ceiling.** Enterprise buyers weight "who backs this" heavily; Snyk and Cisco both answer that by default, we answer it with the release-assurance/precision-contract paper trail instead, which requires a reader who already trusts us enough to go check it.
+- **Compliance angle is a paragraph, not a shipped artifact.** The EU AI Act / OWASP mapping is a real differentiator per this doc's own "Compliance packaging" note, but there is no example generated audit artifact or landing page proving it out yet.
