@@ -48,6 +48,7 @@ No account, cloud upload, Python interpreter, or configuration required. TypeScr
 - [See it work](#see-it-work)
 - [Commands](#commands)
 - [GitHub Action](#github-action)
+- [Pre-commit hook](#pre-commit-hook)
 - [Rules](#rules)
 - [Architecture](#architecture)
 - [MCP server (use it from Claude)](#mcp-server-use-it-from-claude)
@@ -98,7 +99,9 @@ If you already run Semgrep or GHAS, keep them — add SecureAI-Scan for the risk
 
 ## See it work
 
-<!-- TODO: terminal recording of `secureai-scan scan .` end-to-end, from npx invocation to the evidence-tiered report. Keep it small (compress, or host as a GitHub release asset rather than a raw repo file). No demo GIF exists yet; don't add an <img>/markdown reference here until one is actually committed or hosted, or it renders as a broken image on GitHub. -->
+`secureai-scan scan .` end to end, real output against a real (small, deliberately vulnerable) file — [source](docs/demo-source):
+
+<img src="docs/demo.svg" alt="Terminal recording of secureai-scan scan . finding a traced prompt-injection vulnerability" width="700">
 
 Attack shapes the scanner traces end to end:
 
@@ -168,7 +171,7 @@ secureai-scan mcp owner/mcp-server-repo        # or git, same as `skill`
 ```bash
 secureai-scan bom . --output AI_BOM.md   # AI Bill of Materials
 secureai-scan explain AI001              # why + exploit + fix example, for any rule
-secureai-scan threat-model .             # THREAT_MODEL.md with the OWASP coverage matrix
+secureai-scan threat-model .             # THREAT_MODEL.md with the OWASP coverage matrix — example: docs/examples/THREAT_MODEL.example.md
 secureai-scan init                       # policy file + CI workflow, one-time setup
 ```
 
@@ -203,6 +206,25 @@ Scanning clean? Add the badge to your own README:
 
 ```md
 [![secureai-scan](https://img.shields.io/badge/secureai--scan-passing-brightgreen)](https://github.com/akanthed/SecureAI-Scan)
+```
+
+## Pre-commit hook
+
+Prefer catching findings before they're pushed? Add this repo as a [pre-commit](https://pre-commit.com) hook source instead of, or alongside, the GitHub Action:
+
+```yaml
+repos:
+  - repo: https://github.com/akanthed/SecureAI-Scan
+    rev: v0.10.0
+    hooks:
+      - id: secureai-scan
+```
+
+The hook scans the whole project on every commit (not just changed files — a dataflow trace into file A can depend on file B, which a partial scan would miss) and blocks the commit on `high`+ severity findings by default. Override the threshold in your own config:
+
+```yaml
+      - id: secureai-scan
+        args: ["--fail-on", "critical"]
 ```
 
 ## Rules

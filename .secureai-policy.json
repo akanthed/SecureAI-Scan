@@ -1,10 +1,10 @@
 {
   "$comment": "SecureAI-Scan policy file — commit this to your repo. See: secureai-scan explain <RULE_ID>",
-  "$skipPathsRationale": "test-fixtures/ is deliberately vulnerable code that the suite requires to fire (see test/corpus.test.js, which scans it directly as its own root); .regression-cache/ holds repos cloned by npm run regression. Neither is this project's source.",
+  "$skipPathsRationale": "test-fixtures/ and docs/demo-source/ contain deliberately vulnerable code used by tests and documentation; .regression-cache/ holds repos cloned by npm run regression. None are this project's production source.",
   "minSeverity": "medium",
   "minConfidence": 0.45,
   "failOnSeverity": "high",
-  "skipPaths": ["test-fixtures", ".regression-cache"],
+  "skipPaths": ["test-fixtures", "docs/demo-source", ".regression-cache"],
   "blockedRules": [],
   "onlyRules": [],
   "requireOutputValidation": true

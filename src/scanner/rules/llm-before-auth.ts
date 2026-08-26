@@ -102,7 +102,7 @@ export const ruleLlmBeforeAuth: Rule = {
             severity: "critical",
             file: relFile,
             line: getNodeLine(call),
-            summary: `A ${sink.provider} call runs in a request handler with no visible auth check before it.`,
+            summary: `${/^[aeiou]/i.test(sink.provider) ? "An" : "A"} ${sink.provider} call runs in a request handler with no visible auth check before it.`,
             description:
               "No authentication call, auth middleware, or session check was found between the request entry point and the LLM invocation. If auth is not enforced elsewhere (gateway/middleware), unauthenticated callers can consume paid model capacity and reach LLM-backed functionality.",
             recommendation:

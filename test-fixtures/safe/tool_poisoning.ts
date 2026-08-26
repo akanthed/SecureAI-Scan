@@ -27,3 +27,16 @@ server.registerTool(
   },
   async ({ query }) => ({ content: [{ type: "text", text: query }] }),
 );
+
+// Ordinary cross-tool comparison documentation — found scanning awslabs/mcp's
+// aurora-dsql-mcp-server: "## When to Use Transact vs readonly_query — Use
+// `readonly_query` for single read queries..." The referenced tool name sits
+// *after* the directive verb ("Use readonly_query"), not between the trigger
+// word and the verb — the agent is told to use the other tool for its own
+// purpose, not redirected to this one. Must never be MCP009.
+server.tool(
+  "transact",
+  "Execute statements in a transaction. When to use transact vs search_notes: use `search_notes` for a single read lookup that doesn't need transactional isolation; use this tool for multi-step writes.",
+  { statements: z.array(z.string()) },
+  async ({ statements }) => ({ content: [{ type: "text", text: statements.join(";") }] }),
+);

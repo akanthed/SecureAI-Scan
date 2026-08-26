@@ -52,24 +52,38 @@ Cannot out-engineer Cisco/Snyk on headcount. Can out-trust them on process.
 
 ## Distribution (the actual growth plan)
 
-**The wedge is pre-install, not post-commit.** Shipped: `secureai-scan skill <target>` / `secureai-scan mcp <target>`. Next: get this into the places the decision actually gets made —
+**The wedge is pre-install, not post-commit.** Shipped: `secureai-scan skill <target>` / `secureai-scan mcp <target>`. Also shipped (2026-08-26): a `pre-commit` hook (`.pre-commit-hooks.yaml`, `scripts/precommit-entry.js`) alongside the existing GitHub Action — catches findings before a push, not just after.
+
+**VS Code / Cursor extension — scaffolded (2026-08-26), not published.** `vscode-extension/` wraps the CLI (bundled as a real npm dependency, no network calls at scan time — same offline guarantee as the CLI) and reports findings as Problems-panel diagnostics on save, with `Scan Workspace`/`Scan Current File's Project`/`Clear Findings` commands and a status-bar count. Validated: `tsc` compiles clean under `strict`, `vsce package` produces a real installable `.vsix` (5.47MB — mostly tree-sitter's native Python-parser bindings and ts-morph's bundled TypeScript compiler, both load-bearing, not bloat), and the diagnostic-mapping logic is checked against the CLI's actual `--output <file>.json` schema, not a guessed one. **Not done:** published nowhere — Marketplace publishing needs a publisher account/token this session doesn't have. Also open: bundling/minifying (`vsce` warns about 366 unbundled files; performance, not correctness), an icon, and Cursor-specific packaging if that turns out to differ from plain VS Code.
+
+Remaining distribution surface:
 
 - A Claude Code / MCP-server-side integration (the `mcp-server/index.js` this project already ships is the natural host — scan a skill from *inside* the agent, before it's trusted).
-- A VS Code / Cursor extension.
-- A `pre-commit` hook alongside the existing GitHub Action.
 
 **Ecosystem audit.** Scan every public MCP server and published skill; publish results as a standing, dated report. This is how MCP-Scan built its following, it doubles as marketing, and it feeds the advisory list — the one asset that compounds and that a competitor can't shortcut without doing the same legwork. Today's `vercel/ai` triage is a miniature proof of this: a few hours of pointing the scanner at real code found five real, fixable bugs.
+
+First real round shipped 2026-08-26: six independent MCP servers not in the regression corpus (context7, mcp-server-cloudflare, supabase-mcp, firecrawl-mcp-server, agent-toolkit, awslabs/mcp), five root-cause bugs found and fixed — including a `proven`/critical false positive, the worst-possible-tier miss, and a same-day follow-up that closed the remaining seven `MCP009`/`SKL003` false positives properly (distinguishing "tool referenced as the trigger clause's subject" — the real attack shape — from "tool referenced as the verb's object" — ordinary comparison docs — rather than a shortcut that would have cost recall on the real attack) — plus real confirmed findings (unpinned `@latest` MCP configs and a tenant-filter gap in `awslabs/mcp`). Full writeup in [`docs/RealWorldFindings.md`](docs/RealWorldFindings.md#an-ecosystem-audit-of-public-mcp-servers-found-three-more-false-positive-classes--and-one-provencritical-one). Not yet turned into the "standing" part — a recurring, dated cadence, and a decision on whether audited repos join the permanent `npm run regression` corpus, are still open.
 
 **Compliance packaging.** The OWASP LLM/ASI/MCP triple mapping and auto-generated `threat-model` coverage matrix already exist and are underused as a selling point — EU AI Act evidence generation is badly underserved by US-centric competitors. "Produces the artifact your auditor asks for" sells independently of rule-count comparisons.
 
 ## Honest competitive position
 
+**Correction (2026-08-26):** MCP-Scan (Invariant Labs) and Snyk agent-scan are not two competitors — Invariant Labs was acquired by Snyk in June 2025, and MCP-Scan was rebranded into Snyk's Agent Scan product. That's one competitor with both the 2k+-star open-source mindshare *and* Snyk's enterprise sales/distribution behind it, not two separate smaller ones. Treat it as a single combined entry below.
+
 | | Edge | Gap |
 |---|---|---|
-| Cisco skill-scanner | zero-config npm install, no cloud dependency, precision discipline | multi-engine behavioral + LLM analysis, funded team |
-| MCP-Scan (Invariant Labs) | broader scope (skills + RAG + code, not MCP-only), evidence tiers | mindshare, first-mover, 2k+ stars |
-| Snyk agent-scan | open source, transparent rules, no seat pricing | enterprise distribution, existing customer base |
+| Snyk Agent Scan (formerly MCP-Scan, Invariant Labs — acquired June 2025) | broader static scope (skills + RAG + code, not MCP-only), evidence tiers | mindshare (2k+ stars vs. our 19), first-mover, Snyk's existing enterprise customer base and sales motion |
+| Cisco skill-scanner / DefenseClaw | zero-config npm install, no cloud dependency, precision discipline | multi-engine behavioral + LLM-adjudicated analysis, a shipped VS Code extension, 6 output formats, bundled into Cisco's broader agent-governance platform, funded team, RSA 2026 launch visibility |
 
 **Not worth attempting:** a runtime/behavioral engine, general-purpose SAST/secret-scanning (explicitly out of scope — see `CLAUDE.md`), competing on raw rule count. Each loses on resources against funded competitors.
 
 **Positioning:** the scanner whose findings don't need triaging, that runs before you install anything, and that hands your auditor a document — not the scanner with the most rules.
+
+### Adoption gap (as of 2026-08-26)
+
+The technical comparison above still favors us on precision and dataflow-traced evidence. The gap that actually explains low adoption is distribution and trust signal, not detection quality:
+
+- **19 GitHub stars** (repo created 2026-02-05) vs. 2,000+ for Snyk Agent Scan. There is essentially no organic mindshare — no third-party blog coverage, no HN/Reddit threads, no comparison articles that mention this project unprompted.
+- **No IDE presence.** Cisco's scanner already ships a VS Code extension; ours is CLI/GitHub-Action only. The "ecosystem audit" and "VS Code / Cursor extension" items below are still the two highest-leverage unshipped items in this file for exactly that reason — they're the cheapest way to generate both external citations and an in-editor discovery moment.
+- **Single-maintainer trust ceiling.** Enterprise buyers weight "who backs this" heavily; Snyk and Cisco both answer that by default, we answer it with the release-assurance/precision-contract paper trail instead, which requires a reader who already trusts us enough to go check it.
+- **Compliance angle is a paragraph, not a shipped artifact.** The EU AI Act / OWASP mapping is a real differentiator per this doc's own "Compliance packaging" note, but there is no example generated audit artifact or landing page proving it out yet.

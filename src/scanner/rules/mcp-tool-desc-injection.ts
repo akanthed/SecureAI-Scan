@@ -5,6 +5,29 @@ import { evidenceConfidence, demoteEvidence, isTestFilePath, hasSanitizationNear
 import type { Evidence } from "../types.js";
 import { isLikelyLlmCall, getObjectProperty } from "./llm-rule-utils.js";
 
+/**
+ * Whether `node` actually *references* one of `tainted` as a real
+ * identifier — a template-literal interpolation (`${tools}`), a bare
+ * identifier, or a property-access root — as opposed to `node`'s source text
+ * merely containing the variable's name as a substring somewhere.
+ *
+ * Catches the false positive on cloudflare/mcp-server-cloudflare's
+ * `packages/eval-tools/src/runTask.ts`: a plain, static system-prompt string
+ * literal ("...use the tools available to you...") was flagged `proven`
+ * critical purely because a `tools` variable happened to exist in scope and
+ * the English word "tools" appears in the prose — no interpolation, no
+ * dataflow, just a substring collision. `getDescendantsOfKind` doesn't
+ * include `node` itself, so a bare identifier alias (`system: sysPrompt`)
+ * needs its own check.
+ */
+function referencesTaintedVar(node: Node, tainted: Set<string>): boolean {
+  if (Node.isIdentifier(node) && tainted.has(node.getText())) return true;
+  for (const id of node.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    if (tainted.has(id.getText())) return true;
+  }
+  return false;
+}
+
 // MCP / tool-registry listing call patterns
 const MCP_LISTING_METHODS = [
   "listtools",
@@ -82,14 +105,14 @@ function toolVarReachesSystemPrompt(fnNode: Node, tainted: Set<string>): Node | 
 
           const content = getObjectProperty(element, "content");
           if (!content) continue;
-          if ([...tainted].some((v) => content.getText().includes(v))) return content;
+          if (referencesTaintedVar(content, tainted)) return content;
         }
       }
 
       // Anthropic-style { system: `...${tools}...` }
       for (const key of ["system", "systemPrompt", "system_prompt"]) {
         const prop = getObjectProperty(firstArg, key);
-        if (prop && [...tainted].some((v) => prop.getText().includes(v))) return prop;
+        if (prop && referencesTaintedVar(prop, tainted)) return prop;
       }
     }
   }

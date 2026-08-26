@@ -119,9 +119,15 @@ export const ruleSensitivePromptLogging: Rule = {
           if (argKind === "prompt") kind = "prompt";
         }
         if (!kind) continue;
-        // "prompt"-named variables only matter in files that use an LLM SDK;
-        // this is what keeps ordinary web-app logging out of the results.
-        if (kind === "prompt" && !llmFile) continue;
+        // Both kinds only matter in files that actually talk to an LLM — this
+        // rule is LLM-secret-in-prompt-pipeline logging, not a general
+        // secret-scanner (out of scope: see CLAUDE.md's precision contract).
+        // Only the "prompt" branch was gated here; a stripe/agent-toolkit
+        // benchmark demo app with zero LLM SDK imports fired on a
+        // console.log of a bcrypt-hashed password in a React form handler —
+        // exactly the general-purpose-secret-scanning false positive class
+        // this scanner explicitly disclaims being.
+        if (!llmFile) continue;
 
         let evidence: Evidence = kind === "secret" ? "likely" : "likely";
         if (testFile) evidence = demoteEvidence(evidence);
