@@ -9,6 +9,8 @@
  * weather. Do not pass PII.") must never fire.
  */
 
+import { identifierTokens } from "./confidence.js";
+
 export interface InvisibleCharHit {
   /** Unicode code point, formatted U+XXXX. */
   codePoint: string;
@@ -153,12 +155,30 @@ export function sentences(text: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+/**
+ * True when every word in `candidate` already appears in `ownName` — i.e.
+ * `candidate` is describing the same thing `ownName` names, not a distinct
+ * tool/skill. Catches aws-mcp's "amazon aurora dsql" skill referencing
+ * "dsql": the word is that skill's own product name, appearing constantly
+ * throughout its own documentation (`**When:** Always load for guidance
+ * using or updating the DSQL MCP server`), and a *different* skill in the
+ * same monorepo happens to be registered under the bare name "dsql" — a
+ * naming collision, not this skill steering a foreign one.
+ */
+function isSelfDescribing(ownName: string, candidate: string): boolean {
+  const ownTokens = new Set(identifierTokens(ownName));
+  const candidateTokens = identifierTokens(candidate);
+  return candidateTokens.length > 0 && candidateTokens.every((t) => ownTokens.has(t));
+}
+
 export function findCrossToolReference(
   text: string,
   ownName: string,
   allToolNames: Iterable<string>,
 ): CrossToolHit | undefined {
-  const names = [...allToolNames].filter((n) => n !== ownName && n.length >= 4);
+  const names = [...allToolNames].filter(
+    (n) => n !== ownName && n.length >= 4 && !isSelfDescribing(ownName, n),
+  );
   if (names.length === 0) return undefined;
 
   for (const segment of sentences(text)) {

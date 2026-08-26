@@ -29,7 +29,12 @@ export function demoteEvidence(evidence: Evidence): Evidence {
 // (no leading "/" in a relative path, e.g. "tests/foo.ts") are still caught.
 // Both affix positions are needed: suffix-only missed "test-fixtures", the
 // layout this repo itself uses.
-const NON_PRODUCTION_WORD = "tests?|e2e|examples?|demos?|samples?|fixtures?|mocks?|stubs?";
+// "evals?" added after cloudflare/mcp-server-cloudflare's packages/eval-tools/
+// tripped AI001: an LLM-as-judge scoring harness (vitest-evals) that
+// interpolates its own `input`/`expected`/`output` triple into a prompt to
+// grade factuality — structurally identical to real prompt injection, but a
+// same-repo eval harness, not a request handler.
+const NON_PRODUCTION_WORD = "tests?|e2e|examples?|demos?|samples?|fixtures?|mocks?|stubs?|evals?";
 const NON_PRODUCTION_SEGMENT = new RegExp(
   `^(?:__(?:${NON_PRODUCTION_WORD})__|playground|(?:${NON_PRODUCTION_WORD})` +
     `|.*[-_](?:${NON_PRODUCTION_WORD})|(?:${NON_PRODUCTION_WORD})[-_].*)$`,
