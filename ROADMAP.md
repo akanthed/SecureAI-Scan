@@ -52,11 +52,10 @@ Cannot out-engineer Cisco/Snyk on headcount. Can out-trust them on process.
 
 ## Distribution (the actual growth plan)
 
-**The wedge is pre-install, not post-commit.** Shipped: `secureai-scan skill <target>` / `secureai-scan mcp <target>`. Next: get this into the places the decision actually gets made —
+**The wedge is pre-install, not post-commit.** Shipped: `secureai-scan skill <target>` / `secureai-scan mcp <target>`. Also shipped (2026-08-26): a `pre-commit` hook (`.pre-commit-hooks.yaml`, `scripts/precommit-entry.js`) alongside the existing GitHub Action — catches findings before a push, not just after. Next: get this into the remaining places the decision actually gets made —
 
 - A Claude Code / MCP-server-side integration (the `mcp-server/index.js` this project already ships is the natural host — scan a skill from *inside* the agent, before it's trusted).
 - A VS Code / Cursor extension.
-- A `pre-commit` hook alongside the existing GitHub Action.
 
 **Ecosystem audit.** Scan every public MCP server and published skill; publish results as a standing, dated report. This is how MCP-Scan built its following, it doubles as marketing, and it feeds the advisory list — the one asset that compounds and that a competitor can't shortcut without doing the same legwork. Today's `vercel/ai` triage is a miniature proof of this: a few hours of pointing the scanner at real code found five real, fixable bugs.
 

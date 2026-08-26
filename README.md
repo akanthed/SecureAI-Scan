@@ -48,6 +48,7 @@ No account, cloud upload, Python interpreter, or configuration required. TypeScr
 - [See it work](#see-it-work)
 - [Commands](#commands)
 - [GitHub Action](#github-action)
+- [Pre-commit hook](#pre-commit-hook)
 - [Rules](#rules)
 - [Architecture](#architecture)
 - [MCP server (use it from Claude)](#mcp-server-use-it-from-claude)
@@ -203,6 +204,25 @@ Scanning clean? Add the badge to your own README:
 
 ```md
 [![secureai-scan](https://img.shields.io/badge/secureai--scan-passing-brightgreen)](https://github.com/akanthed/SecureAI-Scan)
+```
+
+## Pre-commit hook
+
+Prefer catching findings before they're pushed? Add this repo as a [pre-commit](https://pre-commit.com) hook source instead of, or alongside, the GitHub Action:
+
+```yaml
+repos:
+  - repo: https://github.com/akanthed/SecureAI-Scan
+    rev: v0.10.0
+    hooks:
+      - id: secureai-scan
+```
+
+The hook scans the whole project on every commit (not just changed files — a dataflow trace into file A can depend on file B, which a partial scan would miss) and blocks the commit on `high`+ severity findings by default. Override the threshold in your own config:
+
+```yaml
+      - id: secureai-scan
+        args: ["--fail-on", "critical"]
 ```
 
 ## Rules
