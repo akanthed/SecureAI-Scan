@@ -13,8 +13,10 @@ export async function handler(req: { url: string }) {
 // secret-scanner check masquerading as an AI-specific rule, contradicting
 // this project's own scope contract. Found scanning stripe/agent-toolkit's
 // benchmarks/furever demo app (EditAccountButton.tsx): a React account-edit
-// form logging a bcrypt-hashed password from an API response, zero LLM
-// imports anywhere in the file.
+// form handling a bcrypt-hashed password from an API response, zero LLM
+// imports anywhere in the file. Log only whether the response included the
+// field, since logging its value would be unsafe even though AI002 is out of
+// scope without an LLM pipeline.
 import bcrypt from "bcryptjs";
 
 export async function onSubmit(values: { email: string; password: string }) {
@@ -24,7 +26,7 @@ export async function onSubmit(values: { email: string; password: string }) {
     body: JSON.stringify({ newEmail: values.email, newPassword }),
   });
   const { email: newEmail, password: returnedPassword } = await response.json();
-  console.log("response ok", newEmail, returnedPassword);
+  console.log("response ok", newEmail, returnedPassword !== undefined);
 }
 
 // Safe: a "key"-named constant that is a validation prefix, not a secret
