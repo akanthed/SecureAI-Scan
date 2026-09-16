@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "src/scanner/reporter.ts"
+        ],
+        "createdAt": "2026-09-16T11:53:56.255Z",
+        "reason": "severity-colored left border on finding cards is the standard security-report alert pattern (GitHub code scanning, Sentry, Snyk); pre-existing code not touched this session, kept as intentional severity signal"
+      },
+      {
+        "rule": "side-tab",
+        "value": "*",
+        "files": [
+          "docs/index.html"
+        ],
+        "createdAt": "2026-09-16T12:40:00.000Z",
+        "reason": "pre-existing .method-card left-border accent (violet/ember/danger per card), not touched this session — only the footer link was added; same sanctioned severity-accent pattern as reporter.ts"
+      }
+    ]
+  }
+}
