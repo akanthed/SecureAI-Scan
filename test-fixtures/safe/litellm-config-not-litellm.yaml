@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+model_list: "not the litellm proxy schema, just a string field"
+data:
+  api_key: this-would-be-a-hit-if-the-structural-gate-were-name-matching-only

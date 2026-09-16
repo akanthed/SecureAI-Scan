@@ -1,0 +1,60 @@
+name: "SecureAI-Scan"
+description: "Find AI/LLM security vulnerabilities in code, configs, and MCP setups with evidence and SARIF output"
+author: "Akshay Kanthed"
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  scanner-version:
+    description: "Exact secureai-scan npm version to install"
+    required: false
+    default: "0.10.0"
+  path:
+    description: "Path to scan"
+    required: false
+    default: "."
+  fail-on:
+    description: "Fail the job if findings at/above this severity exist (low|medium|high|critical). Empty = never fail."
+    required: false
+    default: ""
+  paranoid:
+    description: "Include heuristic-tier findings"
+    required: false
+    default: "false"
+  sarif-file:
+    description: "Where to write the SARIF report"
+    required: false
+    default: "secureai.sarif"
+  upload-sarif:
+    description: "Upload the SARIF to GitHub code scanning (requires security-events: write)"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install secureai-scan
+      shell: bash
+      env:
+        SCANNER_VERSION: ${{ inputs.scanner-version }}
+      run: npm install -g "secureai-scan@$SCANNER_VERSION"
+
+    - name: Run SecureAI-Scan
+      shell: bash
+      env:
+        FAIL_ON: ${{ inputs.fail-on }}
+        PARANOID: ${{ inputs.paranoid }}
+        SARIF_FILE: ${{ inputs.sarif-file }}
+        SCAN_PATH: ${{ inputs.path }}
+      run: |
+        args=(--output "$SARIF_FILE")
+        if [ "$PARANOID" = "true" ]; then args+=(--paranoid); fi
+        if [ -n "$FAIL_ON" ]; then args+=(--fail-on "$FAIL_ON"); fi
+        secureai-scan scan "$SCAN_PATH" "${args[@]}"
+
+    - name: Upload SARIF to GitHub code scanning
+      if: ${{ inputs.upload-sarif == 'true' && always() }}
+      uses: github/codeql-action/upload-sarif@v4.37.7
+      with:
+        sarif_file: ${{ inputs.sarif-file }}

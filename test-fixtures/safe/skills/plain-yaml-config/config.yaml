@@ -1,0 +1,6 @@
+setup: "npm install && npm run build"
+steps:
+  - name: install
+    run: npm install
+  - name: build
+    run: npm run build

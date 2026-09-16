@@ -1,0 +1,6 @@
+# Default owner for everything in the repo.
+* @akanthed
+
+# Package advisories carry a proven-tier trust bar (see CONTRIBUTING.md) —
+# route changes here through the same review regardless of what else is in the PR.
+/src/scanner/advisories.ts @akanthed

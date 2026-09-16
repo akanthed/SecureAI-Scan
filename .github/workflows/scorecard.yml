@@ -1,0 +1,39 @@
+name: OpenSSF Scorecard
+
+on:
+  branch_protection_rule:
+  schedule:
+    - cron: "31 5 * * 1"
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+  security-events: write
+
+jobs:
+  scorecard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Run OpenSSF Scorecard
+        uses: ossf/scorecard-action@v2.4.4
+        with:
+          results_file: scorecard-results.sarif
+          results_format: sarif
+          publish_results: true
+      - name: Upload Scorecard artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: scorecard-results
+          path: scorecard-results.sarif
+          retention-days: 5
+      - name: Upload Scorecard to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4.37.7
+        with:
+          sarif_file: scorecard-results.sarif

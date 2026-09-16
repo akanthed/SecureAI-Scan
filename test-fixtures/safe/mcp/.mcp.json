@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "web-fetcher": {
+      "command": "npx",
+      "args": ["-y", "some-mcp-fetch-server@1.4.2"],
+      "env": {
+        "FETCH_API_KEY": "${env:FETCH_API_KEY}"
+      }
+    },
+    "local-dev": {
+      "url": "http://localhost:3845/mcp"
+    },
+    "remote-tools": {
+      "url": "https://tools.example.com/mcp"
+    }
+  }
+}

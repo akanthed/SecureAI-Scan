@@ -1,0 +1,67 @@
+name: Missed detection (false negative)
+description: A real vulnerability existed in your code but SecureAI-Scan reported no finding for it.
+title: "[missed detection]: "
+labels: ["false-negative", "detection-gap"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this — false negatives are the highest-priority
+        bug class for a security scanner. The more concrete the reproduction,
+        the faster this gets fixed.
+  - type: input
+    id: version
+    attributes:
+      label: SecureAI-Scan version
+      description: Output of `secureai-scan --version`
+      placeholder: "0.4.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: language
+    attributes:
+      label: Language
+      options:
+        - TypeScript / JavaScript
+        - Python
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: sdk
+    attributes:
+      label: LLM/agent SDK or framework in use
+      description: e.g. litellm, LangChain, OpenAI SDK, Anthropic SDK, FastMCP, boto3 Bedrock, Vercel AI SDK
+      placeholder: "litellm"
+    validations:
+      required: true
+  - type: textarea
+    id: snippet
+    attributes:
+      label: Minimal code sample
+      description: The smallest snippet that reproduces the missed finding. Redact secrets/proprietary logic — the shape of the code matters more than the exact content.
+      render: python
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What vulnerability did you expect to be flagged, and why?
+      description: Name the rule if you know it (e.g. AI001 prompt injection, AI005 unsafe output handling), or describe the risk in plain terms.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command you ran
+      placeholder: "secureai-scan scan . --paranoid"
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual output
+      description: Paste the full scan output, including the finding count summary line.
+      render: text
+    validations:
+      required: true

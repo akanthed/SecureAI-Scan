@@ -1,0 +1,93 @@
+{
+  "name": "secureai-scan",
+  "version": "0.11.0",
+  "description": "AST-based AI security scanner for TypeScript, JavaScript, and Python with dataflow evidence for prompt injection, MCP, Agent Skill, and RAG risks.",
+  "author": "Akshay Kanthed",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/akanthed/SecureAI-Scan.git"
+  },
+  "homepage": "https://github.com/akanthed/SecureAI-Scan#readme",
+  "bugs": {
+    "url": "https://github.com/akanthed/SecureAI-Scan/issues"
+  },
+  "keywords": [
+    "security",
+    "sarif",
+    "sbom",
+    "ai-bom",
+    "code-scanning",
+    "ai",
+    "llm",
+    "scanner",
+    "cli",
+    "typescript",
+    "python",
+    "prompt-injection",
+    "appsec",
+    "mcp",
+    "rag",
+    "vector-database",
+    "devsecops",
+    "owasp",
+    "langchain",
+    "openai",
+    "agent-security",
+    "ai-security",
+    "claude",
+    "claude-skills",
+    "model-context-protocol",
+    "tool-poisoning",
+    "vulnerability-scanner"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "secureai-scan": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "mcp-server",
+    "skills",
+    "README.md",
+    "GOVERNANCE.md",
+    "SECURITY.md",
+    "docs/ReleaseAssurance.md",
+    "docs/OWASP2026.md",
+    "docs/benchmarks/v0.9.0.json",
+    "LICENSE"
+  ],
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "check:runtime": "node -e \"const [major,minor]=process.versions.node.split('.').map(Number); if(major<22||(major===22&&minor<12)){console.error('SecureAI-Scan requires Node >=22.12.0; found '+process.version); process.exit(1)} console.log('Node runtime supported: '+process.version)\"",
+    "build": "npm run clean && tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "npm run build && node dist/index.js",
+    "test": "npm run build && node test/run-tests.js",
+    "coverage": "npm run build && c8 --check-coverage --lines 80 --functions 80 --branches 75 --statements 80 --reporter=text --reporter=html -o coverage node test/run-tests.js",
+    "regression": "npm run build && node scripts/regression-scan.js",
+    "release:check": "npm test && npm run coverage && npm run regression && npm pack --dry-run --ignore-scripts",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run release:check",
+    "sync-advisories": "node scripts/sync-advisories.js"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "js-yaml": "^5.3.0",
+    "tree-sitter": "^0.25.1",
+    "tree-sitter-python": "^0.25.0",
+    "ts-morph": "^28.0.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^26.1.2",
+    "c8": "^12.0.0",
+    "typescript": "^7.0.2"
+  }
+}

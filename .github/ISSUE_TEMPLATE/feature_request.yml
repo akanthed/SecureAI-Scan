@@ -1,0 +1,32 @@
+name: Feature request / new rule
+description: Propose a new detection rule, CLI feature, or output format.
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of request is this?
+      options:
+        - New detection rule
+        - CLI feature (flag, command, output format)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What risk or workflow gap does this address?
+      description: For a new rule — what's the vulnerability class, and what does exploitation look like?
+    validations:
+      required: true
+  - type: textarea
+    id: example
+    attributes:
+      label: Example (vulnerable code, or the CLI usage you'd want)
+      render: typescript
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: OWASP category, CVE, incident writeup, or other source, if applicable.

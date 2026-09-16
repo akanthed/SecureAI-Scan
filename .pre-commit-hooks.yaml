@@ -1,0 +1,34 @@
+# Lets a project add this repo as a pre-commit (https://pre-commit.com) hook
+# source instead of (or alongside) the GitHub Action:
+#
+#   repos:
+#     - repo: https://github.com/akanthed/SecureAI-Scan
+#       rev: v0.10.0
+#       hooks:
+#         - id: secureai-scan
+#
+# `language: node` means pre-commit installs this repo's own package.json
+# into an isolated node_modules the first time the hook runs, cached after
+# that for the same `rev`. That install is a bare `npm install`, which does
+# not build `dist/` (a git checkout, unlike the published npm tarball,
+# ships no prebuilt `dist/`, and there's no npm lifecycle script that builds
+# on a plain install without risking breaking the published package for
+# ordinary end users) — so `entry` points at a small wrapper
+# (scripts/precommit-entry.js) that builds once, then runs the scan.
+#
+# `pass_filenames: false` + `always_run: true`: this scanner traces
+# source→flow→sink dataflow across files (an import-resolved LLM call in file
+# A can depend on a source file B never touched by this commit), so handing
+# it only the changed filenames would silently break that tracing. It scans
+# the whole project every run instead, the same way `tsc`/`mypy` pre-commit
+# hooks do for the same reason. `--fail-on high` keeps it from blocking a
+# commit over the lower-severity/heuristic tail; override via `args:` in the
+# consuming project's own `.pre-commit-config.yaml` to change the threshold.
+- id: secureai-scan
+  name: SecureAI-Scan
+  description: Scan for LLM/MCP/RAG security risks (prompt injection, tool poisoning, RAG misconfig) with dataflow evidence.
+  entry: node scripts/precommit-entry.js
+  args: ["--fail-on", "high"]
+  language: node
+  pass_filenames: false
+  always_run: true

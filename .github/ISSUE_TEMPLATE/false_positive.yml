@@ -1,0 +1,34 @@
+name: False positive
+description: SecureAI-Scan flagged something that isn't actually a vulnerability.
+title: "[false positive]: "
+labels: ["false-positive"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: SecureAI-Scan version
+      placeholder: "0.4.1"
+    validations:
+      required: true
+  - type: input
+    id: rule
+    attributes:
+      label: Rule ID
+      description: The rule_id shown in the finding (e.g. AI005, VEC001, MCP008)
+      placeholder: "AI005"
+    validations:
+      required: true
+  - type: textarea
+    id: snippet
+    attributes:
+      label: Minimal code sample that triggers the false positive
+      render: typescript
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is this safe?
+      description: What makes this code not actually vulnerable — e.g. input is already validated upstream, this is test/fixture code, the sink isn't actually reachable.
+    validations:
+      required: true
