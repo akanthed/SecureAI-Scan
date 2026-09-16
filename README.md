@@ -18,7 +18,7 @@ Covers the official [OWASP Top 10 for LLM Applications 2026](https://genai.owasp
 ## Get started in 30 seconds
 
 ```bash
-npx --yes secureai-scan@0.10.0 scan .
+npx --yes secureai-scan@0.11.0 scan .
 ```
 
 No account, cloud upload, Python interpreter, or configuration required. TypeScript, JavaScript, Python, MCP configs, and Agent Skill bundles are detected automatically.

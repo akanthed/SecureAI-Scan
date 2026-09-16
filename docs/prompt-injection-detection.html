@@ -167,7 +167,7 @@ fix     Keep system prompts static; pass user input as a user-role message.</cod
     </div>
 
     <p>Doing this by hand across a real codebase is slow and easy to miss — a value can pass through several functions before it reaches the sink. <a href="https://github.com/akanthed/SecureAI-Scan">SecureAI-Scan</a> automates exactly this trace via AST analysis (ts-morph for TypeScript/JavaScript, tree-sitter for Python), only flagging calls that resolve through real imports:</p>
-    <p><code>npx secureai-scan@0.9.0 scan .</code></p>
+    <p><code>npx secureai-scan@0.11.0 scan .</code></p>
 
     <div class="cta">
       <p><strong>Check an MCP tool description or config instead?</strong> That's a related but different check — invisible Unicode and injection phrasing in untrusted text, not code dataflow.</p>
