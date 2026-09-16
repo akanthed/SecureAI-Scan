@@ -19,3 +19,8 @@ MARKETING.md
 docs/PROJECT_AUDIT.md
 docs/MASTER_REVIEW.md
 
+# Local dev tooling state (machine-specific, not shared config)
+.claude/
+.impeccable/
+graphify-out/
+
