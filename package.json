@@ -13,33 +13,16 @@
     "url": "https://github.com/akanthed/SecureAI-Scan/issues"
   },
   "keywords": [
-    "security",
-    "sarif",
-    "sbom",
-    "ai-bom",
-    "code-scanning",
-    "ai",
-    "llm",
-    "scanner",
-    "cli",
-    "typescript",
-    "python",
+    "mcp-security",
     "prompt-injection",
-    "appsec",
-    "mcp",
-    "rag",
-    "vector-database",
-    "devsecops",
-    "owasp",
-    "langchain",
-    "openai",
-    "agent-security",
-    "ai-security",
-    "claude",
-    "claude-skills",
-    "model-context-protocol",
     "tool-poisoning",
-    "vulnerability-scanner"
+    "mcp",
+    "model-context-protocol",
+    "ai-security",
+    "agent-security",
+    "llm",
+    "rag",
+    "owasp"
   ],
   "engines": {
     "node": ">=22.12.0"
@@ -75,7 +58,8 @@
     "release:check": "npm test && npm run coverage && npm run regression && npm pack --dry-run --ignore-scripts",
     "prepack": "npm run build",
     "prepublishOnly": "npm run release:check",
-    "sync-advisories": "node scripts/sync-advisories.js"
+    "sync-advisories": "node scripts/sync-advisories.js",
+    "verdict-index": "npm run build && node scripts/verdict-index.js"
   },
   "dependencies": {
     "commander": "^15.0.0",

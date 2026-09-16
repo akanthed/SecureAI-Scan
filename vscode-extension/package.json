@@ -88,7 +88,7 @@
     "package": "npm run build && vsce package -o secureai-scan.vsix"
   },
   "dependencies": {
-    "secureai-scan": "^0.10.0"
+    "secureai-scan": "^0.11.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

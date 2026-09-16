@@ -1,0 +1,28 @@
+name: Verdict index
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * *" # nightly, off the hour to avoid GitHub's cron pile-up
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run verdict-index
+      - name: Commit if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/verdict-index.md
+          git diff --cached --quiet || git commit -m "chore: nightly verdict index refresh"
+          git push

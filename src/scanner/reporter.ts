@@ -21,6 +21,9 @@ export interface ReportSummary {
   byEvidence: Record<Evidence, number>;
   /** Findings hidden because they are heuristic tier (shown with --paranoid). */
   hiddenHeuristic?: number;
+  /** Top rules among the hidden heuristic findings, by count — lets a clean
+   *  scan say *what* it declined to show instead of just a bare number. */
+  hiddenHeuristicTop?: Array<{ ruleId: string; title: string; count: number }>;
 }
 
 export interface ReportSnippetLine {
@@ -90,6 +93,10 @@ export interface BuildReportOptions {
   ignoredFindings?: Array<{ finding: Finding; reason: string; annotationLine: number }>;
   baselineDiff?: ReportBaselineDiff;
   hiddenHeuristic?: number;
+  /** The actual heuristic findings hidden from this report (evidence-filtered
+   *  out before `findings` was passed in) — used only to summarize *which*
+   *  rules they came from, never rendered as findings themselves. */
+  hiddenHeuristicFindings?: Finding[];
   filesScanned?: number;
   durationMs?: number;
 }
@@ -179,6 +186,15 @@ export function buildReport(
     byEvidence[f.evidence] += 1;
   }
 
+  const hiddenByRule = new Map<string, number>();
+  for (const f of options?.hiddenHeuristicFindings ?? []) {
+    hiddenByRule.set(f.rule_id, (hiddenByRule.get(f.rule_id) ?? 0) + 1);
+  }
+  const hiddenHeuristicTop = [...hiddenByRule.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([ruleId, count]) => ({ ruleId, title: catalogFor(ruleId)?.title ?? ruleId, count }));
+
   return {
     meta: {
       ...meta,
@@ -190,6 +206,7 @@ export function buildReport(
       bySeverity,
       byEvidence,
       hiddenHeuristic: options?.hiddenHeuristic,
+      hiddenHeuristicTop: hiddenHeuristicTop.length > 0 ? hiddenHeuristicTop : undefined,
     },
     baselineDiff: options?.baselineDiff,
     groups,
@@ -322,6 +339,12 @@ export function formatTerminalReport(report: ReportModel, limit = 10): string {
     out.push(`  ${tc.bold(tc.green("✓"))} ${tc.green("No findings at the current evidence level.")}`);
     if (summary.hiddenHeuristic) {
       out.push(`  ${tc.dim(`${summary.hiddenHeuristic} heuristic finding(s) hidden — run with --paranoid to see them.`)}`);
+      if (summary.hiddenHeuristicTop) {
+        const top = summary.hiddenHeuristicTop
+          .map((t) => `${t.ruleId} ${t.title} (${t.count})`)
+          .join(", ");
+        out.push(`  ${tc.dim(`top: ${top}`)}`);
+      }
     }
     out.push("");
     return out.join("\n");
@@ -338,7 +361,10 @@ export function formatTerminalReport(report: ReportModel, limit = 10): string {
   out.push(`  ${tc.bold(String(summary.total))} finding(s)   ${sevParts.join(tc.dim(" · "))}`);
   out.push(`  ${tc.dim("evidence")}     ${tc.dim(evParts.join(" · "))}`);
   if (summary.hiddenHeuristic) {
-    out.push(`  ${tc.dim(`+${summary.hiddenHeuristic} heuristic hidden (--paranoid to show)`)}`);
+    const top = summary.hiddenHeuristicTop
+      ? " — " + summary.hiddenHeuristicTop.map((t) => `${t.ruleId} (${t.count})`).join(", ")
+      : "";
+    out.push(`  ${tc.dim(`+${summary.hiddenHeuristic} heuristic hidden (--paranoid to show)${top}`)}`);
   }
   if (report.baselineDiff && !report.baselineDiff.created) {
     out.push(

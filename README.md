@@ -17,6 +17,15 @@ Covers the official [OWASP Top 10 for LLM Applications 2026](https://genai.owasp
 
 ## Get started in 30 seconds
 
+Before you install an MCP server or Agent Skill, scan it — nothing is cloned to disk in a runnable state or executed:
+
+```bash
+npx --yes secureai-scan@0.11.0 mcp some-mcp-server-package
+npx --yes secureai-scan@0.11.0 skill anthropics/skills
+```
+
+Or scan your own repo:
+
 ```bash
 npx --yes secureai-scan@0.11.0 scan .
 ```
@@ -194,9 +203,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: akanthed/SecureAI-Scan@v0.10.0
+      - uses: akanthed/SecureAI-Scan@v0.11.0
         with:
-          scanner-version: 0.10.0
+          scanner-version: 0.11.0
           fail-on: high
 ```
 
@@ -215,7 +224,7 @@ Prefer catching findings before they're pushed? Add this repo as a [pre-commit](
 ```yaml
 repos:
   - repo: https://github.com/akanthed/SecureAI-Scan
-    rev: v0.10.0
+    rev: v0.11.0
     hooks:
       - id: secureai-scan
 ```

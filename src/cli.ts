@@ -92,11 +92,15 @@ export async function runCli(argv: string[]): Promise<void> {
 
   program
     .name("secureai-scan")
-    .description("AI security scanner — proves LLM, MCP, and RAG vulnerabilities with dataflow evidence")
+    .description("AI security scanner — verify an MCP server or Agent Skill before you install it, or scan your own repo, with dataflow evidence for LLM, MCP, and RAG vulnerabilities")
     .version(getOwnVersion())
     .addHelpText(
       "after",
       [
+        "",
+        "Verify before you install (no clone, no config — nothing fetched is ever executed):",
+        "  secureai-scan skill anthropics/skills     Scan an Agent Skill by owner/repo, URL, or local path",
+        "  secureai-scan mcp some-mcp-server-package Scan an MCP server by npm name, git URL, or local path",
         "",
         "Quick start:",
         "  secureai-scan scan .                  Scan current repo (proven + likely findings)",
@@ -105,10 +109,6 @@ export async function runCli(argv: string[]): Promise<void> {
         "  secureai-scan bom .                   AI Bill of Materials (SDKs, models, MCP servers)",
         "  secureai-scan explain AI001           Fix guide for a rule",
         "  secureai-scan init                    Policy file + CI workflow",
-        "",
-        "Scan before you install (no clone, no config — nothing fetched is ever executed):",
-        "  secureai-scan skill anthropics/skills     Scan an Agent Skill by owner/repo, URL, or local path",
-        "  secureai-scan mcp some-mcp-server-package Scan an MCP server by npm name, git URL, or local path",
         "",
         "Suppress a reviewed finding in code:",
         "  // secureai-ignore AI001: reviewed, sanitized via allowlist",
@@ -229,6 +229,9 @@ export async function runCli(argv: string[]): Promise<void> {
         const evidenceFiltered = paranoid
           ? findings
           : findings.filter((f) => f.evidence !== "heuristic");
+        const hiddenHeuristicFindings = paranoid
+          ? []
+          : findings.filter((f) => f.evidence === "heuristic");
         const hiddenHeuristic = findings.length - evidenceFiltered.length;
 
         // Optional numeric confidence filter (CLI > policy; no hidden default).
@@ -277,6 +280,7 @@ export async function runCli(argv: string[]): Promise<void> {
             ignoredFindings: filteredIgnored,
             baselineDiff,
             hiddenHeuristic,
+            hiddenHeuristicFindings,
             filesScanned,
             durationMs: Date.now() - startedAt,
           },
@@ -563,6 +567,7 @@ async function runFetchAndScan(
 
     const paranoid = options.paranoid ?? false;
     const evidenceFiltered = paranoid ? findings : findings.filter((f) => f.evidence !== "heuristic");
+    const hiddenHeuristicFindings = paranoid ? [] : findings.filter((f) => f.evidence === "heuristic");
     const hiddenHeuristic = findings.length - evidenceFiltered.length;
     const filtered = filterFindingsBySeverity(evidenceFiltered, options.severity);
 
@@ -573,6 +578,7 @@ async function runFetchAndScan(
         rootPath: resolved.dir,
         ignoredFindings: [],
         hiddenHeuristic,
+        hiddenHeuristicFindings,
         filesScanned,
         durationMs: Date.now() - startedAt,
       },
