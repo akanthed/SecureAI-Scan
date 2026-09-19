@@ -12,6 +12,10 @@
     },
     "remote-tools": {
       "url": "https://tools.example.com/mcp"
+    },
+    "local-python-server": {
+      "command": "/usr/local/bin/python3",
+      "args": ["-m", "my_mcp_server"]
     }
   }
 }

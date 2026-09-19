@@ -144,6 +144,34 @@ test("DEP003 does not flag postmark-mcp's pre-backdoor version (1.0.15, before t
   assert.deepEqual(scanKnownMaliciousPackages(dir), []);
 });
 
+test("DEP003 flags @lanyer640/mcp-runcommand-server's backdoored reverse-shell version", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-runcommand-backdoor-"));
+  fs.writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify(
+      { name: "tmp", version: "1.0.0", dependencies: { "@lanyer640/mcp-runcommand-server": "1.0.6" } },
+      null,
+      2,
+    ),
+  );
+  const findings = scanKnownMaliciousPackages(dir);
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].rule_id, "DEP003");
+});
+
+test("DEP003 does not flag @lanyer640/mcp-runcommand-server's pre-backdoor version (1.0.5, before the malicious 1.0.6 release)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-runcommand-pre-backdoor-"));
+  fs.writeFileSync(
+    path.join(dir, "package.json"),
+    JSON.stringify(
+      { name: "tmp", version: "1.0.0", dependencies: { "@lanyer640/mcp-runcommand-server": "1.0.5" } },
+      null,
+      2,
+    ),
+  );
+  assert.deepEqual(scanKnownMaliciousPackages(dir), []);
+});
+
 test("DEP003 fails toward flagging when the declared version is a range, not an exact pin", () => {
   // "^0.1.16" could still resolve to a vulnerable 0.1.x release depending on
   // what's actually installed — ambiguity must never silently clear a
