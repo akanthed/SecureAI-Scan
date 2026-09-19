@@ -13,6 +13,7 @@ import { stripBom } from "../utils/text.js";
  *   MCP004 — MCP server launched via npx/uvx without a pinned version
  *   MCP005 — secret value inlined in MCP config env
  *   MCP006 — MCP server URL uses plain http:// (non-localhost)
+ *   MCP012 — MCP server launched via a raw shell interpreter
  */
 
 const MCP_CONFIG_FILENAMES = new Set([
@@ -126,6 +127,26 @@ function lineOf(lines: string[], needle: string): number {
 const SECRET_NAME_HINT = /(key|token|secret|password|passwd|credential)/i;
 const ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$|^\$\{env:[^}]+\}$|^\${input:[^}]+\}$/;
 
+const SHELL_INTERPRETER_BASENAMES = new Set([
+  "bash",
+  "sh",
+  "zsh",
+  "dash",
+  "ksh",
+  "cmd",
+  "cmd.exe",
+  "powershell",
+  "powershell.exe",
+  "pwsh",
+  "pwsh.exe",
+]);
+
+/** Basename of a command, stripping a path and a trailing .exe, case-insensitive for Windows launchers. */
+function commandBasename(command: string): string {
+  const base = command.split(/[\\/]/).pop() ?? command;
+  return base.toLowerCase();
+}
+
 function isPinnedPackage(spec: string): boolean {
   // scoped: @scope/name@1.2.3 — unscoped: name@1.2.3
   const at = spec.lastIndexOf("@");
@@ -170,6 +191,24 @@ export function scanMcpConfigs(rootPath: string, skipPaths?: string[]): Finding[
             evidence: "proven",
           });
         }
+      }
+
+      // MCP012 — raw shell interpreter as the launcher
+      if (server.command && SHELL_INTERPRETER_BASENAMES.has(commandBasename(server.command))) {
+        findings.push({
+          rule_id: "MCP012",
+          title: "MCP server launched via a raw shell interpreter",
+          severity: "critical",
+          file: relFile,
+          line: lineOf(lines, server.command),
+          summary: `Server "${server.name}" launches via the shell interpreter "${server.command}" instead of a runtime binary or package manager.`,
+          description:
+            `The "args" field is executed as a shell command line rather than passed as argv to a fixed program. Any edit to this committed config — a compromised commit, or a config swapped in after the server was already approved and trusted (the MCPoison/CVE-2025-54136 pattern) — is arbitrary code execution on the next launch, with no package-fetch step to review.`,
+          recommendation:
+            "Launch the server via its runtime (node, python, a pinned npx/uvx package) or a direct path to the binary — never via bash/sh/cmd/powershell.",
+          confidence: evidenceConfidence("proven"),
+          evidence: "proven",
+        });
       }
 
       // MCP005 — inline secrets in env

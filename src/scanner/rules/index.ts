@@ -12,6 +12,7 @@ import { ruleUnboundedLlmInput } from "./unbounded-llm-input.js";
 import { ruleIndirectPromptInjection } from "./indirect-prompt-injection.js";
 import { ruleMultiagentTrustBoundary } from "./multiagent-trust-boundary.js";
 import { ruleUnvalidatedStructuredOutput } from "./unvalidated-structured-output.js";
+import { ruleStructuredOutputInjection } from "./structured-output-injection.js";
 // MCP rules
 import { ruleMcpToolDescInjection } from "./mcp-tool-desc-injection.js";
 import { ruleMcpDynamicServerUrl } from "./mcp-dynamic-server-url.js";
@@ -40,10 +41,11 @@ export const RULES: Rule[] = [
   ruleRagContextInjection,
   ruleSystemPromptLeakage,
   ruleUnboundedLlmInput,
-  // Extended AI rules (AI010–AI012)
+  // Extended AI rules (AI010–AI013)
   ruleIndirectPromptInjection,
   ruleMultiagentTrustBoundary,
   ruleUnvalidatedStructuredOutput,
+  ruleStructuredOutputInjection,
   // MCP rules (MCP001–MCP003)
   ruleMcpToolDescInjection,
   ruleMcpDynamicServerUrl,
@@ -63,7 +65,7 @@ export const RULES: Rule[] = [
 ];
 
 // Config-file rules implemented outside the AST rule engine (mcp-config-scanner).
-export const CONFIG_RULE_IDS = ["MCP004", "MCP005", "MCP006"];
+export const CONFIG_RULE_IDS = ["MCP004", "MCP005", "MCP006", "MCP012"];
 
 // LiteLLM proxy config.yaml rules implemented outside the AST rule engine
 // (litellm-config-scanner).
@@ -79,10 +81,17 @@ export const SKILL_RULE_IDS = [
 // advisory list).
 export const DEPENDENCY_RULE_IDS = ["DEP001", "DEP002", "DEP003"];
 
+// Rules implemented only in python-scanner.ts, with no TS/ts-morph
+// counterpart in RULES above (every other Python check shares an ID with a
+// TS Rule object; AI014's confidence-gated-decision pattern is Python-only
+// because typesafe_sdk itself is Python-only).
+export const PYTHON_ONLY_RULE_IDS = ["AI014"];
+
 export const AVAILABLE_RULE_IDS = [
   ...RULES.map((rule) => rule.id),
   ...CONFIG_RULE_IDS,
   ...LITELLM_CONFIG_RULE_IDS,
   ...SKILL_RULE_IDS,
   ...DEPENDENCY_RULE_IDS,
+  ...PYTHON_ONLY_RULE_IDS,
 ];

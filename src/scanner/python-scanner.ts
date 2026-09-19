@@ -181,6 +181,24 @@ function fileImportsLlmSdk(src: PythonSource): boolean {
   return src.ast.imports.some((node) => PY_LLM_IMPORT_PATTERNS.some((pattern) => pattern.test(node.text)));
 }
 
+// ── TypeSafe AI SDK import detection (AI014) ──────────────────────────────
+// typesafe_sdk (client.system_one(state=..., questions={...})) is a
+// "typed decision" SDK, not a text-generation LLM SDK — kept as its own
+// gate rather than folded into fileHasLlm/PY_LLM_IMPORT_PATTERNS so AI014
+// stays scoped to the confidence-gated-autonomy pattern this SDK's own docs
+// describe, without widening what every other AI0xx rule treats as an LLM.
+const PY_TYPESAFE_IMPORT_PATTERN = /^\s*(?:import|from)\s+typesafe_sdk\b/m;
+
+function fileImportsTypesafeSdk(src: PythonSource): boolean {
+  return src.ast.imports.some((node) => PY_TYPESAFE_IMPORT_PATTERN.test(node.text));
+}
+
+// system_one's typed answers carry a probability/confidence field per
+// primitive: Choice -> confidence, Score -> confidence, Noul -> noul itself
+// IS the probability. All three are the "typed but not content-checked"
+// values a caller might mistake for an authorization signal.
+const CONFIDENCE_FIELD_PATTERN = /\.\s*(?:confidence|noul)\b/;
+
 // ── MCP server SDK import detection (FastMCP / official mcp package) ──────
 const PY_MCP_IMPORT_PATTERNS = [
   /^\s*(?:import|from)\s+mcp\b/m,
@@ -691,6 +709,58 @@ function checkAI010(src: PythonSource, i: number, file: string, ctx: FileContext
   };
 }
 
+/**
+ * AI014: a TypeSafe-style decision call (client.system_one(state=..., ...))
+ * receives user-controlled input, and the resulting confidence/noul score
+ * gates a dangerous execution sink (eval/exec/subprocess/os.system) in the
+ * same scope, with no independent content check on the input itself.
+ *
+ * The confidence-gate pattern this flags is TypeSafe's own documented
+ * design ("set the thresholds for when it acts autonomously and when it
+ * asks for review") — the bug is not using a confidence gate, it's using it
+ * as the *only* check on attacker-influenced input before a sensitive sink.
+ * A schema/type guarantee on the decision's shape says nothing about
+ * whether the underlying input was safe to act on.
+ */
+function checkAI014(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
+  if (!ctx.fileImportsTypesafe) return null;
+  const call = src.ast.callsAtLine(i).find((candidate) => /(?:^|\.)system_one$/.test(pythonCallName(candidate)));
+  if (!call) return null;
+
+  const stateArg = call.keywords.get("state") ?? call.arguments[0];
+  if (!stateArg) return null;
+
+  const scope = pythonScope(src, call.node);
+  const directRequest = matchesAny(stateArg.text, REQUEST_PATTERNS);
+  const taintedVars = collectRequestTaintedVars(src, scope, i);
+  const taintedVarUsed = [...taintedVars].some((target) => pythonNodeContainsText(stateArg, target));
+  if (!directRequest && !taintedVarUsed) return null;
+
+  const afterCallText = scope.text.slice(call.node.endIndex - scope.startIndex);
+  if (!CONFIDENCE_FIELD_PATTERN.test(afterCallText)) return null;
+  if (hasSanitization(afterCallText)) return null;
+
+  const sink = EXEC_SINKS.find((candidate) => candidate.pattern.test(afterCallText));
+  if (!sink) return null;
+
+  return {
+    ...findingBase(
+      "AI014",
+      "Untrusted input drives a confidence-gated autonomous action",
+      "critical",
+      file,
+      call.node.startPosition.row + 1,
+    ),
+    summary: `User-controlled input reaches a system_one() decision whose confidence score gates ${sink.label}.`,
+    description:
+      "A TypeSafe-style decision call's confidence/noul field proves how certain the model is about its own answer — it says nothing about whether the input that produced that answer was safe. Here, attacker-influenced input (request data) flows into the decision, and the confidence score alone gates a dangerous execution sink. An input crafted to push the confidence score high bypasses whatever review threshold the code intended.",
+    recommendation:
+      "Treat the confidence score as a routing signal, not an authorization check. Validate or sandbox the underlying action independently of the model's confidence (an allowlist of safe commands, a human approval step that doesn't just check the same score, or a permission check unrelated to the model's output).",
+    confidence: evidenceConfidence("likely"),
+    evidence: "likely",
+  };
+}
+
 function checkVEC001(src: PythonSource, i: number, file: string): Finding | null {
   const call = src.ast.callsAtLine(i).find((candidate) =>
     matchesAny(candidate.node.text, VECTOR_SEARCH_PATTERNS),
@@ -1026,6 +1096,7 @@ function checkMCP009(src: PythonSource, i: number, file: string, ctx: FileContex
 
 interface FileContext {
   fileHasLlm: boolean;
+  fileImportsTypesafe: boolean;
   fileHasMcpServer: boolean;
   mcpTools?: PyToolDefinition[];
   /** Tool names defined in this file (only computed for MCP server files). */
@@ -1045,6 +1116,7 @@ const PYTHON_RULES: RuleChecker[] = [
   checkAI006,
   checkAI007,
   checkAI010,
+  checkAI014,
   checkVEC001,
   checkVEC003,
   checkMCP001,
@@ -1127,6 +1199,7 @@ export function scanPythonFiles(
     const receiverNames = collectLlmReceiverNames(src);
     const ctx: FileContext = {
       fileHasLlm: fileImportsLlmSdk(src),
+      fileImportsTypesafe: fileImportsTypesafeSdk(src),
       fileHasMcpServer: hasMcpServer,
       mcpTools,
       mcpToolNames: mcpTools ? new Set(mcpTools.map((tool) => tool.name)) : undefined,
