@@ -37,10 +37,12 @@ Following calls also introduced a false positive in our own rule. mcp-server-kub
 
 A rule that finds CVEs but also fires on every server that runs a subprocess is useless. We scanned 25 widely used MCP servers and frameworks: official SDKs and reference servers, Microsoft's Playwright MCP, Sentry, MongoDB, Supabase, Firecrawl, Exa, Tavily, Context7, FastMCP (Python and TypeScript), DesktopCommander, and more. **MCP013/MCP014 produced no default-tier findings.** The by-design "run any command" and "read any file" tools (DesktopCommander, filesystem-style servers) appear only under `--paranoid`, labeled as by-design capabilities rather than bugs.
 
-The sweep and the regression gate found **three false positives in older rules**, each now fixed at the root and pinned as a fixture in `test-fixtures/safe/`:
+The sweep and the regression gate found **five false positives in older rules**, each now fixed at the root and pinned as a fixture in `test-fixtures/safe/`:
 
 - browserbase's server printed a sample client config containing its *own* listening address, and MCP002 reported it as a critical "MCP URL from user input". An unrelated variable with the same name in a request handler had read `req.url`, and taint was tracked by name, not by declaration.
 - FastMCP's in-memory BM25 index over its own tool catalog (`self._index.query(...)`) was reported as an unfiltered cross-tenant vector search.
+- DesktopCommander's terminal skill *warns* the agent: "Be careful with (`curl ... | sh`), that's untrusted code execution." That was reported as the skill executing remote code. A fetch-and-run match now has to name what it fetches.
+- Five of vercel/ai's examples put the user's request into the AI SDK's `prompt` field, which *is* the user message, and they were reported as prompt injection. They surfaced only because this release finally taints `await req.json()`. Better recall exposed a precision bug that had been hiding behind a blind spot.
 - A Cisco-labeled *safe* skill (new in their eval corpus, caught by `npm run regression`) that writes `~/.npmrc` and downloads release notes was reported as credential exfiltration. Writing a file is not reading it, and `curl -o` is not egress.
 
 ## A labeled ground-truth test for skill scanning
