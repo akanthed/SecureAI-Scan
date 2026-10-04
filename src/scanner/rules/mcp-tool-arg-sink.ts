@@ -653,6 +653,75 @@ function guardedIn(fn: Node, names: Set<string>, sink: CallExpression | undefine
   return false;
 }
 
+// ── Reaching definitions at a sink ─────────────────────────────────────────
+
+type Write = { node: Node; container: Node | undefined; append: boolean; value: Node | undefined };
+
+/** The block-like statement list a write sits in (its parent block, case clause, or file). */
+function statementContainer(node: Node): Node | undefined {
+  let current: Node | undefined = node.getParent();
+  while (current && !Node.isBlock(current) && !Node.isCaseClause(current) && !Node.isDefaultClause(current) && !Node.isSourceFile(current)) {
+    current = current.getParent();
+  }
+  return current;
+}
+
+/** `name = helper(name, ...)`: a call that takes the value back in, and isn't a guard. */
+function passesThrough(value: Node | undefined, name: string): boolean {
+  const inner = value ? unwrap(value) : undefined;
+  if (!inner || !Node.isCallExpression(inner)) return false;
+  if (!inner.getArguments().some((arg) => mentions(arg.getText(), name))) return false;
+  const callee = inner.getExpression();
+  const calleeName = Node.isPropertyAccessExpression(callee) ? callee.getName() : callee.getText();
+  return !identifierTokens(calleeName).some((token) => GUARD_TOKENS.has(token));
+}
+
+/**
+ * Taint of a sink argument, flow-sensitively when it is a reassigned local.
+ * `buildTaint` is flow-insensitive: one `command` variable reused across
+ * switch cases (`command = "kubectl config get-contexts"` in one case,
+ * `` command = `kubectl config use-context ${name}` `` in a later one) would
+ * taint every exec of it. Found in mcp-server-kubernetes: static-command
+ * cases were flagged because a *later* case assigned tool data. Here only
+ * writes before the sink count; a plain assignment in a block enclosing the
+ * sink replaces earlier values, while `+=` and writes in branches that may
+ * or may not run add to them.
+ */
+function sinkArgumentTaint(argNode: Node, sink: CallExpression, fn: Node, state: ScopeTaint): Taint | undefined {
+  const inner = unwrap(argNode);
+  if (!Node.isIdentifier(inner)) return expressionTaint(argNode, state);
+  const name = inner.getText();
+  const writes: Write[] = [];
+  for (const decl of fn.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
+    if (decl.getName() === name) writes.push({ node: decl, container: statementContainer(decl), append: false, value: decl.getInitializer() });
+  }
+  for (const assignment of fn.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
+    const operator = assignment.getOperatorToken().getText();
+    if ((operator !== "=" && operator !== "+=") || assignment.getLeft().getText() !== name) continue;
+    writes.push({ node: assignment, container: statementContainer(assignment), append: operator === "+=", value: assignment.getRight() });
+  }
+  // A seeded parameter or a name with no local writes: nothing to order.
+  if (writes.length === 0) return expressionTaint(argNode, state);
+
+  const sinkStart = sink.getStart();
+  let current: Taint | undefined = state.vars.get(name) && !writes.some((w) => Node.isVariableDeclaration(w.node)) ? state.vars.get(name) : undefined;
+  for (const write of writes.filter((w) => w.node.getEnd() <= sinkStart).sort((a, b) => a.node.getStart() - b.node.getStart())) {
+    const written = write.value ? expressionTaint(write.value, state) : undefined;
+    const dominates = !!write.container && (write.container === statementContainer(sink) || sink.getAncestors().includes(write.container));
+    if (write.append) {
+      if (written) current = { ...written, composed: true, baseJoined: written.baseJoined || !!current?.baseJoined };
+      else if (current) current = { ...current, composed: true };
+    } else if (dominates) {
+      // `cmd = addOptions(cmd, args)` passes the value through and keeps it;
+      // `cmd = shellQuote(cmd)` / `cmd = "static"` replaces it.
+      current = written ?? (current && passesThrough(write.value, name) ? { ...current, composed: true } : undefined);
+    } else if (written) {
+      current = current ? { ...current, composed: current.composed || written.composed, baseJoined: current.baseJoined || written.baseJoined } : written;
+    }
+  }
+  return current;
+}
+
 /** Names in this scope that carry the same tool field as `taint`. */
 function namesFor(state: ScopeTaint, taint: Taint): Set<string> {
   const names = new Set<string>([taint.field]);
@@ -721,7 +790,7 @@ function analyzeScope(
     const kind = classifySink(call);
     if (kind) {
       const argNode = call.getArguments()[0];
-      const taint = argNode ? expressionTaint(argNode, state) : undefined;
+      const taint = argNode ? sinkArgumentTaint(argNode, call, scope.fn, state) : undefined;
       if (!taint) continue;
       const names = namesFor(state, taint);
       if (guardedIn(scope.fn, names, call) || scope.callers.some((c) => guardedIn(c.fn, c.names, undefined))) continue;

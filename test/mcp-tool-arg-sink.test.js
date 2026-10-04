@@ -121,3 +121,40 @@ test("taint follows imports through tsconfig path aliases (@/lib/...)", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a reused command variable is judged by the value that reaches each exec (found in mcp-server-kubernetes)", () => {
+  const dir = tempRepo({
+    "context.ts": [
+      'import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";',
+      'import { execSync } from "node:child_process";',
+      'import { z } from "zod";',
+      "function addOptions(command: string, input: { tail?: number }) {",
+      "  return input.tail ? `${command} --tail=${input.tail}` : command;",
+      "}",
+      'const server = new McpServer({ name: "k8s", version: "1.0.0" });',
+      'server.tool("context", { op: z.string(), name: z.string(), tail: z.number().optional() }, async (input) => {',
+      '  let command = "";',
+      "  switch (input.op) {",
+      '    case "list":',
+      '      command = "kubectl config get-contexts";', // static: must not fire
+      "      return execSync(command).toString();",
+      '    case "use":',
+      "      command = `kubectl config use-context ${input.name}`;",
+      "      return execSync(command).toString();",
+      "    default:",
+      "      command = `kubectl logs ${input.name}`;",
+      "      command = addOptions(command, input);", // passes the value through
+      "      return execSync(command).toString();",
+      "  }",
+      "});",
+      "",
+    ].join("\n"),
+  });
+  try {
+    const lines = scan(dir).filter((f) => f.rule_id === "MCP013").map((f) => f.line).sort((a, b) => a - b);
+    // The "use" exec and the default-branch exec; never the static "list" one.
+    assert.deepEqual(lines, [16, 20]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
