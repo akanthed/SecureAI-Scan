@@ -250,11 +250,38 @@ function handlerArg(args: Node[], projectFiles: Set<SourceFile>): FunctionLike |
   return undefined;
 }
 
+/** The object literal a schema expression stands for: inline, `z.object({...})`, `X.shape`, or a (possibly imported) const. */
+function schemaLiteral(shape: Node | undefined, depth = 0): Node | undefined {
+  if (!shape || depth > 4) return undefined;
+  let node = unwrap(shape);
+  if (Node.isObjectLiteralExpression(node)) return node;
+  // z.object({ ... }) → the object literal inside
+  if (Node.isCallExpression(node)) return schemaLiteral(node.getArguments()[0], depth + 1);
+  // argSchema.shape → argSchema
+  if (Node.isPropertyAccessExpression(node) && node.getName() === "shape") return schemaLiteral(node.getExpression(), depth + 1);
+  if (Node.isIdentifier(node) || Node.isPropertyAccessExpression(node)) {
+    try {
+      const nameNode = Node.isPropertyAccessExpression(node) ? node.getNameNode() : node;
+      let symbol = nameNode.getSymbol();
+      if (symbol?.getDeclarations().some((d) => Node.isImportSpecifier(d) || Node.isImportClause(d))) {
+        symbol = symbol.getAliasedSymbol() ?? symbol;
+      }
+      for (const decl of symbol?.getDeclarations() ?? []) {
+        if (Node.isVariableDeclaration(decl) || Node.isPropertyAssignment(decl)) {
+          const literal = schemaLiteral(decl.getInitializer(), depth + 1);
+          if (literal) return literal;
+        }
+      }
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 function shapeSchema(shape: Node | undefined): Map<string, string> {
   const schema = new Map<string, string>();
-  let node = shape;
-  // z.object({ ... }) → the object literal inside
-  if (node && Node.isCallExpression(node)) node = node.getArguments()[0];
+  const node = schemaLiteral(shape);
   if (!node || !Node.isObjectLiteralExpression(node)) return schema;
   for (const prop of node.getProperties()) {
     if (Node.isPropertyAssignment(prop)) schema.set(prop.getName(), prop.getInitializer()?.getText() ?? "");
@@ -341,8 +368,11 @@ function collectHandlers(sourceFile: SourceFile, projectFiles: Set<SourceFile>):
       if (!toolName || !fn) continue;
       let schema = new Map<string, string>();
       for (const arg of args.slice(1, -1)) {
-        if (!Node.isObjectLiteralExpression(arg)) continue;
-        schema = shapeSchema(method === "registerTool" ? getObjectProperty(arg, "inputSchema") : arg);
+        if (getStringValue(arg) !== undefined) continue;
+        const candidate = shapeSchema(
+          method === "registerTool" && Node.isObjectLiteralExpression(arg) ? getObjectProperty(arg, "inputSchema") : arg,
+        );
+        if (candidate.size > 0) schema = candidate;
       }
       const scope = newScope(toolName, fn, schema);
       seedParameter(fn, 0, scope);
@@ -417,13 +447,20 @@ function argFieldName(node: Node, objects: Set<string>): string | undefined {
 interface ScopeTaint {
   vars: Map<string, Taint>;
   objects: Set<string>;
+  /** Tool fields whose schema can't carry a metacharacter or `../` (z.number, z.enum, .regex, ...). */
+  restricted: Set<string>;
+}
+
+function restrictedFields(schema: Map<string, string>): Set<string> {
+  return new Set([...schema].filter(([, text]) => RESTRICTIVE_SCHEMA.test(text)).map(([field]) => field));
 }
 
 function buildTaint(scope: Scope): ScopeTaint {
   const vars = new Map(scope.seeds);
   const objects = new Set(scope.argObjects);
   const file = scope.fn.getSourceFile().getFilePath();
-  const state: ScopeTaint = { vars, objects };
+  const state: ScopeTaint = { vars, objects, restricted: restrictedFields(scope.schema) };
+  for (const [name, taint] of [...vars]) if (state.restricted.has(taint.field)) vars.delete(name);
 
   const decls = scope.fn.getDescendantsOfKind(SyntaxKind.VariableDeclaration);
   const assignments = scope.fn
@@ -465,7 +502,7 @@ function buildTaint(scope: Scope): ScopeTaint {
               objects.add(bound);
               changed = true;
             }
-          } else if (isArgObject(init, objects) && !vars.has(bound)) {
+          } else if (isArgObject(init, objects) && !vars.has(bound) && !state.restricted.has(property)) {
             vars.set(bound, rootTaint(property, file, getNodeLine(element)));
             changed = true;
           }
@@ -493,7 +530,9 @@ function buildTaint(scope: Scope): ScopeTaint {
 function expressionTaint(node: Node, state: ScopeTaint): Taint | undefined {
   const inner = unwrap(node);
   const field = argFieldName(inner, state.objects);
-  if (field !== undefined) return rootTaint(field, inner.getSourceFile().getFilePath(), getNodeLine(inner));
+  if (field !== undefined) {
+    return state.restricted.has(field) ? undefined : rootTaint(field, inner.getSourceFile().getFilePath(), getNodeLine(inner));
+  }
   if (Node.isIdentifier(inner)) return state.vars.get(inner.getText());
   // `params.title` where the caller passed { title: args.title } — per-field taint.
   if (Node.isPropertyAccessExpression(inner)) {
