@@ -82,6 +82,8 @@ const EXPECTED_VULNERABLE = [
   // Evasion-resistance: each of these fixtures is cloaked with a technique
   // from arXiv:2607.02357 that defeated the scanners surveyed there.
   ["SKL002", "vulnerable/skills/cloaked-skill/SKILL.md"],
+  // Quoting an override is not a mention unless the sentence refuses it.
+  ["SKL002", "vulnerable/skills/quoted-override-skill/SKILL.md"],
   ["SKL004", "vulnerable/skills/staged-skill/SKILL.md"],
   ["SKL005", "vulnerable/skills/exfil-skill/helpers/metrics.test.ts"],
   // Recall gaps found by running against real-world labeled fixtures
