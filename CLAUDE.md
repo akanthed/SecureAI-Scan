@@ -92,6 +92,16 @@ Two modules exist specifically to defeat the published scanner-evasion technique
 
 Because a bundle can be an entire repository (when `SKILL.md` sits at a repo root), both bundle rules require a *linked* conjunction rather than co-occurrence: SKL004's unpack directive must name the blob, and SKL005's credential read and egress must be within `EXFIL_PROXIMITY_LINES` of each other in the same file. Loosening either is how these rules would start firing on ordinary monorepos.
 
+### MCP tool-argument taint (MCP013/MCP014)
+
+`src/scanner/rules/mcp-tool-arg-sink.ts` (TS) and `checkMcpToolArgSink` in `python-scanner.ts` treat **MCP tool arguments** as the taint source: the model writes them, so a prompt injection chooses them. That source is what keeps these rules in scope; a value from an ordinary HTTP form reaching `exec` is general SAST and stays out. Three conventions are load-bearing:
+
+- **Report only an intent the code fails to keep.** MCP013 needs the argument *composed into a fixed command*; MCP014 needs it *joined onto a base directory*. A by-design "run any command" or "read any file" tool is `heuristic`. Don't promote it: on 25 popular servers this distinction is the difference between zero findings and noise.
+- **Guards must actually validate.** A membership test counts only against an allowlist (or a metacharacter probe on the value), and a regex only when it is anchored or probes metacharacters. `fileText.includes(x)` and `x.match(/host\/(.+)/)` don't validate anything, and treating them as guards hid two real CVEs.
+- **Sinks use reaching definitions.** A variable reused across `switch` cases is judged by the write that reaches each `exec` (or each wrapper call), not by any write in the function. Flow-insensitive taint produced false positives in mcp-server-kubernetes.
+
+Recall is checked against published CVEs, not only fixtures: the vulnerable commit must fire and the fix commit must be clean (see `docs/RealWorldFindings.md`). Re-run that check when changing these rules.
+
 ### The evidence-tier contract (this is the core design principle)
 
 Every `Finding` carries an `Evidence` tier (`src/scanner/types.ts`):
@@ -117,6 +127,7 @@ Any change to a rule's detection logic must be checked against this corpus, **an
 
 ### Other entry points
 
+- `src/scanner/installed.ts` — `secureai-scan installed`: audits the per-user MCP configs of known AI clients (Claude Code incl. per-project servers in `~/.claude.json`, Claude Desktop, Cursor, VS Code, Windsurf, Gemini CLI, Cline, Roo Code, Amazon Q) and `~/.claude/skills`. It stages **only the server entries** of each config into a private temp dir, runs the unchanged config/advisory scanners there, and maps findings back to the real file and line. Never stage or echo anything else from a client config: `~/.claude.json` also holds session tokens. `--deep` fetches npm-launched servers via `fetch-target.ts` and is the only network path; tests inject `fetchPackage` to stay offline.
 - `src/scanner/bom.ts` — AI-BOM generation (`secureai-scan bom`), inventories SDKs/models/vector stores/MCP servers.
 - `src/scanner/threat-model.ts` — generates `THREAT_MODEL.md` with an OWASP LLM/ASI/MCP coverage matrix, driven entirely off `src/scanner/catalog.ts`'s `RULE_CATALOG`/`FRAMEWORK_MAP` (add a rule there and the matrix updates itself — no separate wiring needed except `CATEGORY_LABELS`/`buildTrustBoundaries` for a genuinely new rule-ID prefix).
 - `src/scanner/explainer.ts` + `src/scanner/catalog.ts` — power `secureai-scan explain <RULE_ID>` (static per-rule why/exploit/fix content keyed by rule ID). **Every new rule needs an entry in both** — `explainer.ts` silently falls back to generic boilerplate for unregistered IDs, which is easy to miss since nothing fails a build or test over it.

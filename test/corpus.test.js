@@ -68,6 +68,7 @@ const EXPECTED_VULNERABLE = [
   ["MCP013", "vulnerable/mcp-tool-sinks/fastmcp_server.ts"],
   ["MCP013", "vulnerable/mcp-tool-sinks/fastmcp_ops.py"],
   ["MCP013", "vulnerable/mcp-tool-sinks/lowlevel_server.py"],
+  ["MCP013", "vulnerable/mcp-tool-sinks/fastmcp_helper.py"],
   // Interprocedural: dispatcher → handler in another file → imported
   // promisified exec; registry object → class-method chain → conditional.
   ["MCP013", "vulnerable/mcp-tool-sinks/dispatcher/issues.ts"],

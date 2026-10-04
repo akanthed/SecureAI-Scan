@@ -158,3 +158,33 @@ test("a reused command variable is judged by the value that reaches each exec (f
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("a reused command variable passed to an exec wrapper is judged at the call", () => {
+  const dir = tempRepo({
+    "helm.ts": [
+      'import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";',
+      'import { execSync } from "node:child_process";',
+      'import { z } from "zod";',
+      "function runHelm(command: string) {",
+      "  return execSync(command).toString();",
+      "}",
+      'const server = new McpServer({ name: "helm", version: "1.0.0" });',
+      'server.tool("helm", { op: z.string(), chart: z.string() }, async (input) => {',
+      '  let command = "helm repo update";',
+      '  if (input.op === "update") return runHelm(command);',
+      "  command = `helm install ${input.chart}`;",
+      "  return runHelm(command);",
+      "});",
+      "",
+    ].join("\n"),
+  });
+  try {
+    const hits = scan(dir).filter((f) => f.rule_id === "MCP013");
+    assert.equal(hits.length, 1);
+    // Reported at the wrapper's exec, reached through the tainted call only.
+    assert.equal(hits[0].line, 5);
+    assert.ok(hits[0].trace.some((step) => step.line === 12 && /passed to `runHelm`/.test(step.note)), JSON.stringify(hits[0].trace));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

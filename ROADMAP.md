@@ -32,7 +32,7 @@ Confirmed gap, not theoretical: `cisco-ai-defense/skill-scanner`'s `multi-file-e
 
 **Plan:** deliberately *not* a general interprocedural taint engine — that's a research project and a false-positive generator. Instead, bundle-scoped import-graph taint: inside one skill bundle or one MCP server package (a small, closed unit), resolve imports and propagate capability facts across the handful of files in that unit. Bounded scope is the point.
 
-**Status:** not started.
+**Status:** partly shipped for MCP servers (unreleased, `main`). MCP013/MCP014 follow a tool argument from the handler through imports, class methods, object-literal fields, handler references, and `tsconfig` path aliases, up to four calls, inside the scanned TypeScript project. That is bounded by the project, not a general engine, and findings that cross a call cap at `likely`. It is validated on six published MCP command-injection CVEs (all detected on the vulnerable release, all clean on the fix). **Not done:** the same propagation for Python handlers (single-function only today), and for skill-bundle capability facts (SKL005's credential-read and egress still need to sit in one file).
 
 ### 3. Static analysis has a ceiling
 
@@ -55,6 +55,8 @@ Cannot out-engineer Cisco/Snyk on headcount. Can out-trust them on process.
 **The wedge is pre-install, not post-commit.** Shipped: `secureai-scan skill <target>` / `secureai-scan mcp <target>`. Also shipped (2026-08-26): a `pre-commit` hook (`.pre-commit-hooks.yaml`, `scripts/precommit-entry.js`) alongside the existing GitHub Action — catches findings before a push, not just after.
 
 **VS Code / Cursor extension — scaffolded (2026-08-26), not published.** `vscode-extension/` wraps the CLI (bundled as a real npm dependency, no network calls at scan time — same offline guarantee as the CLI) and reports findings as Problems-panel diagnostics on save, with `Scan Workspace`/`Scan Current File's Project`/`Clear Findings` commands and a status-bar count. Validated: `tsc` compiles clean under `strict`, `vsce package` produces a real installable `.vsix` (5.47MB — mostly tree-sitter's native Python-parser bindings and ts-morph's bundled TypeScript compiler, both load-bearing, not bloat), and the diagnostic-mapping logic is checked against the CLI's actual `--output <file>.json` schema, not a guessed one. **Not done:** published nowhere — Marketplace publishing needs a publisher account/token this session doesn't have. Also open: bundling/minifying (`vsce` warns about 366 unbundled files; performance, not correctness), an icon, and Cursor-specific packaging if that turns out to differ from plain VS Code.
+
+**Audit what's installed — shipped (unreleased, `main`).** `secureai-scan installed` reads the per-user MCP configs of nine AI clients plus installed skills, and `--deep` scans each installed server's code. This is the zero-argument "check my machine" entry point Snyk Agent Scan built its following on, with a different deliverable: findings proven from the server's own source, not only its tool descriptions.
 
 Remaining distribution surface:
 

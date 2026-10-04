@@ -607,7 +607,13 @@ function guards(call: CallExpression, names: Set<string>): boolean {
   const callee = call.getExpression();
   const method = Node.isPropertyAccessExpression(callee) ? callee.getName() : undefined;
   const receiverText = method && Node.isPropertyAccessExpression(callee) ? callee.getExpression().getText() : "";
-  const argsText = call.getArguments().map((arg) => arg.getText()).join(" ");
+  // String literals are never references: `lower.startsWith("description")`
+  // does not mention a variable named `description`.
+  const argsText = call
+    .getArguments()
+    .filter((arg) => !Node.isStringLiteral(arg) && !Node.isNoSubstitutionTemplateLiteral(arg))
+    .map((arg) => arg.getText())
+    .join(" ");
   const onValue = [...names].some((name) => mentions(receiverText, name));
   const onArgs = [...names].some((name) => mentions(argsText, name));
   if (!onValue && !onArgs) return false;
@@ -831,7 +837,9 @@ function analyzeScope(
     const args = call.getArguments();
     for (let index = 0; index < args.length; index += 1) {
       const isObject = isArgObject(args[index], state.objects);
-      let taint = isObject ? undefined : expressionTaint(args[index], state);
+      // The value reaching this call, like at a sink: a reused variable
+      // passed to a wrapper is judged by what it holds here.
+      let taint = isObject ? undefined : sinkArgumentTaint(args[index], call, scope.fn, state);
       let fields: Map<string, Taint> | undefined;
       const literal = unwrap(args[index]);
       if (!isObject && !taint && Node.isObjectLiteralExpression(literal)) {

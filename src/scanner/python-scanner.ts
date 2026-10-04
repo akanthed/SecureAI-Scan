@@ -1593,25 +1593,86 @@ function pyDispatchedToolName(node: PythonNode, handler: PyToolHandler): string 
   return handler.toolName;
 }
 
+interface PyReach {
+  handler: PyToolHandler;
+  taint: PySinkTaint;
+  /** Set when the sink is in a module-level helper the tool handler calls. */
+  hop?: { helper: PythonFunctionNode; call: PythonCallNode };
+}
+
+function pyTaintAtSink(src: PythonSource, handler: PyToolHandler, sinkCall: PythonCallNode, target: PythonNode): PySinkTaint | undefined {
+  if (handler.params.size === 0 && handler.argObjects.size === 0) return undefined;
+  const vars = pyHandlerTaint(src, handler, sinkCall.node.startIndex);
+  const taint = pyExprTaint(target, handler, vars);
+  if (!taint) return undefined;
+  const names = new Set<string>([taint.field]);
+  for (const [name, info] of vars) if (info.field === taint.field) names.add(name);
+  return pyIsGuarded(src, handler, names, sinkCall) ? undefined : taint;
+}
+
+/**
+ * A tool argument reaching `target` at `sinkCall`: directly inside a tool
+ * handler, or one call away — the sink sits in a module-level helper
+ * (`def _run(cmd): subprocess.run(cmd, shell=True)`) that a tool handler in
+ * the same file calls with a tainted argument. Guards in either function
+ * count; the hop caps the finding at `likely`.
+ */
+function pyReachSink(src: PythonSource, sinkCall: PythonCallNode, target: PythonNode): PyReach | undefined {
+  const direct = pyToolHandler(src, sinkCall.node);
+  if (direct) {
+    const taint = pyTaintAtSink(src, direct, sinkCall, target);
+    return taint ? { handler: direct, taint } : undefined;
+  }
+
+  const helper = src.ast.enclosingFunction(sinkCall.node);
+  if (!helper || helper.node.parent?.type !== "module" && helper.node.parent?.parent?.type !== "module") return undefined;
+  const params = (helper.node.childForFieldName("parameters")?.namedChildren ?? [])
+    .map(pyParamName)
+    .filter((name): name is string => !!name);
+  if (params.length === 0) return undefined;
+
+  // Which helper parameter reaches the sink, and how it was shaped there.
+  const asHandler: PyToolHandler = {
+    fn: helper,
+    toolName: helper.name,
+    params: new Map(params.map((name) => [name, helper.node.startPosition.row])),
+    argObjects: new Set(),
+  };
+  const inner = pyTaintAtSink(src, asHandler, sinkCall, target);
+  if (!inner) return undefined;
+  const index = params.indexOf(inner.field);
+  if (index < 0) return undefined;
+
+  for (const call of src.ast.calls) {
+    if (pythonCallName(call) !== helper.name) continue;
+    const caller = pyToolHandler(src, call.node);
+    if (!caller) continue;
+    const argument = call.keywords.get(inner.field) ?? call.arguments[index];
+    if (!argument) continue;
+    const outer = pyTaintAtSink(src, caller, call, argument);
+    if (!outer) continue;
+    return {
+      handler: caller,
+      taint: { ...outer, composed: outer.composed || inner.composed, baseJoined: outer.baseJoined || inner.baseJoined },
+      hop: { helper, call },
+    };
+  }
+  return undefined;
+}
+
 function checkMcpToolArgSink(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
   if (!ctx.fileHasMcpServer) return null;
   const aliases = pySubprocessNames(src);
   for (const call of src.ast.callsAtLine(i)) {
     const sink = pySinkKind(call, aliases);
     if (!sink?.target) continue;
-    const handler = pyToolHandler(src, call.node);
-    if (!handler || (handler.params.size === 0 && handler.argObjects.size === 0)) continue;
-    const vars = pyHandlerTaint(src, handler, call.node.startIndex);
-    const taint = pyExprTaint(sink.target, handler, vars);
-    if (!taint) continue;
-
-    const names = new Set<string>([taint.field]);
-    for (const [name, info] of vars) if (info.field === taint.field) names.add(name);
-    if (pyIsGuarded(src, handler, names, call)) continue;
+    const reached = pyReachSink(src, call, sink.target);
+    if (!reached) continue;
+    const { handler, taint, hop } = reached;
 
     const intentional = sink.kind === "shell" ? taint.composed : taint.baseJoined;
-    const evidence = intentional ? (sink.kind === "shell" ? "proven" : "likely") : "heuristic";
-    const toolName = pyDispatchedToolName(call.node, handler);
+    const evidence = !intentional ? "heuristic" : sink.kind === "shell" && !hop ? "proven" : "likely";
+    const toolName = pyDispatchedToolName(hop?.call.node ?? call.node, handler);
     const sinkName = pythonCallName(call);
     const ruleId = sink.kind === "shell" ? "MCP013" : "MCP014";
     const title = sink.kind === "shell"
@@ -1622,7 +1683,9 @@ function checkMcpToolArgSink(src: PythonSource, i: number, file: string, ctx: Fi
     const trace: TraceStep[] = [
       { kind: "source", file, line: taint.line + 1, note: `tool argument \`${taint.field}\` of MCP tool \`${toolName}\` (model-controlled)` },
     ];
-    if (sink.target.startPosition.row !== call.node.startPosition.row || sink.target.type === "identifier") {
+    if (hop) {
+      trace.push({ kind: "flow", file, line: hop.call.node.startPosition.row + 1, note: `passed to \`${hop.helper.name}\`` });
+    } else if (sink.target.startPosition.row !== call.node.startPosition.row || sink.target.type === "identifier") {
       trace.push({
         kind: "flow",
         file,

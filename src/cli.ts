@@ -20,6 +20,7 @@ import { generateBom, formatBomMarkdown } from "./scanner/bom.js";
 import { getOwnVersion } from "./utils/version.js";
 import { scanSkillFiles, findSkillFiles } from "./scanner/skill-scanner.js";
 import { resolveTarget } from "./scanner/fetch-target.js";
+import { scanInstalled } from "./scanner/installed.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -129,7 +130,7 @@ export async function runCli(argv: string[]): Promise<void> {
     // Scope which rules run
     .option("-r, --rules <list>", "Comma-separated rule IDs to run, e.g. AI001,MCP007", parseRules)
     .option("--only-ai", "Run only AI/LLM rules (AI001–AI012)")
-    .option("--only-mcp", "Run only MCP rules (MCP001–MCP010)")
+    .option("--only-mcp", "Run only MCP rules (MCP001–MCP014)")
     .option("--only-vec", "Run only Vector/RAG rules (VEC001–VEC004)")
     .option("--only-skl", "Run only Agent Skill rules (SKL001–SKL005)")
     .option(
@@ -349,6 +350,23 @@ export async function runCli(argv: string[]): Promise<void> {
     .description("Fetch and scan an MCP server package before you install it (full rule set + DEP003 advisories)")
     .action(async (target: string, options: SkillOrMcpOptions) => {
       await runFetchAndScan(target, "mcp", options);
+    });
+
+  // ── installed ────────────────────────────────────────────────────────────
+  // Audit what is already trusted on this machine: the MCP servers configured
+  // in each AI client's per-user config, and installed Agent Skills. Offline
+  // unless --deep, which fetches npm-launched servers the same way `mcp` does.
+  program
+    .command("installed")
+    .option("--deep", "Also scan each installed server's code: npm packages are fetched with `npm pack` (never installed or executed), local servers are read in place")
+    .option("-s, --severity <level>", "Minimum severity: low | medium | high | critical", parseSeverity)
+    .option("--paranoid", "Include heuristic-tier findings (hidden by default)")
+    .option("--output <file>", "Save a full report as .sarif, .json, .md, or .html")
+    .option("--fail-on <severity>", "Exit 1 if findings at/above this severity exist", parseSeverity)
+    .option("--limit <number>", "Max rule groups shown in terminal (default: 10)", parseLimit)
+    .description("Audit the MCP servers and Agent Skills installed on this machine (Claude Code/Desktop, Cursor, VS Code, Windsurf, Gemini CLI, Cline, ...)")
+    .action((options: InstalledOptions) => {
+      runInstalled(options);
     });
 
   // ── explain ──────────────────────────────────────────────────────────────
@@ -595,6 +613,62 @@ async function runFetchAndScan(
       process.stdout.write(`\nKept fetched copy at: ${resolved.dir}\n`);
     } else {
       resolved.cleanup();
+    }
+  }
+}
+
+interface InstalledOptions extends Omit<SkillOrMcpOptions, "keep"> {
+  deep?: boolean;
+}
+
+function runInstalled(options: InstalledOptions): void {
+  const startedAt = Date.now();
+  if (options.deep) process.stdout.write("Deep mode: fetching npm-launched servers with `npm pack` (nothing is installed or executed)...\n");
+  const result = scanInstalled({ deep: options.deep ?? false });
+
+  if (result.configs.length === 0 && result.skillRoots.length === 0) {
+    process.stdout.write(
+      "\nNo MCP client configs or Agent Skills found in the usual per-user locations " +
+        "(Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Gemini CLI, Cline, Roo Code, Amazon Q, ~/.claude/skills).\n" +
+        "To audit a project's own config, run: secureai-scan scan <path>\n",
+    );
+    return;
+  }
+
+  const byClient = new Map<string, number>();
+  for (const server of result.servers) byClient.set(server.client, (byClient.get(server.client) ?? 0) + 1);
+  const lines = [`\nFound ${result.servers.length} MCP server(s) across ${result.configs.length} client config(s)` + (result.skillCount ? ` and ${result.skillCount} Agent Skill(s)` : "") + ":"];
+  for (const [client, count] of byClient) lines.push(`  ${client}: ${count} server(s)`);
+  for (const root of result.skillRoots) lines.push(`  ${root.client}: ${root.path}`);
+  if (options.deep) {
+    if (result.deepScanned.length) lines.push(`  Deep-scanned: ${result.deepScanned.join(", ")}`);
+    for (const skipped of result.deepSkipped) lines.push(`  Not deep-scanned: ${skipped.server} (${skipped.reason})`);
+  } else if (result.servers.length > 0) {
+    lines.push("  Run with --deep to also scan each server's code (command injection, path traversal, ...).");
+  }
+  process.stdout.write(`${lines.join("\n")}\n`);
+
+  const paranoid = options.paranoid ?? false;
+  const evidenceFiltered = paranoid ? result.findings : result.findings.filter((f) => f.evidence !== "heuristic");
+  const filtered = filterFindingsBySeverity(evidenceFiltered, options.severity);
+  const report = buildReport(
+    filtered,
+    { tool: "SecureAI-Scan", version: getOwnVersion(), scannedAt: new Date().toISOString() },
+    {
+      ignoredFindings: [],
+      hiddenHeuristic: result.findings.length - evidenceFiltered.length,
+      filesScanned: result.configs.length + result.skillCount + result.deepScanned.length,
+      durationMs: Date.now() - startedAt,
+    },
+  );
+  if (options.output) writeFullReport(report, options.output);
+  process.stdout.write(`${formatTerminalReport(report, options.limit ?? 10)}\n`);
+
+  if (options.failOn) {
+    const failing = filtered.filter((f) => severityValue(f.severity) >= severityValue(options.failOn!));
+    if (failing.length > 0) {
+      process.stderr.write(`\nFailing: ${failing.length} finding(s) at or above "${options.failOn}" severity.\n`);
+      process.exitCode = 1;
     }
   }
 }
