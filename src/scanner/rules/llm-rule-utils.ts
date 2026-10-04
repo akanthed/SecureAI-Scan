@@ -110,7 +110,7 @@ function leftmostIdentifier(node: Node): Node | undefined {
 }
 
 /** Resolve an identifier to the module specifier it (transitively) came from. */
-function resolveIdentifierModule(identifier: Node, depth = 0): string | undefined {
+export function resolveIdentifierModule(identifier: Node, depth = 0): string | undefined {
   if (depth > 5 || !Node.isIdentifier(identifier)) return undefined;
 
   const symbol = identifier.getSymbol();

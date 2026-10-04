@@ -1,6 +1,13 @@
-import { Node, SyntaxKind } from "ts-morph";
+import path from "node:path";
+import { Node, SyntaxKind, type SourceFile } from "ts-morph";
 import type { Evidence, Finding, Rule, RuleContext } from "../types.js";
-import { getCallsWithin, getFileFunctions, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
+import {
+  getCallsWithin,
+  getFileCalls,
+  getFileFunctions,
+  getNodeLine,
+  getRelativeFilePath,
+} from "../../utils/ast.js";
 import {
   evidenceConfidence,
   demoteEvidence,
@@ -63,12 +70,38 @@ function surroundingHasAuth(handler: Node): boolean {
   return false;
 }
 
+// Next.js runs `middleware.ts` (renamed `proxy.ts` in Next 16) in front of
+// every matched route, and that is where most App Router apps enforce auth.
+const NEXT_EDGE_AUTH_FILE = /^(?:middleware|proxy)\.(?:ts|tsx|js|mjs)$/;
+
+/**
+ * Auth that applies to handlers from outside them: a Next.js middleware/proxy
+ * file, or a global `app.use(requireAuth)`-style Express/Koa middleware. When
+ * present, a handler with no inline auth check is the expected shape, not
+ * evidence of a missing check, so findings drop to `heuristic`. Found in a
+ * blind audit: every App Router route in a middleware-protected app was
+ * reported as a critical, unauthenticated LLM endpoint.
+ */
+function projectHasCentralAuth(sourceFiles: SourceFile[]): boolean {
+  for (const sourceFile of sourceFiles) {
+    const filePath = sourceFile.getFilePath();
+    if (NEXT_EDGE_AUTH_FILE.test(path.basename(filePath))) return true;
+    for (const call of getFileCalls(sourceFile)) {
+      const callee = call.getExpression();
+      if (!Node.isPropertyAccessExpression(callee) || callee.getName() !== "use") continue;
+      if (call.getArguments().some((arg) => nameLooksLikeAuth(arg.getText().slice(0, 200)))) return true;
+    }
+  }
+  return false;
+}
+
 export const ruleLlmBeforeAuth: Rule = {
   id: "AI003",
   title: "LLM call in unauthenticated request handler",
-  severity: "critical",
+  severity: "medium",
   run(context: RuleContext): Finding[] {
     const findings: Finding[] = [];
+    const centralAuth = projectHasCentralAuth(context.sourceFiles);
 
     for (const sourceFile of context.sourceFiles) {
       const relFile = getRelativeFilePath(context.rootPath, sourceFile);
@@ -95,11 +128,12 @@ export const ruleLlmBeforeAuth: Rule = {
           // unobservable hop is why this is "likely", never "proven".
           let evidence: Evidence = sink.resolved ? "likely" : "heuristic";
           if (testFile) evidence = demoteEvidence(evidence);
+          if (centralAuth) evidence = "heuristic";
 
           findings.push({
             rule_id: "AI003",
             title: "LLM call in unauthenticated request handler",
-            severity: "critical",
+            severity: "medium",
             file: relFile,
             line: getNodeLine(call),
             summary: `${/^[aeiou]/i.test(sink.provider) ? "An" : "A"} ${sink.provider} call runs in a request handler with no visible auth check before it.`,

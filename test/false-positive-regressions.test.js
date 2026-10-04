@@ -512,3 +512,71 @@ test("scanning unresolvable/edge-case identifiers does not throw", () => {
 
   assert.doesNotThrow(() => scanRepositoryDetailed(dir));
 });
+
+// ── AI003 project-level auth (llm-before-auth.ts) ───────────────────────────
+// Found in a blind audit: every App Router route in a middleware-protected
+// Next.js app was reported as a critical unauthenticated LLM endpoint.
+
+const NEXT_CHAT_ROUTE = [
+  'import OpenAI from "openai";',
+  "const openai = new OpenAI();",
+  "export async function POST(request: Request) {",
+  "  const { q } = await request.json();",
+  "  const r = await openai.chat.completions.create({",
+  '    model: "gpt-4o",',
+  '    messages: [{ role: "user", content: String(q) }],',
+  "  });",
+  "  return Response.json(r);",
+  "}",
+  "",
+].join("\n");
+
+function ai003At(dir, tier) {
+  return scanRepositoryDetailed(dir).findings.filter(
+    (f) => f.rule_id === "AI003" && (tier === "default" ? f.evidence !== "heuristic" : true),
+  );
+}
+
+test("AI003 still fires on an LLM route with no auth anywhere in the project", () => {
+  const dir = tempDir("secureai-ai003-none-");
+  fs.mkdirSync(path.join(dir, "app", "api", "chat"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "app", "api", "chat", "route.ts"), NEXT_CHAT_ROUTE);
+  const hits = ai003At(dir, "default");
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].severity, "medium");
+});
+
+test("AI003 demotes to heuristic when a Next.js middleware/proxy file guards routes", () => {
+  for (const name of ["middleware.ts", "proxy.ts"]) {
+    const dir = tempDir("secureai-ai003-mw-");
+    fs.mkdirSync(path.join(dir, "app", "api", "chat"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "app", "api", "chat", "route.ts"), NEXT_CHAT_ROUTE);
+    fs.writeFileSync(path.join(dir, name), "export { auth as middleware } from './auth';\n");
+    assert.deepEqual(ai003At(dir, "default"), [], name);
+    assert.equal(ai003At(dir, "all").length, 1, `${name}: still visible under --paranoid`);
+  }
+});
+
+test("AI003 demotes to heuristic under a global Express auth middleware", () => {
+  const dir = tempDir("secureai-ai003-express-");
+  fs.writeFileSync(
+    path.join(dir, "server.ts"),
+    [
+      'import express from "express";',
+      'import OpenAI from "openai";',
+      'import { requireAuth } from "./auth";',
+      "const app = express();",
+      "const openai = new OpenAI();",
+      "app.use(requireAuth);",
+      'app.post("/chat", async (req, res) => {',
+      "  const r = await openai.chat.completions.create({",
+      '    model: "gpt-4o",',
+      '    messages: [{ role: "user", content: String(req.body.q) }],',
+      "  });",
+      "  res.json(r);",
+      "});",
+      "",
+    ].join("\n"),
+  );
+  assert.deepEqual(ai003At(dir, "default"), []);
+});

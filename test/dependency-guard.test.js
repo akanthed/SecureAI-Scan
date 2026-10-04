@@ -111,6 +111,8 @@ test("DEP003 clears a package once it's pinned to a version outside the affected
   const vulnFindings = scanKnownMaliciousPackages(vulnDir);
   assert.equal(vulnFindings.length, 1, `expected the vulnerable pin to be flagged: ${JSON.stringify(vulnFindings)}`);
   assert.equal(vulnFindings[0].rule_id, "DEP003");
+  // The summary names the advisory — it used to read "...affected range of advisory."
+  assert.match(vulnFindings[0].summary, /affected range of .*CVE-2025-6514/);
 
   const patchedDir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-cve-patched-"));
   fs.writeFileSync(

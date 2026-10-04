@@ -75,13 +75,19 @@ def handler():
     self.prompt, request_id = request.json["q"], request.json["id"]
     return client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": self.prompt}],
+        messages=[{"role": "system", "content": self.prompt}],
     )
 `,
   });
   try {
     const findings = scanPythonFiles(root).findings;
     assert.ok(findings.some((finding) => finding.rule_id === "AI001" && finding.evidence === "likely"));
+    // The same taint in a user-role message is the recommended pattern.
+    fs.writeFileSync(
+      path.join(root, "app.py"),
+      fs.readFileSync(path.join(root, "app.py"), "utf8").replace('"role": "system"', '"role": "user"'),
+    );
+    assert.equal(scanPythonFiles(root).findings.some((finding) => finding.rule_id === "AI001"), false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -116,7 +122,7 @@ test("analyzed Python source exposes the same production AST used by rules", () 
 
 test("VEC001 recognizes vector SDK filter aliases and explicit keyword expansion", () => {
   const root = tempRepo({
-    "vectors.py": `
+    "vectors.py": `from qdrant_client import QdrantClient
 def filtered_searches(store, vector, tenant_filter):
     store.search(vector, expr=tenant_filter)
     store.search(vector, query_filter=tenant_filter)
@@ -136,6 +142,14 @@ def unfiltered_search(store, vector):
     assert.equal(findings.length, 1);
     assert.equal(findings[0].line, 13);
     assert.equal(findings[0].evidence, "likely");
+    // Without any vector-store import, `store.search(vector)` is only a
+    // name-shaped guess (found as a false positive in jlowin/fastmcp).
+    fs.writeFileSync(
+      path.join(root, "vectors.py"),
+      fs.readFileSync(path.join(root, "vectors.py"), "utf8").replace("from qdrant_client import QdrantClient\n", ""),
+    );
+    const unimported = scanPythonFiles(root).findings.filter((finding) => finding.rule_id === "VEC001");
+    assert.deepEqual(unimported.map((finding) => finding.evidence), ["heuristic"]);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

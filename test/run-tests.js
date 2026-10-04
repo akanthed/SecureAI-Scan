@@ -9,6 +9,7 @@ import "./mcp-config.test.js";
 import "./litellm-config.test.js";
 import "./python-ast.test.js";
 import "./skill-scanner.test.js";
+import "./mcp-tool-arg-sink.test.js";
 import "./corpus.test.js";
 import "./false-positive-regressions.test.js";
 import "./cli.test.js";
