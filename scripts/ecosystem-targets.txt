@@ -1,0 +1,28 @@
+# Public MCP servers and frameworks for `node scripts/ecosystem-scan.js`.
+# One target per line: GitHub "owner/repo", a git URL, or an npm package name.
+modelcontextprotocol/servers
+modelcontextprotocol/servers-archived
+modelcontextprotocol/python-sdk
+microsoft/playwright-mcp
+executeautomation/mcp-playwright
+upstash/context7
+wonderwhy-er/DesktopCommanderMCP
+supabase-community/supabase-mcp
+firecrawl/firecrawl-mcp-server
+punkpeye/fastmcp
+jlowin/fastmcp
+zcaceres/markdownify-mcp
+MarkusPfundstein/mcp-obsidian
+blazickjp/arxiv-mcp-server
+tavily-ai/tavily-mcp
+exa-labs/exa-mcp-server
+browserbase/mcp-server-browserbase
+mongodb-js/mongodb-mcp-server
+getsentry/sentry-mcp
+BrowserMCP/mcp
+cyanheads/git-mcp-server
+ahujasid/blender-mcp
+idosal/git-mcp
+hangwin/mcp-chrome
+jae-jae/fetcher-mcp
+haris-musa/excel-mcp-server

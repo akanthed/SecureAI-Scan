@@ -1,6 +1,6 @@
 {
   "note": "Reviewed proven/likely findings from scripts/regression-scan.js. Only add entries you have read against their source line.",
-  "updated": "2026-09-19",
+  "updated": "2026-10-04",
   "fingerprints": [
     "ai|MCP011|packages/harness-opencode/src/bridge/host-tool-mcp.ts",
     "cisco-skill-scanner|SKL001|evals/test_skills/malicious/ascii-smuggling/SKILL.md",

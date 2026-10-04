@@ -55,19 +55,41 @@ export function isMcpConfigContext(node: Node): boolean {
   return false;
 }
 
-export function isUserControlledValue(valueNode: Node, taintedVars: Set<string>): boolean {
+/**
+ * Request-derived variables, tracked as *declarations* rather than names. A
+ * name is not an identity: found scanning browserbase/mcp-server-browserbase,
+ * where `const url = new URL(req.url)` inside an HTTP request handler tainted
+ * the unrelated `let url` in the same file's `listen()` callback (the server's
+ * own bound address), producing a critical MCP002 on a printed sample config.
+ */
+export type TaintedDeclarations = Set<Node>;
+
+function variableDeclarationOf(identifier: Node): Node | undefined {
+  try {
+    return identifier.getSymbol()?.getDeclarations().find((decl) => Node.isVariableDeclaration(decl));
+  } catch {
+    return undefined;
+  }
+}
+
+function isTaintedIdentifier(identifier: Node, tainted: TaintedDeclarations): boolean {
+  const decl = variableDeclarationOf(identifier);
+  return decl !== undefined && tainted.has(decl);
+}
+
+export function isUserControlledValue(valueNode: Node, tainted: TaintedDeclarations): boolean {
   const text = valueNode.getText();
   if (REQUEST_SOURCES.some((src) => text.includes(src))) return true;
-  if (Node.isIdentifier(valueNode) && taintedVars.has(valueNode.getText())) return true;
+  if (Node.isIdentifier(valueNode)) return isTaintedIdentifier(valueNode, tainted);
   if (Node.isTemplateExpression(valueNode)) {
     const identifiers = valueNode.getDescendantsOfKind(SyntaxKind.Identifier);
-    return identifiers.some((id) => taintedVars.has(id.getText()));
+    return identifiers.some((id) => isTaintedIdentifier(id, tainted));
   }
   return false;
 }
 
-export function collectRequestDerivedVars(fnNode: Node): Set<string> {
-  const tainted = new Set<string>();
+export function collectRequestDerivedVars(fnNode: Node): TaintedDeclarations {
+  const tainted: TaintedDeclarations = new Set<Node>();
   // Deliberately does NOT seed `tainted` from the function's own parameter
   // names. That treated every parameter of every function as "user
   // input" regardless of the function's role — found scanning
@@ -84,10 +106,10 @@ export function collectRequestDerivedVars(fnNode: Node): Set<string> {
     if (!init) continue;
     const initText = init.getText();
     if (REQUEST_SOURCES.some((src) => initText.includes(src))) {
-      tainted.add(decl.getName());
+      tainted.add(decl);
     }
-    if (Node.isIdentifier(init) && tainted.has(init.getText())) {
-      tainted.add(decl.getName());
+    if (Node.isIdentifier(init) && isTaintedIdentifier(init, tainted)) {
+      tainted.add(decl);
     }
   }
   return tainted;

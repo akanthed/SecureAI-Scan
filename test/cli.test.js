@@ -126,7 +126,48 @@ test("scan -r SKL005 reports the payload staged in a test file", () => {
   assert.match(stdout, /metrics\.test\.ts/);
 });
 
-for (const ruleId of ["AI001", "MCP010", "SKL001", "SKL004", "SKL005", "DEP003"]) {
+test("scan -r MCP013 and --only-mcp reach the tool-argument sink rules through the CLI", () => {
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "secureai-cli-mcp013-")), "report.json");
+  for (const scope of [["-r", "MCP013"], ["--only-mcp"]]) {
+    const { stdout, status } = run(["scan", "test-fixtures/vulnerable/mcp-tool-sinks", ...scope, "--output", out]);
+    assert.equal(status, 0, scope.join(" "));
+    assert.match(stdout, /MCP013/, scope.join(" "));
+    const report = JSON.parse(fs.readFileSync(out, "utf8"));
+    const files = report.groups.filter((g) => g.ruleId === "MCP013").flatMap((g) => g.occurrences.map((o) => o.file));
+    assert.ok(files.some((f) => f.endsWith("git_server.ts")), `${scope.join(" ")}: ${files.join(", ")}`);
+  }
+});
+
+test("installed audits the configs and skills under $HOME through the CLI", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-cli-home-"));
+  try {
+    fs.mkdirSync(path.join(home, ".cursor"), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, ".cursor", "mcp.json"),
+      JSON.stringify({ mcpServers: { mail: { command: "npx", args: ["-y", "postmark-mcp@1.0.16"] } } }, null, 2),
+    );
+    const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: path.join(home, ".config") };
+    const found = run(["installed", "--fail-on", "high"], { env });
+    assert.equal(found.status, 1, "--fail-on must fail on the malicious package");
+    assert.match(found.stdout, /Found 1 MCP server\(s\) across 1 client config\(s\)/);
+    assert.match(found.stdout, /DEP003/);
+    assert.match(found.stdout, /~\/\.cursor\/mcp\.json/);
+
+    fs.rmSync(path.join(home, ".cursor"), { recursive: true, force: true });
+    const empty = run(["installed"], { env });
+    assert.equal(empty.status, 0);
+    assert.match(empty.stdout, /No MCP client configs or Agent Skills found/);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("--help lists the full MCP rule range for --only-mcp", () => {
+  const { stdout } = run(["scan", "--help"]);
+  assert.match(stdout, /MCP001–MCP014/);
+});
+
+for (const ruleId of ["AI001", "MCP010", "MCP013", "MCP014", "SKL001", "SKL004", "SKL005", "DEP003"]) {
   test(`explain ${ruleId} renders without throwing`, () => {
     const { stdout, status } = run(["explain", ruleId]);
     assert.equal(status, 0);

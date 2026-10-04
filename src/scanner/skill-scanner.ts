@@ -8,6 +8,7 @@ import {
   findRemoteInstructionDirective,
   findUnsafeDeserializationTag,
   matchInjectionPhrases,
+  neutralizeQuotedMentions,
 } from "./tool-poisoning-checks.js";
 import { matchAcrossVariants, textVariants } from "./deobfuscate.js";
 import {
@@ -253,6 +254,10 @@ function scanSkillContent(
     );
     if (strongHit) {
       const { result, transforms } = strongHit;
+      // In the clear and only inside quoted examples of what to refuse: a
+      // mention, not an instruction. Concealed hits are never excused.
+      const onlyMentioned =
+        transforms.length === 0 && matchInjectionPhrases(neutralizeQuotedMentions(segment.text)).strong.length === 0;
       findings.push(
         finding(
           "SKL002",
@@ -260,11 +265,11 @@ function scanSkillContent(
           segment.label === "description" || transforms.length > 0 ? "high" : "medium",
           relFile,
           anchorLineForLabels(segment.text, segment.baseLine, [result.strong[0]]),
-          `Skill "${label}" ${segment.label} contains ${result.strong[0]}.`,
+          `Skill "${label}" ${segment.label} ${onlyMentioned ? "quotes" : "contains"} ${result.strong[0]}${onlyMentioned ? " as an example of what to refuse" : ""}.`,
           "The skill contains instructions aimed at the agent rather than documentation for the user — the same pattern used by real-world MCP tool-poisoning attacks, now seen in Agent Skill files. Skill content enters the model's context as trusted instructions whenever the skill loads." +
             transformSuffix(transforms),
           "Rewrite the skill as plain documentation. If this content was not written by your team, treat the skill as compromised.",
-          evidenceFor("likely", transforms),
+          onlyMentioned ? "heuristic" : evidenceFor("likely", transforms),
         ),
       );
     } else {

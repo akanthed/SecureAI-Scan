@@ -28,7 +28,51 @@ function isRequestObjectAccess(node: Node): boolean {
   const rootName = root.getText().toLowerCase();
   if (rootName === "req" || rootName === "request") return true;
   if (rootName === "ctx") return node.getText().toLowerCase().startsWith("ctx.request");
-  return false;
+  // Hono: `c.req.query(...)`, `c.req.valid("json")` — the context's `req`.
+  return /^\w+\.req(?:\.|\[|$)/.test(node.getText());
+}
+
+// Methods that read the body/query of a Fetch-API `Request` (Next.js App
+// Router, Remix, SvelteKit, Hono, Workers) or a Hono `c.req`.
+const REQUEST_READ_METHODS = new Set([
+  "json", "formData", "text", "get", "getAll", "param", "query", "queries", "header", "valid",
+]);
+
+/**
+ * `await req.json()`, `request.formData()`, `req.nextUrl.searchParams.get("q")`,
+ * `c.req.valid("json")`: a call that reads request data. The awaited result
+ * carries the same taint as `req.body.x` does for Express; without this, every
+ * Fetch-API-style handler was invisible to AI001.
+ */
+function isRequestRead(node: Node): boolean {
+  let current = node;
+  while (
+    Node.isAwaitExpression(current) ||
+    Node.isParenthesizedExpression(current) ||
+    Node.isAsExpression(current) ||
+    Node.isNonNullExpression(current)
+  ) {
+    current = current.getExpression();
+  }
+  if (!Node.isCallExpression(current)) return false;
+  const callee = current.getExpression();
+  if (!Node.isPropertyAccessExpression(callee)) return false;
+  if (!REQUEST_READ_METHODS.has(callee.getName())) return false;
+  const receiver = callee.getExpression();
+  return Node.isIdentifier(receiver)
+    ? ["req", "request"].includes(receiver.getText().toLowerCase())
+    : isRequestObjectAccess(receiver);
+}
+
+/** Names bound by a declaration: `x`, or every name in `{ a, b: c }` / `[a, b]`. */
+function boundNames(decl: import("ts-morph").VariableDeclaration): string[] {
+  const nameNode = decl.getNameNode();
+  if (Node.isIdentifier(nameNode)) return [nameNode.getText()];
+  return nameNode
+    .getDescendantsOfKind(SyntaxKind.BindingElement)
+    .map((element) => element.getNameNode())
+    .filter(Node.isIdentifier)
+    .map((id) => id.getText());
 }
 
 /**
@@ -89,10 +133,39 @@ function collectTaint(
     changed = false;
     passes += 1;
     for (const decl of decls) {
-      const name = decl.getName();
-      if (tainted.has(name)) continue;
       const init = decl.getInitializer();
       if (!init) continue;
+
+      // Destructuring: `const { persona } = await req.json()` taints each
+      // bound name from a request read, request access, or tainted value.
+      if (!Node.isIdentifier(decl.getNameNode())) {
+        let origin: string | undefined;
+        if (isRequestRead(init) || isRequestObjectAccess(init)) {
+          origin = `request data \`${init.getText().replace(/^await\s+/, "")}\``;
+        } else if (Node.isIdentifier(init) && tainted.get(init.getText())?.origin.startsWith("request data")) {
+          origin = tainted.get(init.getText())!.origin;
+        }
+        if (!origin) continue;
+        for (const bound of boundNames(decl)) {
+          if (tainted.has(bound)) continue;
+          tainted.set(bound, { origin, line: getNodeLine(decl), viaTemplate: false });
+          changed = true;
+        }
+        continue;
+      }
+
+      const name = decl.getName();
+      if (tainted.has(name)) continue;
+
+      if (isRequestRead(init)) {
+        tainted.set(name, {
+          origin: `request data \`${init.getText().replace(/^await\s+/, "")}\``,
+          line: getNodeLine(decl),
+          viaTemplate: false,
+        });
+        changed = true;
+        continue;
+      }
 
       if (isRequestObjectAccess(init)) {
         tainted.set(name, {
@@ -229,6 +302,8 @@ function traceInterproceduralSink(
         // is. Never "proven" — see the plan's precision-risk rationale.
         let evidence: Evidence = "likely";
         if (crossedTestFile) evidence = demoteEvidence(evidence);
+        // Non-system prompt fields: see the base case in run() below.
+        if (!isSystemRole) evidence = "heuristic";
         if (!rootOrigin.startsWith("request data")) evidence = demoteEvidence(evidence);
 
         const trace: TraceStep[] = [...precedingSteps];
@@ -410,15 +485,29 @@ export const rulePromptInjectionConcat: Rule = {
               continue;
             }
 
-            if (!isDynamicComposition(part.node, taint)) continue;
             const taintedRef = findTaintedRef(part.node, taint);
             if (!taintedRef) continue;
-
             const isSystemRole = part.role === "system" || part.role === "developer";
+            // Request data handed over as the *whole* system prompt is the
+            // worst case, composed or not. Restricted to request origin: a
+            // `systemPrompt` parameter of an SDK wrapper is the caller's
+            // choice, not user input.
+            const bareRequestSystem =
+              isSystemRole && taintedRef.origin.startsWith("request data") && taintedRef.name !== "req" && taintedRef.name !== "request";
+            if (!isDynamicComposition(part.node, taint) && !bareRequestSystem) continue;
+
             const sinkLine = getNodeLine(part.node);
 
             let evidence: Evidence = sink.resolved ? "proven" : "likely";
             if (testFile) evidence = demoteEvidence(evidence);
+            // A request value composed into a non-system prompt field (Vercel
+            // AI SDK `prompt`, a bare string argument) only steers the
+            // caller's own response: there are no privileged instructions to
+            // override. Found in vercel/ai's examples once Fetch-API request
+            // reads were tainted, e.g. `system: STATIC, prompt: \`Categorize:
+            // "${expense}"\``, the recommended shape. Only system/developer
+            // roles are reported at default evidence.
+            if (!isSystemRole) evidence = "heuristic";
             // Param-only taint (no request object anywhere) is weaker: the
             // caller may be internal. Request-derived taint stays proven.
             if (!taintedRef.origin.startsWith("request data")) {

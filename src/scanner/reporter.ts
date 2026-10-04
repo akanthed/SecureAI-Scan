@@ -311,7 +311,7 @@ export function formatTerminalReport(report: ReportModel, limit = 10): string {
   const { summary, meta } = report;
   const divider = tc.dim("─".repeat(64));
 
-  const fileInfo = meta.filesScanned !== undefined ? ` · ${meta.filesScanned} files` : "";
+  const fileInfo = meta.filesScanned !== undefined ? ` · ${meta.filesScanned} ${meta.filesScanned === 1 ? "file" : "files"}` : "";
   const timing = meta.durationMs !== undefined ? ` · ${(meta.durationMs / 1000).toFixed(1)}s` : "";
   out.push("");
   out.push(`  ${tc.bold("SecureAI-Scan")} ${tc.dim("v" + meta.version)}${tc.dim(fileInfo)}${tc.dim(timing)}`);

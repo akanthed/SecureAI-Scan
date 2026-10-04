@@ -148,7 +148,7 @@ export function scanKnownMaliciousPackages(rootPath: string, skipPaths?: string[
     if (confirmed.length > 0) {
       findings.push(
         advisoryFinding(candidate, confirmed, "high", "proven", {
-          summary: `${candidate.name}@${candidate.version} is inside the affected range of ${plural(confirmed.length, "advisory", "advisories")}.`,
+          summary: `${candidate.name}@${candidate.version} is inside the affected range of ${advisoryLabel(confirmed)}.`,
           recommendation: `Update ${candidate.name} past the affected range (${confirmed[0].affectedVersions ?? "see reference"}). Reference: ${confirmed[0].reference}`,
         }),
       );
@@ -214,6 +214,16 @@ function advisoryFinding(
 
 function rangeSuffix(advisory: PackageAdvisory): string {
   return advisory.affectedVersions ? ` (affected: ${advisory.affectedVersions})` : "";
+}
+
+const ADVISORY_ID = /\b(?:CVE-\d{4}-\d{4,}|GHSA(?:-[23456789cfghjmpqrvwx]{4}){3})\b/i;
+
+/** "CVE-2025-6514", or "3 advisories (CVE-…, GHSA-…, …)": never a bare "advisory". */
+function advisoryLabel(advisories: PackageAdvisory[]): string {
+  const ids = [...new Set(advisories.map((a) => ADVISORY_ID.exec(`${a.reference} ${a.reason}`)?.[0]).filter((id): id is string => !!id))];
+  if (advisories.length === 1) return ids[0] ?? "a published advisory";
+  const shown = ids.slice(0, 3).join(", ");
+  return `${advisories.length} advisories${shown ? ` (${shown}${ids.length > 3 ? ", …" : ""})` : ""}`;
 }
 
 function plural(n: number, one: string, many: string): string {

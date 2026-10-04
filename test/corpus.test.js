@@ -32,6 +32,13 @@ const EXPECTED_VULNERABLE = [
   // Attribute assignment target (`self.x = request.json[...]`) in a class-based
   // handler, with the model call far outside any proximity window.
   ["AI001", "vulnerable/attribute_taint.py"],
+  // Role-aware Python AI001: SDK `system=` keyword, and a LangChain
+  // SystemMessage inside a message list resolved through a variable.
+  ["AI001", "vulnerable/ai001_python_system_kwarg.py"],
+  ["AI001", "vulnerable/ai001_python_langchain_system_message.py"],
+  // Fetch-API request reads (`await req.json()`, Hono `c.req.json()`).
+  ["AI001", "vulnerable/next-app/chat_route.ts"],
+  ["AI001", "vulnerable/hono_system_prompt.ts"],
   ["AI002", "vulnerable/logging.ts"],
   ["AI003", "vulnerable/llm_before_auth.ts"],
   ["AI004", "vulnerable/pii_to_llm.ts"],
@@ -52,18 +59,39 @@ const EXPECTED_VULNERABLE = [
   ["MCP010", "vulnerable/mcp_dynamic_command.ts"],
   ["MCP011", "vulnerable/mcp_untrusted_tool_source.ts"],
   ["MCP011", "vulnerable/mcp_untrusted_tool_source.py"],
+  // MCP013/MCP014: model-controlled tool arguments reaching a shell command /
+  // a base-joined file path, across the high-level, low-level, registerTool,
+  // fastmcp, and FastMCP (Python) handler shapes.
+  ["MCP013", "vulnerable/mcp-tool-sinks/git_server.ts"],
+  ["MCP013", "vulnerable/mcp-tool-sinks/lowlevel_server.ts"],
+  ["MCP013", "vulnerable/mcp-tool-sinks/wrapper_server.ts"],
+  ["MCP013", "vulnerable/mcp-tool-sinks/fastmcp_server.ts"],
+  ["MCP013", "vulnerable/mcp-tool-sinks/fastmcp_ops.py"],
+  ["MCP013", "vulnerable/mcp-tool-sinks/lowlevel_server.py"],
+  ["MCP013", "vulnerable/mcp-tool-sinks/fastmcp_helper.py"],
+  // Interprocedural: dispatcher → handler in another file → imported
+  // promisified exec; registry object → class-method chain → conditional.
+  ["MCP013", "vulnerable/mcp-tool-sinks/dispatcher/issues.ts"],
+  ["MCP013", "vulnerable/mcp-tool-sinks/service-chain/docs-service.ts"],
+  ["MCP014", "vulnerable/mcp-tool-sinks/lowlevel_server.ts"],
+  ["MCP014", "vulnerable/mcp-tool-sinks/register_tool_server.ts"],
+  ["MCP014", "vulnerable/mcp-tool-sinks/fastmcp_ops.py"],
   ["SKL001", "vulnerable/skills/leaky-skill/SKILL.md"],
   ["SKL002", "vulnerable/skills/leaky-skill/SKILL.md"],
   ["SKL003", "vulnerable/skills/leaky-skill/SKILL.md"],
   // Evasion-resistance: each of these fixtures is cloaked with a technique
   // from arXiv:2607.02357 that defeated the scanners surveyed there.
   ["SKL002", "vulnerable/skills/cloaked-skill/SKILL.md"],
+  // Quoting an override is not a mention unless the sentence refuses it.
+  ["SKL002", "vulnerable/skills/quoted-override-skill/SKILL.md"],
   ["SKL004", "vulnerable/skills/staged-skill/SKILL.md"],
   ["SKL005", "vulnerable/skills/exfil-skill/helpers/metrics.test.ts"],
   // Recall gaps found by running against real-world labeled fixtures
   // (cisco-ai-defense/skill-scanner's evals/ corpus) — see CHANGELOG 0.6.1.
   ["SKL005", "vulnerable/skills/env-harvest-skill/collect.py"],
   ["SKL005", "vulnerable/skills/deferred-exec-skill/updater.py"],
+  // A credential file read and uploaded (the safe twin only writes it).
+  ["SKL005", "vulnerable/skills/npmrc-upload-skill/scripts/sync.sh"],
   // SKL006 — Claude Code dynamic-context-injection (`!`cmd``/```!) runs at
   // load time, before any agent decision or tool-permission gate.
   ["SKL006", "vulnerable/skills/dynamic-exec-skill/SKILL.md"],
