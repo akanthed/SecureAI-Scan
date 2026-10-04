@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.12.0 — 2026-10-04
 
 **MCP tool-argument taint: the scanner now finds command injection and path traversal inside MCP servers**, the two largest classes of real MCP CVEs, and nine real-world false-positive classes are fixed at the root. Validated against six published MCP command-injection CVEs (all detected on the vulnerable release, all clean on the patched one) and 25 popular MCP servers (no default-tier MCP013/MCP014 findings). Full write-up: [`docs/RealWorldFindings.md`](docs/RealWorldFindings.md#we-pointed-it-at-six-mcp-servers-with-published-command-injection-cves).
 

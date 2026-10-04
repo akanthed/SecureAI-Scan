@@ -14,7 +14,7 @@
 A default scan reports only what it can prove. No account, no upload, nothing leaves your machine. TypeScript, JavaScript, Python, MCP configs, and Agent Skill bundles are detected automatically.
 
 ```bash
-npx --yes secureai-scan@0.11.0 scan .
+npx --yes secureai-scan@0.12.0 scan .
 ```
 
 ## What a finding looks like
@@ -56,7 +56,6 @@ We scanned every MCP server we could find with a published command-injection adv
 
 Across 25 popular MCP servers *without* a CVE (official SDKs and reference servers, Playwright, Sentry, MongoDB, Supabase, Firecrawl, FastMCP, and more), the same rules raise no default-tier findings. The commits, every miss we had to fix along the way, and the false positives the sweep found in our own older rules are in **[What we found scanning real repos](docs/RealWorldFindings.md)**.
 
-<sub>MCP013/MCP014 are on `main` and ship in the next npm release; see the [changelog](CHANGELOG.md#unreleased).</sub>
 
 ## Why you can trust a default scan
 
@@ -165,9 +164,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: akanthed/SecureAI-Scan@v0.11.0
+      - uses: akanthed/SecureAI-Scan@v0.12.0
         with:
-          scanner-version: 0.11.0
+          scanner-version: 0.12.0
           fail-on: high
 ```
 
@@ -176,7 +175,7 @@ jobs:
 ```yaml
 repos:
   - repo: https://github.com/akanthed/SecureAI-Scan
-    rev: v0.11.0
+    rev: v0.12.0
     hooks:
       - id: secureai-scan
         # args: ["--fail-on", "critical"]
