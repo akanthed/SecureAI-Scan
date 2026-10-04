@@ -646,7 +646,9 @@ function checkAI001(src: PythonSource, i: number, file: string, ctx: FileContext
       note: `${callName} — ${isSystemRole ? `${part.role} role` : `${part.role} field`}`,
     });
 
-    const evidence = "likely";
+    // Composed into a non-system prompt string, the caller only steers their
+    // own response; see the TypeScript rule (prompt-injection-concat.ts).
+    const evidence = isSystemRole ? "likely" : "heuristic";
     return {
       ...findingBase(
         "AI001",

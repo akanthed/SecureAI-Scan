@@ -302,6 +302,8 @@ function traceInterproceduralSink(
         // is. Never "proven" — see the plan's precision-risk rationale.
         let evidence: Evidence = "likely";
         if (crossedTestFile) evidence = demoteEvidence(evidence);
+        // Non-system prompt fields: see the base case in run() below.
+        if (!isSystemRole) evidence = "heuristic";
         if (!rootOrigin.startsWith("request data")) evidence = demoteEvidence(evidence);
 
         const trace: TraceStep[] = [...precedingSteps];
@@ -498,6 +500,14 @@ export const rulePromptInjectionConcat: Rule = {
 
             let evidence: Evidence = sink.resolved ? "proven" : "likely";
             if (testFile) evidence = demoteEvidence(evidence);
+            // A request value composed into a non-system prompt field (Vercel
+            // AI SDK `prompt`, a bare string argument) only steers the
+            // caller's own response: there are no privileged instructions to
+            // override. Found in vercel/ai's examples once Fetch-API request
+            // reads were tainted, e.g. `system: STATIC, prompt: \`Categorize:
+            // "${expense}"\``, the recommended shape. Only system/developer
+            // roles are reported at default evidence.
+            if (!isSystemRole) evidence = "heuristic";
             // Param-only taint (no request object anywhere) is weaker: the
             // caller may be internal. Request-derived taint stays proven.
             if (!taintedRef.origin.startsWith("request data")) {
