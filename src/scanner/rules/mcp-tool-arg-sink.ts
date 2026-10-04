@@ -612,7 +612,10 @@ const MEMBERSHIP_METHODS = new Set(["includes", "has", "indexOf"]);
 const ALLOWLIST_TOKENS = new Set(["allowed", "allow", "allowlist", "whitelist", "valid", "supported", "permitted", "known", "safe"]);
 
 function mentions(text: string, name: string): boolean {
-  return new RegExp(`(?:^|[^\\w$])${name.replace(/[$]/g, "\\$")}(?:[^\\w$]|$)`).test(text);
+  // Names come from the scanned code (`args["some.key"]`), so escape every
+  // regex metacharacter, not just `$`.
+  const escaped = name.replace(/[\\^$.*+?()[\]{}|/-]/g, "\\$&");
+  return new RegExp(`(?:^|[^\\w$])${escaped}(?:[^\\w$]|$)`).test(text);
 }
 
 function regexValidates(node: Node, depth = 0): boolean {
