@@ -118,8 +118,20 @@ Semgrep, Trivy, and GitHub Advanced Security don't model tool-argument taint, MC
 
 ## Use it from Claude
 
-- **MCP server:** `mcp-server/index.js` exposes `scan_repository`, `explain_rule`, `generate_bom`, and `scan_untrusted_target`. Add it to `mcpServers` as `{"command": "node", "args": ["/path/to/secureai-scan/mcp-server/index.js"]}`.
-- **Skill:** copy [`skills/secureai-scan/`](skills/secureai-scan/SKILL.md) into `.claude/skills/` so Claude knows when to scan and how to read results.
+Claude Code plugin (skill + MCP server in one install):
+
+```
+/plugin marketplace add akanthed/SecureAI-Scan
+/plugin install secureai-scan@secureai-scan
+```
+
+Any other MCP client (Cursor, VS Code, Windsurf, Gemini CLI, ...) can run the server directly:
+
+```json
+{ "mcpServers": { "secureai-scan": { "command": "npx", "args": ["--yes", "--package=secureai-scan", "secureai-scan-mcp"] } } }
+```
+
+It exposes `scan_repository`, `explain_rule`, `generate_bom`, and `scan_untrusted_target`. The skill alone is [`skills/secureai-scan/`](skills/secureai-scan/SKILL.md).
 
 ## Learn more
 

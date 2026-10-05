@@ -1,0 +1,16 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.akanthed/secureai-scan",
+  "description": "Offline scanner for LLM, MCP, RAG and Agent Skill security risks. Scan a repo or vet a skill/MCP server before installing.",
+  "repository": { "url": "https://github.com/akanthed/SecureAI-Scan", "source": "github" },
+  "version": "0.13.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "secureai-scan",
+      "version": "0.13.0",
+      "runtimeHint": "npx",
+      "transport": { "type": "stdio" }
+    }
+  ]
+}

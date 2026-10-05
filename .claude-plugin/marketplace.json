@@ -1,0 +1,12 @@
+{
+  "name": "secureai-scan",
+  "owner": { "name": "Akshay Kanthed" },
+  "plugins": [
+    {
+      "name": "secureai-scan",
+      "source": "./",
+      "description": "Offline AI/LLM security scanner as a skill plus MCP server.",
+      "category": "security"
+    }
+  ]
+}
