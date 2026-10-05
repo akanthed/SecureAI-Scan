@@ -2,7 +2,7 @@
   "name": "secureai-scan-vscode",
   "displayName": "SecureAI-Scan",
   "description": "Offline LLM/MCP/RAG security scanner — prompt injection, tool poisoning, RAG misconfig — with dataflow evidence, right in the editor.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "akanthed",
   "license": "MIT",
   "author": "Akshay Kanthed",
@@ -88,7 +88,7 @@
     "package": "npm run build && vsce package -o secureai-scan.vsix"
   },
   "dependencies": {
-    "secureai-scan": "^0.10.0"
+    "secureai-scan": "^0.12.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

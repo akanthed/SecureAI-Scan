@@ -1,0 +1,17 @@
+{
+  "name": "secureai-scan",
+  "version": "0.12.0",
+  "description": "Offline AI/LLM security scanner: prompt injection, MCP command injection and tool poisoning, RAG leaks, poisoned Agent Skills. Scan code, or check a skill/MCP server before you install it.",
+  "author": { "name": "Akshay Kanthed" },
+  "homepage": "https://github.com/akanthed/SecureAI-Scan",
+  "repository": "https://github.com/akanthed/SecureAI-Scan",
+  "license": "MIT",
+  "keywords": ["security", "mcp", "prompt-injection", "agent-skills", "owasp"],
+  "skills": "./skills/",
+  "mcpServers": {
+    "secureai-scan": {
+      "command": "npx",
+      "args": ["--yes", "--package=secureai-scan@0.13.0", "secureai-scan-mcp"]
+    }
+  }
+}

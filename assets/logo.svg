@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="SecureAI-Scan: an S-shaped dataflow trace from source to sink">
+  <defs>
+    <linearGradient id="trace" x1="88" y1="38" x2="40" y2="102" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="#0b1020"/>
+  <!-- the trace: source -> flow -> sink, drawn as an S -->
+  <path d="M82 38H56a16 16 0 0 0 0 32h16a16 16 0 0 1 0 32H52" fill="none" stroke="url(#trace)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- source: hollow node -->
+  <circle cx="90" cy="38" r="7" fill="#0b1020" stroke="#22d3ee" stroke-width="5"/>
+  <!-- flow: checkpoint -->
+  <circle cx="64" cy="70" r="3.5" fill="#0b1020"/>
+  <!-- sink: crosshair target -->
+  <circle cx="40" cy="102" r="8" fill="none" stroke="#f59e0b" stroke-width="5"/>
+  <circle cx="40" cy="102" r="2.5" fill="#f59e0b"/>
+  <path d="M40 87v6M40 111v6M25 102h6M49 102h6" stroke="#f59e0b" stroke-width="3.5" stroke-linecap="round"/>
+</svg>

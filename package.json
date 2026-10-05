@@ -47,9 +47,11 @@
   "publishConfig": {
     "access": "public"
   },
+  "mcpName": "io.github.akanthed/secureai-scan",
   "type": "module",
   "bin": {
-    "secureai-scan": "dist/index.js"
+    "secureai-scan": "dist/index.js",
+    "secureai-scan-mcp": "mcp-server/index.js"
   },
   "files": [
     "dist",
