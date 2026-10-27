@@ -73,6 +73,7 @@ const EXPECTED_VULNERABLE = [
   // promisified exec; registry object → class-method chain → conditional.
   ["MCP013", "vulnerable/mcp-tool-sinks/dispatcher/issues.ts"],
   ["MCP013", "vulnerable/mcp-tool-sinks/service-chain/docs-service.ts"],
+  ["MCP013", "vulnerable/mcp-tool-sinks/deep-chain/server.ts"],
   ["MCP014", "vulnerable/mcp-tool-sinks/lowlevel_server.ts"],
   ["MCP014", "vulnerable/mcp-tool-sinks/register_tool_server.ts"],
   ["MCP014", "vulnerable/mcp-tool-sinks/fastmcp_ops.py"],
