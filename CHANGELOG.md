@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.12.1 — 2026-10-27
+
+**Recall corpus: MCP013 is now checked against published CVEs and refactors of them, not only fixtures.** Taint through helper chains follows one more call.
+
+### Added
+- **Recall corpus (`npm run corpus`)**: six published MCP command-injection CVE pairs (vulnerable commit must fire, fix commit must stay clean), 18 recall mutations and 17 guard mutations applied as patches on pinned SHAs (no vendored source), and a 26-server clean set that must stay silent on MCP013/MCP014. All pass. See `docs/Corpus.md`. Dev tooling only, not shipped in the npm package.
+
+### Changed
+- MCP013/MCP014 helper-chain taint follows up to five calls (was four), so a harmless extra wrapper no longer hides a real finding. No new findings in `test-fixtures/safe/`, the clean set, or `npm run regression`.
+
 ## 0.12.0 — 2026-10-04
 
 **MCP tool-argument taint: the scanner now finds command injection and path traversal inside MCP servers**, the two largest classes of real MCP CVEs, and nine real-world false-positive classes are fixed at the root. Validated against six published MCP command-injection CVEs (all detected on the vulnerable release, all clean on the patched one) and 25 popular MCP servers (no default-tier MCP013/MCP014 findings). Full write-up: [`docs/RealWorldFindings.md`](docs/RealWorldFindings.md#we-pointed-it-at-six-mcp-servers-with-published-command-injection-cves).

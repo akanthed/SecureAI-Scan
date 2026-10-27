@@ -1,0 +1,544 @@
+{
+  "generated": "2026-10-27T03:10:50.458Z",
+  "scanner": {
+    "name": "secureai-scan",
+    "version": "0.12.0"
+  },
+  "recall": {
+    "vulnerable": {
+      "passed": 6,
+      "total": 6
+    },
+    "mutations": {
+      "passed": 18,
+      "total": 18
+    }
+  },
+  "precision": {
+    "fixed": {
+      "passed": 6,
+      "total": 6
+    },
+    "guards": {
+      "passed": 17,
+      "total": 17
+    },
+    "clean": {
+      "passed": 26,
+      "total": 26
+    }
+  },
+  "cases": [
+    {
+      "group": "vulnerable",
+      "id": "CVE-2025-53967",
+      "label": "vulnerable commit",
+      "status": "pass",
+      "detail": "1 finding(s)"
+    },
+    {
+      "group": "fixed",
+      "id": "CVE-2025-53967",
+      "label": "fix commit",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-53967",
+      "label": "recall:alias",
+      "status": "pass",
+      "detail": "1 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-53967",
+      "label": "guard:alias",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-53967",
+      "label": "recall:wrapper",
+      "status": "pass",
+      "detail": "1 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-53967",
+      "label": "guard:wrapper",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-53967",
+      "label": "recall:crossfile",
+      "status": "pass",
+      "detail": "1 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-53967",
+      "label": "guard:crossfile",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "vulnerable",
+      "id": "CVE-2025-53355",
+      "label": "vulnerable commit",
+      "status": "pass",
+      "detail": "17 finding(s)"
+    },
+    {
+      "group": "fixed",
+      "id": "CVE-2025-53355",
+      "label": "fix commit",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-53355",
+      "label": "recall:alias",
+      "status": "pass",
+      "detail": "17 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-53355",
+      "label": "guard:alias",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-53355",
+      "label": "recall:wrapper",
+      "status": "pass",
+      "detail": "12 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-53355",
+      "label": "guard:wrapper",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-53355",
+      "label": "recall:crossfile",
+      "status": "pass",
+      "detail": "1 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-53355",
+      "label": "guard:crossfile",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "vulnerable",
+      "id": "CVE-2025-54073",
+      "label": "vulnerable commit",
+      "status": "pass",
+      "detail": "7 finding(s)"
+    },
+    {
+      "group": "fixed",
+      "id": "CVE-2025-54073",
+      "label": "fix commit",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-54073",
+      "label": "recall:alias",
+      "status": "pass",
+      "detail": "7 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-54073",
+      "label": "guard:alias",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-54073",
+      "label": "recall:wrapper",
+      "status": "pass",
+      "detail": "1 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-54073",
+      "label": "guard:wrapper",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-54073",
+      "label": "recall:crossfile",
+      "status": "pass",
+      "detail": "1 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-54073",
+      "label": "guard:crossfile",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "vulnerable",
+      "id": "CVE-2025-53818",
+      "label": "vulnerable commit",
+      "status": "pass",
+      "detail": "6 finding(s)"
+    },
+    {
+      "group": "fixed",
+      "id": "CVE-2025-53818",
+      "label": "fix commit",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-53818",
+      "label": "recall:alias",
+      "status": "pass",
+      "detail": "6 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-53818",
+      "label": "recall:wrapper",
+      "status": "pass",
+      "detail": "2 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-53818",
+      "label": "guard:wrapper",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-53818",
+      "label": "recall:crossfile",
+      "status": "pass",
+      "detail": "1 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-53818",
+      "label": "guard:crossfile",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "vulnerable",
+      "id": "CVE-2025-53372",
+      "label": "vulnerable commit",
+      "status": "pass",
+      "detail": "4 finding(s)"
+    },
+    {
+      "group": "fixed",
+      "id": "CVE-2025-53372",
+      "label": "fix commit",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-53372",
+      "label": "recall:alias",
+      "status": "pass",
+      "detail": "4 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-53372",
+      "label": "guard:alias",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-53372",
+      "label": "recall:wrapper",
+      "status": "pass",
+      "detail": "4 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-53372",
+      "label": "guard:wrapper",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-53372",
+      "label": "recall:crossfile",
+      "status": "pass",
+      "detail": "1 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-53372",
+      "label": "guard:crossfile",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "vulnerable",
+      "id": "CVE-2025-52573",
+      "label": "vulnerable commit",
+      "status": "pass",
+      "detail": "2 finding(s)"
+    },
+    {
+      "group": "fixed",
+      "id": "CVE-2025-52573",
+      "label": "fix commit",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-52573",
+      "label": "recall:alias",
+      "status": "pass",
+      "detail": "2 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-52573",
+      "label": "guard:alias",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-52573",
+      "label": "recall:wrapper",
+      "status": "pass",
+      "detail": "1 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-52573",
+      "label": "guard:wrapper",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "mutations",
+      "id": "CVE-2025-52573",
+      "label": "recall:crossfile",
+      "status": "pass",
+      "detail": "1 finding(s)"
+    },
+    {
+      "group": "guards",
+      "id": "CVE-2025-52573",
+      "label": "guard:crossfile",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "servers",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "servers-archived",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "python-sdk",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "playwright-mcp",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "mcp-playwright",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "context7",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "DesktopCommanderMCP",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "supabase-mcp",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "firecrawl-mcp-server",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "fastmcp",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "fastmcp",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "markdownify-mcp",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "mcp-obsidian",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "arxiv-mcp-server",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "tavily-mcp",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "exa-mcp-server",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "mcp-server-browserbase",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "mongodb-mcp-server",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "sentry-mcp",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "mcp",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "git-mcp-server",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "blender-mcp",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "git-mcp",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "mcp-chrome",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "fetcher-mcp",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    },
+    {
+      "group": "clean",
+      "id": "excel-mcp-server",
+      "label": "clean server",
+      "status": "pass",
+      "detail": "0 finding(s)"
+    }
+  ]
+}

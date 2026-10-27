@@ -1,0 +1,240 @@
+{
+  "note": "CVE pairs for MCP013 recall/precision. SHAs are full 40-char commits resolved from the tags/commits listed in docs/RealWorldFindings.md.",
+  "cases": [
+    {
+      "id": "CVE-2025-53967",
+      "repo": "https://github.com/GLips/Figma-Context-MCP.git",
+      "vulnerableSha": "5b0d10e76eafafe972dddc40bfb601b50d5953f0",
+      "fixSha": "927f2c1984c1274f24a02bb41dafcdf92dd2e832",
+      "rule": "MCP013",
+      "tool": "get_figma_data (via fetchWithRetry curl fallback)",
+      "mutations": [
+        {
+          "name": "alias",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-53967/recall-alias.patch"
+        },
+        {
+          "name": "alias",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-53967/guard-alias.patch"
+        },
+        {
+          "name": "wrapper",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-53967/recall-wrapper.patch"
+        },
+        {
+          "name": "wrapper",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-53967/guard-wrapper.patch"
+        },
+        {
+          "name": "crossfile",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-53967/recall-crossfile.patch"
+        },
+        {
+          "name": "crossfile",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-53967/guard-crossfile.patch"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2025-53355",
+      "repo": "https://github.com/Flux159/mcp-server-kubernetes.git",
+      "vulnerableSha": "f1dafc91f99c786f50762cef4f001d2fbc99eda8",
+      "fixSha": "8e1768aaf589d43cdf903f1f0778a1eb35bb3145",
+      "rule": "MCP013",
+      "tool": "kubectl_scale / kubectl_patch / explain_resource",
+      "mutations": [
+        {
+          "name": "alias",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-53355/recall-alias.patch"
+        },
+        {
+          "name": "alias",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-53355/guard-alias.patch"
+        },
+        {
+          "name": "wrapper",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-53355/recall-wrapper.patch"
+        },
+        {
+          "name": "wrapper",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-53355/guard-wrapper.patch"
+        },
+        {
+          "name": "crossfile",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-53355/recall-crossfile.patch"
+        },
+        {
+          "name": "crossfile",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-53355/guard-crossfile.patch"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2025-54073",
+      "repo": "https://github.com/sammcj/mcp-package-docs.git",
+      "vulnerableSha": "8e9bd31f77cf731a15383577326ae777f52bf425",
+      "fixSha": "cb4ad49615275379fd6f2f1cf1ec4731eec56eb9",
+      "rule": "MCP013",
+      "tool": "package doc lookup tools",
+      "mutations": [
+        {
+          "name": "alias",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-54073/recall-alias.patch"
+        },
+        {
+          "name": "alias",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-54073/guard-alias.patch"
+        },
+        {
+          "name": "wrapper",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-54073/recall-wrapper.patch"
+        },
+        {
+          "name": "wrapper",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-54073/guard-wrapper.patch"
+        },
+        {
+          "name": "crossfile",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-54073/recall-crossfile.patch"
+        },
+        {
+          "name": "crossfile",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-54073/guard-crossfile.patch"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2025-53818",
+      "repo": "https://github.com/sunwood-ai-labs/github-kanban-mcp-server.git",
+      "vulnerableSha": "0a4f9f92a13a201fe31cda310da1c95d63876579",
+      "fixSha": "34246b6f18a4dc4e0cc974d571edc696752d3abc",
+      "rule": "MCP013",
+      "tool": "add_comment",
+      "mutations": [
+        {
+          "name": "alias",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-53818/recall-alias.patch"
+        },
+        {
+          "name": "wrapper",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-53818/recall-wrapper.patch"
+        },
+        {
+          "name": "wrapper",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-53818/guard-wrapper.patch"
+        },
+        {
+          "name": "crossfile",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-53818/recall-crossfile.patch"
+        },
+        {
+          "name": "crossfile",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-53818/guard-crossfile.patch"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2025-53372",
+      "repo": "https://github.com/alfonsograziano/node-code-sandbox-mcp.git",
+      "vulnerableSha": "7fd7fb88be2cb2a03702915d05d03bdf6bc8ac80",
+      "fixSha": "e461a74ecb189b268daac0d972c467b49b2abdd2",
+      "rule": "MCP013",
+      "tool": "sandbox tools",
+      "mutations": [
+        {
+          "name": "alias",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-53372/recall-alias.patch"
+        },
+        {
+          "name": "alias",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-53372/guard-alias.patch"
+        },
+        {
+          "name": "wrapper",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-53372/recall-wrapper.patch"
+        },
+        {
+          "name": "wrapper",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-53372/guard-wrapper.patch"
+        },
+        {
+          "name": "crossfile",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-53372/recall-crossfile.patch"
+        },
+        {
+          "name": "crossfile",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-53372/guard-crossfile.patch"
+        }
+      ]
+    },
+    {
+      "id": "CVE-2025-52573",
+      "repo": "https://github.com/joshuayoes/ios-simulator-mcp.git",
+      "vulnerableSha": "01c0e3384cddf60749aa4b2d6060b7a28ca5b0d1",
+      "fixSha": "eb53a4f2cc8bbeb13e8d6d930f00167befcdb809",
+      "rule": "MCP013",
+      "tool": "ui_tap",
+      "mutations": [
+        {
+          "name": "alias",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-52573/recall-alias.patch"
+        },
+        {
+          "name": "alias",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-52573/guard-alias.patch"
+        },
+        {
+          "name": "wrapper",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-52573/recall-wrapper.patch"
+        },
+        {
+          "name": "wrapper",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-52573/guard-wrapper.patch"
+        },
+        {
+          "name": "crossfile",
+          "kind": "recall",
+          "patch": "mutations/CVE-2025-52573/recall-crossfile.patch"
+        },
+        {
+          "name": "crossfile",
+          "kind": "guard",
+          "patch": "mutations/CVE-2025-52573/guard-crossfile.patch"
+        }
+      ]
+    }
+  ]
+}

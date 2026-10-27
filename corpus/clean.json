@@ -1,0 +1,135 @@
+{
+  "note": "Unrelated public MCP servers/frameworks pinned at the HEAD seen on 2026-10-27. MCP013/MCP014 must stay silent at default evidence. Source list: scripts/ecosystem-targets.txt.",
+  "servers": [
+    {
+      "name": "servers",
+      "repo": "https://github.com/modelcontextprotocol/servers.git",
+      "sha": "ef9808f71090d0db3eda99e2af2ba78f1086f4fb"
+    },
+    {
+      "name": "servers-archived",
+      "repo": "https://github.com/modelcontextprotocol/servers-archived.git",
+      "sha": "9be4674d1ddf8c469e6461a27a337eeb65f76c2e"
+    },
+    {
+      "name": "python-sdk",
+      "repo": "https://github.com/modelcontextprotocol/python-sdk.git",
+      "sha": "a525a3d9bece967d91534b746a6c842931b7b4ec"
+    },
+    {
+      "name": "playwright-mcp",
+      "repo": "https://github.com/microsoft/playwright-mcp.git",
+      "sha": "0c4107acbecb75472b23c05c0e42471a0011874f"
+    },
+    {
+      "name": "mcp-playwright",
+      "repo": "https://github.com/executeautomation/mcp-playwright.git",
+      "sha": "2349c2891e7c499c8c07b7d78c7f3fb4c797a1da"
+    },
+    {
+      "name": "context7",
+      "repo": "https://github.com/upstash/context7.git",
+      "sha": "d9561600ad502cd72ab8bae4f9172f434aadf4d1"
+    },
+    {
+      "name": "DesktopCommanderMCP",
+      "repo": "https://github.com/wonderwhy-er/DesktopCommanderMCP.git",
+      "sha": "db3430f23c1fd487f66412e93f7022b8c34ccd6f"
+    },
+    {
+      "name": "supabase-mcp",
+      "repo": "https://github.com/supabase-community/supabase-mcp.git",
+      "sha": "25d357c20849453fbee08f2e000fecf0c032f076"
+    },
+    {
+      "name": "firecrawl-mcp-server",
+      "repo": "https://github.com/firecrawl/firecrawl-mcp-server.git",
+      "sha": "539c02e9094e33180a81a4e1de305398a3ecfeb0"
+    },
+    {
+      "name": "fastmcp",
+      "repo": "https://github.com/punkpeye/fastmcp.git",
+      "sha": "c138517b1e952ceb892499b8388a4fd505108d7f"
+    },
+    {
+      "name": "fastmcp",
+      "repo": "https://github.com/jlowin/fastmcp.git",
+      "sha": "169d3b19474c6b5d8d032e3eef8473b4e22c68a7"
+    },
+    {
+      "name": "markdownify-mcp",
+      "repo": "https://github.com/zcaceres/markdownify-mcp.git",
+      "sha": "024f97cea9a94cd842c445eea4503c442c79bd71"
+    },
+    {
+      "name": "mcp-obsidian",
+      "repo": "https://github.com/MarkusPfundstein/mcp-obsidian.git",
+      "sha": "5ee0b84fa8319fd2fdf0db0ee1febb065e712a15"
+    },
+    {
+      "name": "arxiv-mcp-server",
+      "repo": "https://github.com/blazickjp/arxiv-mcp-server.git",
+      "sha": "572e301bb3198962c025d5ed5e14becb86868daa"
+    },
+    {
+      "name": "tavily-mcp",
+      "repo": "https://github.com/tavily-ai/tavily-mcp.git",
+      "sha": "514e56cd0f76f3c4c0fb9e1347bc8e48f9028cdc"
+    },
+    {
+      "name": "exa-mcp-server",
+      "repo": "https://github.com/exa-labs/exa-mcp-server.git",
+      "sha": "0b499f095c4ca145eee07b09137641c037d58449"
+    },
+    {
+      "name": "mcp-server-browserbase",
+      "repo": "https://github.com/browserbase/mcp-server-browserbase.git",
+      "sha": "3e6f53461949037d5e65dd425da3ceb1263f11d6"
+    },
+    {
+      "name": "mongodb-mcp-server",
+      "repo": "https://github.com/mongodb-js/mongodb-mcp-server.git",
+      "sha": "1b117c7c3cfdd5a6cc84b78792de23220fd03fe7"
+    },
+    {
+      "name": "sentry-mcp",
+      "repo": "https://github.com/getsentry/sentry-mcp.git",
+      "sha": "1a924620156d45d9cb15c36464e7fbc68980f2a7"
+    },
+    {
+      "name": "mcp",
+      "repo": "https://github.com/BrowserMCP/mcp.git",
+      "sha": "9db12f2b4f61294f0bc11708986abc47db539d6c"
+    },
+    {
+      "name": "git-mcp-server",
+      "repo": "https://github.com/cyanheads/git-mcp-server.git",
+      "sha": "d34d83af201dc0c9012ca501336c3df6171da932"
+    },
+    {
+      "name": "blender-mcp",
+      "repo": "https://github.com/ahujasid/blender-mcp.git",
+      "sha": "febcd90ece59c3416d7c55fd3723cea46bcaa59d"
+    },
+    {
+      "name": "git-mcp",
+      "repo": "https://github.com/idosal/git-mcp.git",
+      "sha": "c487a29895dcfcb5b672247e646426a56e2051c1"
+    },
+    {
+      "name": "mcp-chrome",
+      "repo": "https://github.com/hangwin/mcp-chrome.git",
+      "sha": "f48e71751e00bc09725c7e173423cff4f2ccd12a"
+    },
+    {
+      "name": "fetcher-mcp",
+      "repo": "https://github.com/jae-jae/fetcher-mcp.git",
+      "sha": "8754aff66e3d9207502207bf82a493f45f556bb8"
+    },
+    {
+      "name": "excel-mcp-server",
+      "repo": "https://github.com/haris-musa/excel-mcp-server.git",
+      "sha": "c3d3adb76217b92124081878ff360d509fd0dad8"
+    }
+  ]
+}

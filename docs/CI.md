@@ -13,9 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: akanthed/SecureAI-Scan@v0.12.0
+      - uses: akanthed/SecureAI-Scan@v0.12.1
         with:
-          scanner-version: 0.12.0
+          scanner-version: 0.12.1
           fail-on: high
 ```
 
@@ -24,7 +24,7 @@ jobs:
 ```yaml
 repos:
   - repo: https://github.com/akanthed/SecureAI-Scan
-    rev: v0.12.0
+    rev: v0.12.1
     hooks:
       - id: secureai-scan
         # args: ["--fail-on", "critical"]

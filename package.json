@@ -1,6 +1,6 @@
 {
   "name": "secureai-scan",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "description": "AST-based AI security scanner for TypeScript, JavaScript, and Python with dataflow evidence for prompt injection, MCP, Agent Skill, and RAG risks.",
   "author": "Akshay Kanthed",
   "license": "MIT",
@@ -78,7 +78,8 @@
     "prepack": "npm run build",
     "prepublishOnly": "npm run release:check",
     "sync-advisories": "node scripts/sync-advisories.js",
-    "ecosystem": "npm run build && node scripts/ecosystem-scan.js"
+    "ecosystem": "npm run build && node scripts/ecosystem-scan.js",
+    "corpus": "npm run build && node scripts/corpus-run.js"
   },
   "dependencies": {
     "commander": "^15.0.0",

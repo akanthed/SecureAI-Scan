@@ -40,7 +40,9 @@ import { fileImportsMcpServerSdk } from "./mcp-tool-poisoning.js";
  * `likely`, like AI001's interprocedural traces.
  */
 
-const MAX_HOPS = 4;
+// Figma-Context-MCP (CVE-2025-53967) already needs four hops, so five leaves
+// room for one harmless extra wrapper (see corpus/ and docs/Corpus.md).
+const MAX_HOPS = 5;
 
 const CHILD_PROCESS_MODULES = new Set(["child_process", "node:child_process"]);
 const FS_MODULES = new Set(["fs", "node:fs", "fs/promises", "node:fs/promises", "fs-extra"]);
