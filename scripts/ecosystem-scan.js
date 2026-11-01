@@ -23,7 +23,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -34,9 +34,9 @@ if (!fs.existsSync(dist("index.js"))) {
   process.exit(1);
 }
 
-const { resolveTarget } = await import(dist("scanner/fetch-target.js"));
-const { scanRepositoryDetailed } = await import(dist("scanner/scan.js"));
-const { scanKnownMaliciousPackages } = await import(dist("scanner/dependency-guard.js"));
+const { resolveTarget } = await import(pathToFileURL(dist("scanner/fetch-target.js")).href);
+const { scanRepositoryDetailed } = await import(pathToFileURL(dist("scanner/scan.js")).href);
+const { scanKnownMaliciousPackages } = await import(pathToFileURL(dist("scanner/dependency-guard.js")).href);
 
 const args = process.argv.slice(2);
 const option = (name) => {

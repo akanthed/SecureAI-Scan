@@ -31,12 +31,25 @@ export interface ResolvedTarget {
   cleanup: () => void;
 }
 
-const GIT_URL_RE = /^(?:https?:\/\/|git@)|\.git$|^[\w-]+\/[\w.-]+$/;
+// A spec is attacker-influenced input: the `installed --deep` path takes it from
+// a client config and the MCP `scan_untrusted_target` tool takes it from the
+// model. Only these shapes are ever handed to git or npm; anything else is
+// refused rather than guessed at, so neither tool can read part of a spec as
+// an option (`--upload-pack=...`, `--registry=...`) or a shell metacharacter.
+const GIT_URL_RE = /^(?:https?:\/\/\S+|git@[\w.-]+:\S+|[\w-]+\/[\w.-]+)$/;
+const NPM_SPEC_RE = /^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(?:@[\w.+-]+)?$/i;
 
-function classify(spec: string): TargetKind {
+export function classify(spec: string): TargetKind {
+  if (spec.startsWith("-")) {
+    throw new Error(`Refusing target "${spec}": a leading "-" would be read as a command-line option.`);
+  }
   if (fs.existsSync(spec)) return "local";
   if (GIT_URL_RE.test(spec)) return "git";
-  return "npm";
+  if (NPM_SPEC_RE.test(spec)) return "npm";
+  throw new Error(
+    `"${spec}" is not a local path, an https:// or git@ URL, an owner/repo, or a registry package ` +
+      `(name, name@version, @scope/name). Other forms (git+ssh:, file:, tarball URLs, version ranges) are not fetched.`,
+  );
 }
 
 function normalizeGitUrl(spec: string): string {
@@ -68,7 +81,7 @@ function fetchGit(spec: string): ResolvedTarget {
   const url = normalizeGitUrl(spec);
   const dir = mkTempDir("secureai-scan-git-");
   try {
-    execFileSync("git", ["clone", "--depth", "1", "--quiet", url, dir], {
+    execFileSync("git", ["clone", "--depth", "1", "--quiet", "--", url, dir], {
       stdio: ["ignore", "ignore", "pipe"],
     });
   } catch (err) {
@@ -89,14 +102,15 @@ function fetchNpm(spec: string): ResolvedTarget {
   const dir = mkTempDir("secureai-scan-npm-");
   let packedName: string;
   try {
-    // On Windows, npm ships as npm.cmd — a batch file, which Node's
-    // execFileSync cannot invoke without shell:true (confirmed: fails with
-    // ENOENT/EINVAL otherwise). Passing args as an array with shell:true is
-    // still safely quoted per-argument by Node, not naive string
-    // concatenation, so this doesn't reopen shell-injection risk even
-    // though `spec` is externally supplied (a CLI argument from whoever is
-    // running this locally, not remote/network input).
-    const out = execFileSync("npm", ["pack", spec, "--silent", "--pack-destination", dir], {
+    // On Windows npm ships as npm.cmd, which execFileSync cannot start without
+    // a shell, and with shell:true Node joins the arguments into one cmd.exe
+    // line WITHOUT quoting them. That is only safe because `spec` has already
+    // passed NPM_SPEC_RE (no whitespace, quotes, or cmd metacharacters, and it
+    // cannot start with "-"), and because the destination is "." under `cwd`
+    // rather than a temp path that may contain spaces. --ignore-scripts keeps
+    // npm from running prepare/prepack for anything it resolves.
+    const out = execFileSync("npm", ["pack", "--ignore-scripts", "--silent", "--pack-destination", ".", "--", spec], {
+      cwd: dir,
       encoding: "utf-8",
       stdio: ["ignore", "pipe", "pipe"],
       shell: process.platform === "win32",

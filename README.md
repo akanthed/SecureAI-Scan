@@ -75,7 +75,7 @@ secureai-scan installed          # the MCP servers and skills your AI clients al
 secureai-scan installed --deep   # also scan each server's code for command injection and path traversal
 ```
 
-`installed` reads the per-user MCP configs of Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Gemini CLI, Cline, Roo Code, and Amazon Q, plus `~/.claude/skills`. It reports unpinned packages, known-malicious or vulnerable releases, inline secrets, plaintext transports, and poisoned skills against the real file and line. It is offline. `--deep` fetches each npm-launched server with `npm pack` (never installed or executed) and reads locally launched servers in place, then runs the full rule set on their code.
+`installed` reads the per-user MCP configs of Claude Code, Claude Desktop, Cursor, VS Code, Windsurf, Gemini CLI, Cline, Roo Code, and Amazon Q, plus `~/.claude/skills`. It reports unpinned packages, known-malicious or vulnerable releases, inline secrets, plaintext transports, and poisoned skills against the real file and line. It is offline. Findings and the AI-BOM name the launcher and package, or a URL's scheme and host, and never print launch arguments or query strings, so a token in a config doesn't end up in a report or a SARIF upload. `--deep` fetches each npm-launched server with `npm pack` (never installed or executed) and reads locally launched servers in place, then runs the full rule set on their code.
 
 ## Scan before you install
 
@@ -88,7 +88,9 @@ secureai-scan mcp some-mcp-server-package      # a bare npm package name
 secureai-scan mcp owner/mcp-server-repo        # or a git repo
 ```
 
-Nothing fetched is ever executed. An npm target is downloaded with `npm pack` (no install, no lifecycle scripts), and a git target is a shallow `git clone`. The fetched copy is deleted afterwards unless you pass `--keep`.
+Nothing fetched is ever executed. An npm target is downloaded with `npm pack --ignore-scripts` (no install, no lifecycle scripts), and a git target is a shallow `git clone`. The fetched copy is deleted afterwards unless you pass `--keep`.
+
+A target must be a local path, an `https://` or `git@` URL, `owner/repo`, or a plain registry name (`name`, `name@version`, `@scope/name`). Anything else, including a leading `-`, shell metacharacters, `git+ssh:`/`file:` specs and version ranges, is refused rather than handed to git or npm. The same check applies to `installed --deep` and the MCP server's `scan_untrusted_target`, where the target can come from a config file or from a model.
 
 ## Commands
 
@@ -111,6 +113,8 @@ Use the GitHub Action (inline PR annotations, Security tab) or the pre-commit ho
 ## Rules
 
 **48 rules** mapped to the OWASP Top 10 for LLM Applications (2026), the Agentic (ASI) list, and the OWASP MCP Top 10. Full table: **[Rules](docs/Rules.md)**. Run `secureai-scan explain <RULE_ID>` for any one.
+
+DEP003 checks an offline advisory list of documented AI-toolchain supply-chain incidents (the postmark-mcp backdoor, the 2026 Mini Shai-Hulud releases of `guardrails-ai`, `mistralai`, `@mistralai/*` and others, and the `easy-day-js` dependency from the Mastra compromise) plus OSV CVEs. A package is listed only with a public incident report and exact versions. It reads the root `package.json` and `requirements.txt`, not lockfiles, so a bad release that appears only transitively is not seen.
 
 ## How it compares
 

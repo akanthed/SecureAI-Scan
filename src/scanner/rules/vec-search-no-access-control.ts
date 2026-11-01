@@ -1,5 +1,6 @@
-import { Node, SyntaxKind } from "ts-morph";
-import type { Finding, Rule, RuleContext } from "../types.js";
+import { Node } from "ts-morph";
+import type { Evidence, Finding, Rule, RuleContext } from "../types.js";
+import { fileImportsVectorSdk } from "./llm-rule-utils.js";
 import { getFileCalls, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath } from "../confidence.js";
 
@@ -20,6 +21,14 @@ const VECTOR_SEARCH_METHODS = [
   "near_text",
   "nearobject",
 ];
+
+// Method names only vector stores use. The other entries in
+// VECTOR_SEARCH_METHODS (`search`, `query`, `retrieve`) are shared with plain
+// databases, search engines and in-memory indexes, so a hit on one of those
+// is `likely` only when the file imports a vector-store SDK.
+const SPECIFIC_SEARCH_METHODS = VECTOR_SEARCH_METHODS.filter(
+  (method) => method !== "search" && method !== "query" && method !== "retrieve",
+);
 
 // Parameter/option names that indicate tenant/access filtering.
 // Deliberately excludes bare "metadata" — an object merely containing a
@@ -97,6 +106,11 @@ export const ruleVecSearchNoAccessControl: Rule = {
         if (!isVectorSearchCall(call)) continue;
         if (hasAccessControlArg(call)) continue;
 
+        const exprText = call.getExpression().getText().toLowerCase();
+        const specific = SPECIFIC_SEARCH_METHODS.some((method) => exprText.endsWith(method));
+        const base: Evidence = specific || fileImportsVectorSdk(sourceFile) ? "likely" : "heuristic";
+        const evidence = isTest ? demoteEvidence(base) : base;
+
         findings.push({
           rule_id: "VEC001",
           title: "Vector search without tenant/user access control filter",
@@ -108,8 +122,8 @@ export const ruleVecSearchNoAccessControl: Rule = {
             "Without a per-user or per-tenant filter, a similarity search returns results from all documents stored in the vector database. User A can receive documents that belong to User B through the LLM's context, causing data leakage across tenant boundaries.",
           recommendation:
             "Always pass a namespace, filter, or where-clause scoped to the authenticated user or tenant. For example: store.similaritySearch(query, k, { filter: { userId: req.user.id } }).",
-          confidence: evidenceConfidence(isTest ? demoteEvidence("likely") : "likely"),
-          evidence: isTest ? demoteEvidence("likely") : "likely",
+          confidence: evidenceConfidence(evidence),
+          evidence,
         });
       }
     }

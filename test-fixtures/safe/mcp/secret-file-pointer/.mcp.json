@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "gsc": {
+      "command": "node",
+      "args": ["server.js"],
+      "env": { "GSC_OAUTH_CLIENT_SECRETS_FILE": "C:/Users/example/secrets/client_secret.json" }
+    }
+  }
+}

@@ -302,3 +302,59 @@ test("dependency guard fails open (and warns once) when the registry is unreacha
   assert.equal(findings.some((f) => f.rule_id === "DEP001"), false);
   assert.match(stderrOutput, /could not reach package registry/i);
 });
+
+function scanPackageJson(deps) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-worm-"));
+  fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ name: "tmp", version: "1.0.0", dependencies: deps }));
+  return scanKnownMaliciousPackages(dir);
+}
+
+function scanRequirements(line) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "secureai-worm-py-"));
+  fs.writeFileSync(path.join(dir, "requirements.txt"), `${line}\n`);
+  return scanKnownMaliciousPackages(dir);
+}
+
+test("DEP003 flags Mini Shai-Hulud releases on an exact pin, clears the neighbouring clean releases", () => {
+  for (const [name, bad, clean] of [
+    ["@mistralai/mistralai", "2.2.3", "2.2.1"],
+    ["@mistralai/mistralai", "2.2.4", "2.2.5"],
+    ["@mistralai/mistralai-azure", "1.7.1", "1.7.4"],
+    ["nextmove-mcp", "0.1.7", "0.1.8"],
+    ["cmux-agent-mcp", "0.1.8", "0.1.9"],
+    ["@squawk/mcp", "0.9.5", "0.9.6"],
+    ["@uipath/agent-sdk", "1.0.2", "1.0.3"],
+  ]) {
+    const hit = scanPackageJson({ [name]: bad });
+    assert.equal(hit.length, 1, `${name}@${bad} should be flagged`);
+    assert.equal(hit[0].evidence, "proven");
+    assert.equal(hit[0].severity, "critical");
+    assert.deepEqual(scanPackageJson({ [name]: clean }), [], `${name}@${clean} is a clean release`);
+  }
+});
+
+test("DEP003 does not raise a proven finding for a Mini Shai-Hulud package declared as a range", () => {
+  // `^2.0.0` usually resolves to a clean release; critical here would be a false
+  // positive on every ordinary Mistral SDK consumer.
+  for (const spec of ["^2.2.0", "~2.2.2", "latest", ">=2.0.0"]) {
+    const findings = scanPackageJson({ "@mistralai/mistralai": spec });
+    assert.ok(
+      findings.every((f) => f.evidence === "heuristic" && f.severity !== "critical"),
+      `${spec}: ${JSON.stringify(findings)}`,
+    );
+  }
+});
+
+test("DEP003 flags the compromised PyPI releases of guardrails-ai and mistralai, not the clean ones", () => {
+  assert.equal(scanRequirements("guardrails-ai==0.10.1").length, 1);
+  assert.deepEqual(scanRequirements("guardrails-ai==0.10.0"), []);
+  assert.equal(scanRequirements("mistralai==2.4.6").length, 1);
+  assert.deepEqual(scanRequirements("mistralai==2.4.5"), []);
+  assert.ok(scanRequirements("mistralai>=2.0.0").every((f) => f.evidence === "heuristic"));
+});
+
+test("DEP003 flags easy-day-js, the Mastra compromise's attacker-owned dependency", () => {
+  const findings = scanPackageJson({ "easy-day-js": "^1.11.21", dayjs: "1.11.10" });
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].severity, "critical");
+});

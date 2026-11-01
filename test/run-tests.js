@@ -15,3 +15,6 @@ import "./corpus.test.js";
 import "./false-positive-regressions.test.js";
 import "./cli.test.js";
 import "./corpus-runner.test.js";
+import "./fetch-target.test.js";
+import "./rule-consistency.test.js";
+import "./launch.test.js";

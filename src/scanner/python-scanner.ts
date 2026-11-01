@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Finding, Severity, TraceStep } from "./types.js";
+import type { Evidence, Finding, Severity, TraceStep } from "./types.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath } from "./confidence.js";
 import {
   findCrossToolReference,
@@ -1001,12 +1001,38 @@ function fileImportsVectorSdk(src: PythonSource): boolean {
   return src.ast.imports.some((node) => PY_VECTOR_SDK_IMPORT.test(node.text));
 }
 
-function checkVEC001(src: PythonSource, i: number, file: string): Finding | null {
-  const call = src.ast.callsAtLine(i).find((candidate) =>
-    matchesAny(candidate.node.text, VECTOR_SEARCH_PATTERNS),
+// Names of the methods that *implement* a store's or index's search. A call to
+// `self._collection.query(...)` inside one of them is the backend half of a
+// wrapper: the caller's filter arrives through the wrapper's own arguments
+// (`query.filters`, `**kwargs`) and is applied by this very call. Found scanning
+// run-llama/llama_index: every vector-store adapter reported itself.
+const SEARCH_IMPLEMENTATION_NAME = /^_?a?(?:query|search|retrieve|similarity_search\w*|as_retriever)(?:_\w+)?$/;
+const SELF_RECEIVER = /^(?:self|cls)\s*\.|^super\s*\(/;
+
+// Judged on the callee, not the whole call's text: an outer call such as
+// `cast(X, store.similarity_search(...))` or `Engine.from_defaults(retriever=
+// idx.as_retriever())` merely contains the search and must not be reported as it.
+function isVectorSearchCall(candidate: PythonCallNode): boolean {
+  const callee = candidate.function.text;
+  if (/\.\s*(?:similarity_search(?:_with_score)?|max_marginal_relevance_search|as_retriever)$/.test(callee)) {
+    return true;
+  }
+  if (/(?:index|collection)\s*\.\s*query$/.test(callee)) return true;
+  return (
+    /(?<!\bre)(?<!\bregex)\.\s*search$/.test(callee) &&
+    /vector/i.test(candidate.arguments.map((argument) => argument.text).join(","))
   );
+}
+
+function checkVEC001(src: PythonSource, i: number, file: string): Finding | null {
+  const call = src.ast.callsAtLine(i).find(isVectorSearchCall);
   if (!call) return null;
-  const evidence = SPECIFIC_VECTOR_SEARCH.test(call.node.text) || fileImportsVectorSdk(src) ? "likely" : "heuristic";
+  const enclosing = src.ast.enclosingFunction(call.node);
+  if (enclosing && SEARCH_IMPLEMENTATION_NAME.test(enclosing.name) && SELF_RECEIVER.test(call.function.text)) {
+    return null;
+  }
+  let evidence: Evidence =
+    SPECIFIC_VECTOR_SEARCH.test(`${call.function.text}(`) || fileImportsVectorSdk(src) ? "likely" : "heuristic";
   const filterNames = [
     "expr",
     "filter",
@@ -1062,6 +1088,12 @@ function checkVEC001(src: PythonSource, i: number, file: string): Finding | null
     return containsSearch || continuesAssignedQuery;
   });
   if (hasFluentFilter) return null;
+
+  // `**kwargs` / `**self.options` forwards arguments chosen by the caller, who
+  // may well supply the filter. The absence of a filter is then unproven.
+  if (call.arguments.some((argument) => argument.type === "dictionary_splat")) {
+    evidence = "heuristic";
+  }
 
   return {
     ...findingBase("VEC001", "Vector search without access control filter", "high", file, i + 1),

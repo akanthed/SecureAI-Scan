@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **DEP003 advisories for the 2026 AI-toolchain supply-chain worms.** The Mini Shai-Hulud (TeamPCP, May 2026) releases of `guardrails-ai`, `mistralai` (PyPI), `@mistralai/*`, `@uipath` agent packages, `cmux-agent-mcp`, `nextmove-mcp`, `@squawk/mcp`, `@dirigible-ai/sdk` and `agentwork-cli`, plus `easy-day-js`, the attacker-owned dependency injected into the Mastra npm compromise (June 2026). Every entry cites a public incident report and has a flag/clear test in `test/dependency-guard.test.js`.
+- **`exactOnly` advisories.** For a legitimate package where only an enumerated set of releases is malicious, an exact pin inside the set is `proven`/critical, while an unresolved spec (`^2.2.0`, `latest`) is `heuristic` instead of critical, since it usually resolves to a clean release.
+
+### Security
+- **`fetch-target.ts` (`skill`, `mcp`, `installed --deep`, MCP `scan_untrusted_target`) no longer passes unvalidated specs to git or npm.** On Windows, `npm pack` ran through `cmd.exe` with unquoted arguments, so a spec such as `foo&calc` executed a command; the spec can come from a client config or from the model. A spec starting with `-` (`--upload-pack=x.git`, `--registry=...`) was also read as an option. Specs are now limited to a local path, an `https://` or `git@` URL, `owner/repo`, or a plain registry name (`name`, `name@version`, `@scope/name`), and anything else is refused. `git clone` and `npm pack` get a `--` separator, `npm pack` runs with `--ignore-scripts`, and the pack destination is `cwd`, so no temp path with spaces reaches the shell.
+- **Findings and the AI-BOM no longer copy secrets out of MCP configs.** MCP004 printed the whole `args` list and MCP006 the whole URL, so a token in `--api-key=...` or `?key=...` reached terminal, JSON, SARIF (uploaded by the GitHub Action) and HTML output. The BOM's MCP server entries did the same. They now show the launcher and package, or the URL's scheme and host only.
+
+### Fixed (false positives)
+- **Python VEC001 on RAG library internals.** Scanning run-llama/llama_index reported 34 default-tier findings, almost all the library calling itself. Three root causes: (1) the rule judged an outer call such as `Engine.from_defaults(retriever=idx.as_retriever())` by the text it contains, so it reported the wrapper as a search; it now reads the callee. (2) `**kwargs`/`**options` forwarded into the search carries the caller's filter, so a missing filter is unproven and the finding is `heuristic`. (3) A vector-store adapter's own `query()`/`search()` calling `self._collection.query(...)` is the backend half of a wrapper, not an application search. LlamaIndex drops from 34 to 5 default-tier findings.
+- **TypeScript VEC001/VEC004 on generic method names.** `.search`/`.query`/`.retrieve` and `.upsert`/`.insert`/`.ingest` are shared with ordinary databases and search engines, so on those names the finding is `likely` only when the file imports a vector-store SDK (otherwise `heuristic`). Store-specific names (`similaritySearch`, `addDocuments`, ...) are unchanged.
+- **VEC002** no longer treats `process.env` (operator configuration) or any bare `ctx.` as a user-controlled `k`, and matches `req.`/`query.`/`params.` as whole identifiers.
+- **AI006** no longer treats the bare token `transfer` as a high-impact action: `transfer_to_billing_agent` is the standard agent-handoff tool name. `transfer_funds`/`transferMoney`/`transfer_payment` still count.
+- **AI008** reports a system prompt that merely mentions "API key" or "connection string" at `heuristic`; `likely` needs a credential-shaped value (a labelled value, a provider key prefix, an AWS or GitHub token, or a URL with userinfo).
+- Each fix has a permanent safe fixture (all eight fail on the previous code), and VEC001, AI006 and AI008 now have vulnerable fixtures in the recall corpus.
+
+### Fixed
+- `explain DEP001` and `explain DEP002` returned generic fallback text; both now have entries, and a test fails if any cataloged rule lacks one.
+- `docs/ThreatModel.md` no longer credits the postmark-mcp backdoor to the tool-poisoning rules (it is covered by a DEP003 advisory), and its table lists the rules added since it was written.
+- `server.json` declared 0.13.0, which is not on npm; it now matches the published 0.12.1.
+
+### Known gap
+- The compromised `@mastra/*` releases are not listed: no per-release list was published (every version released on 2026-06-17 is affected), and a wrong range would flag clean releases. Only the injected `easy-day-js` dependency is detected, and only when it is declared in the root `package.json`. DEP003 does not read lockfiles, so a bad release that is only present transitively is not seen.
+
 ## 0.12.1 — 2026-10-27
 
 **Recall corpus: MCP013 is now checked against published CVEs and refactors of them, not only fixtures.** Taint through helper chains follows one more call.
