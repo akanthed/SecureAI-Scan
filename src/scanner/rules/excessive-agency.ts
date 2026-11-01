@@ -24,11 +24,18 @@ const DANGEROUS_TOKENS = new Set([
   "purchase",
   "payment",
   "refund",
-  "transfer",
   "wire",
   "terminate",
 ]);
+// Bare "transfer" is the standard name of an agent handoff tool
+// (`transfer_to_billing_agent`, OpenAI Swarm / Agents SDK), which moves the
+// conversation, not money. Only a transfer of something of value counts.
 const DANGEROUS_TOKEN_PAIRS: Array<[string, string]> = [
+  ["transfer", "funds"],
+  ["transfer", "money"],
+  ["transfer", "payment"],
+  ["transfer", "balance"],
+  ["transfer", "ownership"],
   ["send", "email"],
   ["send", "mail"],
   ["send", "sms"],

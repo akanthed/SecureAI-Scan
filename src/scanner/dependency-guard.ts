@@ -6,6 +6,7 @@ import { findMcpConfigFiles, parseServers } from "./mcp-config-scanner.js";
 import { parseExactVersion, versionSatisfiesRange } from "./semver.js";
 import { evidenceConfidence } from "./confidence.js";
 import { stripBom } from "../utils/text.js";
+import { launchedPackage } from "../utils/launch.js";
 
 export interface DependencyGuardOptions {
   rootPath: string;
@@ -126,8 +127,11 @@ export function scanKnownMaliciousPackages(rootPath: string, skipPaths?: string[
 
     for (const advisory of advisories) {
       const inRange = advisoryCoversVersion(advisory, exact);
-      if (advisory.kind === "malicious") {
+      if (advisory.kind === "malicious" && !advisory.exactOnly) {
         if (inRange !== false) malicious.push(advisory);
+      } else if (advisory.kind === "malicious") {
+        if (inRange === true) malicious.push(advisory);
+        else if (inRange === undefined) unresolved.push(advisory);
       } else if (inRange === true) {
         confirmed.push(advisory);
       } else if (inRange === undefined) {
@@ -248,7 +252,7 @@ function collectMcpConfigPackages(rootPath: string, skipPaths?: string[]): Packa
       const runner = command.split(/[\\/]/).pop() ?? "";
       const ecosystem = runner === "uvx" ? "pypi" : runner === "npx" || runner === "pnpx" || runner === "bunx" ? "npm" : undefined;
       if (!ecosystem) continue;
-      const pkg = (server.args ?? []).find((a) => !a.startsWith("-"));
+      const pkg = launchedPackage(server.args ?? []);
       if (!pkg) continue;
       // Split a version suffix: name@1.2.3 / @scope/name@1.2.3
       const at = pkg.lastIndexOf("@");

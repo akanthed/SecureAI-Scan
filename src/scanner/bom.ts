@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { stripBom } from "../utils/text.js";
+import { describeLauncher, redactUrl } from "../utils/redact.js";
 
 /**
  * AI Bill of Materials — an inventory of every AI-related component in the
@@ -230,9 +231,9 @@ export function generateBom(rootPath: string): BomResult {
             const c = cfg as Record<string, unknown>;
             const detail =
               typeof c.command === "string"
-                ? `${c.command} ${Array.isArray(c.args) ? (c.args as string[]).join(" ") : ""}`.trim()
+                ? describeLauncher(c.command, Array.isArray(c.args) ? (c.args as string[]) : [])
                 : typeof c.url === "string"
-                  ? c.url
+                  ? redactUrl(c.url)
                   : undefined;
             add("mcp-server", name, path.relative(resolved, full), detail);
           }

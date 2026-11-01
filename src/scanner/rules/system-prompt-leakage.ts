@@ -22,7 +22,13 @@ const SPECIFIC_SECRET_PHRASES = [
 // to a value that looks like an actual credential (contains a digit, dash,
 // or underscore), not a plain English word.
 const LABELED_SECRET_VALUE_RE =
-  /\b(secret|token|password|bearer)\b\s*[:=]?\s*['"]?[A-Za-z0-9_\-.]*[0-9_-][A-Za-z0-9_\-.]{5,}/i;
+  /\b(secret|token|password|bearer|api[ _-]?key|private key|admin password|connection string)\b\s*[:=]?\s*['"]?[A-Za-z0-9_\-.]*[0-9_-][A-Za-z0-9_\-.]{5,}/i;
+
+// A value whose shape is a credential regardless of the words around it: a
+// provider key prefix, an AWS access key id, a GitHub token, or a URL with
+// userinfo (`postgres://user:pass@host`).
+const CREDENTIAL_SHAPE_RE =
+  /\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{30,}|\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:[^\s@/]+@/i;
 
 function privilegedPromptNodes(call: Node): Node[] {
   if (!Node.isCallExpression(call)) {
@@ -75,10 +81,14 @@ export const ruleSystemPromptLeakage: Rule = {
           const literalText = getStringValue(promptNode)?.toLowerCase();
           const nodeText = literalText ?? promptNode.getText().toLowerCase();
           const hasSpecificPhrase = SPECIFIC_SECRET_PHRASES.some((hint) => nodeText.includes(hint));
-          if (!hasSpecificPhrase && !LABELED_SECRET_VALUE_RE.test(nodeText)) {
+          const hasCredentialValue = LABELED_SECRET_VALUE_RE.test(nodeText) || CREDENTIAL_SHAPE_RE.test(nodeText);
+          if (!hasSpecificPhrase && !hasCredentialValue) {
             continue;
           }
-          let evidence: Evidence = "likely";
+          // The phrase alone ("never reveal the API key", "ask the user for
+          // their connection string") is ordinary instruction text. Only a
+          // value that looks like a credential makes the prompt a leak.
+          let evidence: Evidence = hasCredentialValue ? "likely" : "heuristic";
           if (testFile) evidence = demoteEvidence(evidence);
           findings.push({
             rule_id: "AI008",

@@ -66,7 +66,13 @@ const STRONG_PATTERNS: Array<{ re: RegExp; label: string }> = [
     label: "concealment from the user",
   },
   {
-    re: /<\s*(?:important|secret|system|hidden|admin)\s*>/i,
+    // `<important>` is not a placeholder in ordinary writing, so it stands alone.
+    // `<system>`, `<secret>`, `<hidden>` and `<admin>` are: "the <system> shall
+    // respond" is standard requirements notation and `TOKEN=<secret>` is a doc
+    // placeholder (found in Jeffallan/claude-skills). Those count only as a
+    // block with a closing tag, which is how an injected pseudo-system section
+    // is actually written.
+    re: /<\s*important\s*>|<\s*(secret|system|hidden|admin)\s*>[\s\S]{0,4000}?<\s*\/\s*\1\s*>/i,
     label: "pseudo-system tag in description",
   },
   {
@@ -75,7 +81,15 @@ const STRONG_PATTERNS: Array<{ re: RegExp; label: string }> = [
     // skill documentation says "Load API keys securely using loadApiKey",
     // which is security advice, not an exfiltration directive. Requiring a
     // path/extension shape is what separates the two.
-    re: /\b(?:read|cat|open|access|fetch|load)\b[^.]{0,60}(?:~\/\.ssh|id_rsa|id_ed25519|\.env\b|\.aws\/credentials|\.netrc|private[_ ]key(?:\.[a-z0-9]+|\s+file)|api[_ ]?keys?\.(?:json|txt|ya?ml|env|ini|cfg)|(?:the\s+)?api[_ ]?keys?\s+file)/i,
+    // Two guards against describing rather than directing: a negated or
+    // descriptive lead-in ("does not automatically load `.env.local`" — Vercel's
+    // ai-gateway skill) is not an instruction, and `.env.<suffix>`
+    // (.env.local, .env.custom.bak) is the ordinary project dev file, so only
+    // Bare `.env` is not in this list at all: "Load HF_TOKEN from a .env file"
+    // is ordinary developer guidance (K-Dense hugging-science), so it is a weak
+    // signal below. The gap may not contain a negation either ("no API key, no
+    // .env file"). Both found scanning K-Dense-AI/claude-scientific-skills.
+    re: /(?<!\b(?:not|never|n't|automatically|doesn't|won't|cannot)\s+(?:\w+\s+)?)\b(?:read|cat|open|access|fetch|load)\b(?:(?!\b(?:no|not|never|without)\b)[^.]){0,60}(?:~\/\.ssh|id_rsa|id_ed25519|\.aws\/credentials|\.netrc|private[_ ]key(?:\.[a-z0-9]+|\s+file)|api[_ ]?keys?\.(?:json|txt|ya?ml|env|ini|cfg)|(?:the\s+)?api[_ ]?keys?\s+file)/i,
     label: "instruction to read credential files",
   },
   {
@@ -93,6 +107,10 @@ const STRONG_PATTERNS: Array<{ re: RegExp; label: string }> = [
 ];
 
 const WEAK_PATTERNS: Array<{ re: RegExp; label: string }> = [
+  {
+    re: /(?<!\b(?:not|never|n't|automatically|doesn't|won't|cannot)\s+(?:\w+\s+)?)\b(?:read|cat|open|access|fetch|load)\b(?:(?!\b(?:no|not|never|without)\b)[^.]){0,60}\.env\b(?!\.\w)/i,
+    label: "instruction to read a .env file",
+  },
   { re: /\bbefore\s+(?:using|calling|invoking)\s+this\s+tool\b/i, label: "\"before using this tool\" precondition" },
   { re: /\binstead\s+of\s+(?:calling|using|invoking)\b/i, label: "tool substitution directive" },
   { re: /\bdo\s+not\s+mention\b/i, label: "\"do not mention\" directive" },
@@ -107,7 +125,7 @@ const WEAK_PATTERNS: Array<{ re: RegExp; label: string }> = [
 const QUOTED_SPAN = /"[^"\n]{1,200}"|\u201c[^\u201d\n]{1,200}\u201d|`[^`\n]{1,200}`/g;
 // Framing that makes a quoted phrase an example of what to refuse.
 const DEFENSIVE_FRAMING =
-  /\b(?:if|such\s+as|e\.g\.|for\s+example|contains?|containing|includes?|never|do\s+not|don't|must\s+not|refuse|reject|disregard\s+any|ignore\s+any|treat(?:ed)?\s+as\s+data|attempts?|injections?|addressed\s+to\s+you|disguised)\b/i;
+  /\b(?:if|such\s+as|e\.g\.|for\s+example|shaped\s+like\s+a\s+command|contains?|containing|includes?|never|do\s+not|don't|must\s+not|refuse|reject|disregard\s+any|ignore\s+any|treat(?:ed)?\s+as\s+data|attempts?|injections?|addressed\s+to\s+you|disguised)\b/i;
 
 /**
  * Blank out injection phrases that are *quoted inside a defensive sentence*:
@@ -120,7 +138,12 @@ const DEFENSIVE_FRAMING =
 export function neutralizeQuotedMentions(text: string): string {
   return text.replace(QUOTED_SPAN, (span, offset: number) => {
     const before = text.slice(0, offset);
-    const start = Math.max(before.lastIndexOf("\n"), before.search(/[.!?][^.!?]*$/)) + 1;
+    // The sentence starts at the previous sentence end or blank line, not the
+    // previous line break: prose wraps mid-sentence, and the defensive framing
+    // ("something shaped like a command to you") can sit on the line above the
+    // quote (found on Anthropic's receipts skill).
+    const blank = /\n[ \t]*\r?\n(?![\s\S]*\n[ \t]*\r?\n)/.exec(before);
+    const start = Math.max(blank ? blank.index + 1 : -1, before.search(/[.!?][^.!?]*$/)) + 1;
     const afterIndex = offset + span.length;
     const rest = text.slice(afterIndex);
     const endRel = rest.search(/[.!?](?:\s|$)|\n/);
@@ -129,7 +152,31 @@ export function neutralizeQuotedMentions(text: string): string {
   });
 }
 
-export function matchInjectionPhrases(text: string): InjectionPhraseResult {
+/**
+ * Blank out list items under a prohibition heading ("Never:", "Do not:"). They
+ * describe what the skill forbids, so "Read broad environment state, `.env`
+ * files, API keys" under "Never:" (K-Dense peer-review) is the opposite of an
+ * instruction. Offsets are preserved.
+ */
+export function neutralizeProhibitionLists(text: string): string {
+  const lines = text.split("\n");
+  let inProhibition = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(?:[-*]\s+)?(?:\*\*)?(?:never|do\s+not|don'?t|must\s+not|avoid|prohibited|forbidden)\b[^\n]*:\s*(?:\*\*)?\s*$/i.test(line)) {
+      inProhibition = true;
+      continue;
+    }
+    if (inProhibition) {
+      if (/^\s*(?:[-*]|\d+[.)])\s+/.test(line)) lines[i] = line.replace(/[^\r]/g, " ");
+      else if (line.trim() !== "") inProhibition = false;
+    }
+  }
+  return lines.join("\n");
+}
+
+export function matchInjectionPhrases(rawText: string): InjectionPhraseResult {
+  const text = neutralizeProhibitionLists(rawText);
   const strong = STRONG_PATTERNS.filter((p) => p.re.test(text)).map((p) => p.label);
   const weak = WEAK_PATTERNS.filter((p) => p.re.test(text)).map((p) => p.label);
   return { strong, weak };
@@ -191,7 +238,17 @@ function referencesToolName(segment: string, toolName: string): boolean {
   // products, not a skill called `docs`. Found on Anthropic's own
   // google-workspace skill, installed next to a skill named `docs`. Names
   // with separators (`send_email`) stay case-insensitive.
-  const flags = /^[a-z0-9]+$/.test(toolName) ? "" : "i";
+  const plainWord = /^[a-z0-9]+$/.test(toolName);
+  const flags = plainWord ? "" : "i";
+  if (plainWord) {
+    // A bare word is also ordinary English: a skill named `cloud` matched
+    // "when a cloud browser is still running" (found on browser-use/browser-use).
+    // It counts as a reference only when written as an identifier: in code
+    // quotes or backticks, or named as a skill or tool ("the cloud skill").
+    const quoted = new RegExp(`[\`'"/]${escaped}[\`'"]`);
+    const named = new RegExp(`(?:^|[^\\w@/-])${escaped}\\s+(?:skill|tool)\\b`, "i");
+    return quoted.test(segment) || named.test(segment);
+  }
   const re = new RegExp(`(^|[^\\w@/-])${escaped}(?![\\w/-])`, flags);
   return re.test(segment);
 }
@@ -241,6 +298,11 @@ export function findCrossToolReference(
       // the subject of the trigger clause, not the verb's object. See the
       // constraint-3 comment on referencesToolName for why.
       const subjectSpan = afterTrigger.slice(0, verb.index);
+      // A comma, semicolon or colon ends the trigger clause. A verb past it
+      // belongs to a different clause and is often a noun: "...so ctx_search
+      // results auto-flag staleness on future calls" (found on mksglu/
+      // context-mode) matched on "calls". Documentation, not a directive.
+      if (/[,;:]/.test(subjectSpan)) continue;
       for (const other of names) {
         if (referencesToolName(subjectSpan, other)) {
           return { referencedTool: other, directive: trigger[0] + afterTrigger.slice(0, verb.index + verb[0].length) };

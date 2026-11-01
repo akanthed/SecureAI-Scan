@@ -1,7 +1,7 @@
 import { Node, SyntaxKind } from "ts-morph";
 import type { Finding, Rule, RuleContext } from "../types.js";
 import { getFileFunctions, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
-import { isTestFilePath, evidenceConfidence } from "../confidence.js";
+import { isTestFilePath, evidenceConfidence, identifierTokens } from "../confidence.js";
 
 // Properties in MCP server config that hold the endpoint URL
 const MCP_URL_PROPS = [
@@ -39,18 +39,42 @@ const MCP_CONFIG_CONTEXTS = [
 // "params"/"body"/"query"/"headers"-named argument as request-tainted.
 const REQUEST_SOURCES = ["req.", "request.", "ctx."];
 
+function isMcpName(name: string): boolean {
+  const lower = name.toLowerCase();
+  if (MCP_CONFIG_CONTEXTS.some((ctx) => ctx !== "mcp" && lower.includes(ctx))) return true;
+  return identifierTokens(name).includes("mcp");
+}
+
+/**
+ * Is this object literal the configuration of an MCP server or client? Judged
+ * by what the object is *given to or stored as* — the variable or property it
+ * is assigned to, or the callee it is passed to — never by the text around it.
+ * The old check looked for "mcp" anywhere in the six enclosing ancestors' text,
+ * which inside an MCP server's own codebase is every ancestor: found scanning
+ * czlonkowski/n8n-mcp, where `logger.info("...", { url: req.url })` in an HTTP
+ * handler was reported as a critical dynamic MCP server URL.
+ */
 export function isMcpConfigContext(node: Node): boolean {
   let current: Node | undefined = node.getParent();
-  let depth = 0;
-  while (current && depth < 6) {
-    const text = current.getText().toLowerCase();
-    if (MCP_CONFIG_CONTEXTS.some((ctx) => text.includes(ctx))) return true;
-    if (Node.isVariableDeclaration(current)) {
-      const name = current.getName().toLowerCase();
-      if (MCP_CONFIG_CONTEXTS.some((ctx) => name.includes(ctx))) return true;
+  while (current) {
+    if (Node.isVariableDeclaration(current) || Node.isPropertyDeclaration(current)) {
+      return isMcpName(current.getName());
+    }
+    if (Node.isPropertyAssignment(current)) {
+      if (isMcpName(current.getNameNode().getText().replace(/['"`]/g, ""))) return true;
+    } else if (Node.isCallExpression(current) || Node.isNewExpression(current)) {
+      return isMcpName(current.getExpression().getText());
+    } else if (
+      !Node.isObjectLiteralExpression(current) &&
+      !Node.isArrayLiteralExpression(current) &&
+      !Node.isAsExpression(current) &&
+      !Node.isSatisfiesExpression(current) &&
+      !Node.isParenthesizedExpression(current) &&
+      !Node.isSpreadAssignment(current)
+    ) {
+      return false;
     }
     current = current.getParent();
-    depth++;
   }
   return false;
 }

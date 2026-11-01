@@ -11,13 +11,17 @@ Detection scope is fixed to **LLM, MCP, and RAG/agent-related risk.** Concretely
 
 | Category | Rules | Representative real-world incident |
 |---|---|---|
-| Prompt injection (direct + indirect) | AI001, AI010 | User input or fetched content reaching a system prompt unsanitized |
+| Prompt injection (direct + indirect) | AI001, AI010, MCP011 | User input or fetched content reaching a system prompt unsanitized |
 | Sensitive data exposure to/from LLMs | AI002, AI004, AI008 | Secrets logged alongside prompts, whole objects serialized into prompts, credentials embedded in system prompt text |
-| Unsafe output handling | AI005, AI012 | LLM output reaching `eval`/`exec`/SQL/HTML sinks unvalidated |
-| Excessive agency | AI006, AI011 | High-impact tools (delete/pay/deploy) with no approval gate; agent output elevated to system-role downstream |
+| Unsafe output handling | AI005, AI012, AI013 | LLM output reaching `eval`/`exec`/SQL/HTML sinks unvalidated |
+| Excessive agency | AI006, AI011, AI014 | High-impact tools (delete/pay/deploy) with no approval gate; agent output elevated to system-role downstream |
 | Unbounded consumption | AI009 | Missing token/length limits on user input |
-| MCP supply-chain and config risk | MCP002, MCP004–006, MCP010 | Unpinned `npx -y` servers, inline secrets in committed config, plaintext HTTP transport, command/args built from request data (the 2026 MCP STDIO RCE pattern) |
-| MCP/Agent Skill tool poisoning | MCP001, MCP003, MCP007–009, SKL001–005 | Invisible Unicode, agent-directed injection phrases, and cross-tool shadowing in tool/skill descriptions — the pattern behind the WhatsApp MCP rug-pull and the postmark-mcp backdoor |
+| MCP supply-chain and config risk | MCP002, MCP004–006, MCP010, MCP012 | Unpinned `npx -y` servers, inline secrets in committed config, plaintext HTTP transport, command/args built from request data (the 2026 MCP STDIO RCE pattern) |
+| MCP/Agent Skill tool poisoning | MCP001, MCP003, MCP007–009, SKL001–003 | Invisible Unicode, agent-directed injection phrases, and cross-tool shadowing in tool/skill descriptions — the pattern behind the WhatsApp MCP rug-pull |
+| Unauthenticated LLM access | AI003 | An LLM call reachable from a request handler before any authentication |
+| MCP tool-argument injection | MCP013, MCP014 | A model-chosen tool argument composed into a shell command, or joined onto a base directory without containment |
+| Agent Skill bundle risk | SKL004–SKL010 | Staged payloads, credential exfiltration, load-time command execution, unscoped Bash grants, remote instruction fetch, context-file backdoors, unsafe YAML tags |
+| LiteLLM proxy config | LLC001–003 | Literal secrets, plaintext provider endpoints, and no guardrails in `config.yaml` |
 | RAG / vector-store weaknesses | AI007, VEC001–004 | Retrieved content interpolated into privileged prompts; vector search/ingestion without tenant isolation |
 | Known-malicious/vulnerable dependencies | DEP001–003 | Documented backdoors and critical CVEs in AI-ecosystem packages, version-range aware |
 

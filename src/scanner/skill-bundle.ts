@@ -389,7 +389,12 @@ function lineOf(text: string, index: number): number {
  */
 const FETCH_ASSIGN_RE =
   /\b(\w+)\s*=\s*(?:requests\.(?:get|post)|urllib\.request\.urlopen|httpx\.(?:get|post)|await\s+fetch)\s*\([^)\n]*\)(?:\.(?:text|content|json\(\))(?:\s*\(\s*\))?)?/g;
-const EXEC_OF_RE = /\b(?:exec|eval)\s*\(/;
+// A bare `exec(`/`eval(` call, or a child-process `exec`. A member call on any
+// other receiver is not code execution: `fontFaceRe.exec(text)` is
+// RegExp.prototype.exec, which scanned a fetched stylesheet in impeccable's
+// live-browser.js and was reported as "downloads and executes remote code".
+const EXEC_OF_RE =
+  /(?<![.\w])(?:exec|eval)\s*\(|\b(?:child_process|childProcess|cp|shelljs|os)\.(?:exec|execSync|system)\s*\(/;
 const FETCH_EXEC_PROXIMITY_LINES = 10;
 
 /** Cumulative character offset of the start of each 1-based line. */

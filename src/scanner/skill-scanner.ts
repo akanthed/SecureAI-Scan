@@ -17,6 +17,7 @@ import {
   findSkillBundles,
   isOpaqueBlob,
   type CapabilityHit,
+  type CapabilityKind,
   type SkillBundle,
 } from "./skill-bundle.js";
 
@@ -543,16 +544,25 @@ function scanBundleCapabilities(bundle: SkillBundle, parsed: ParsedSkill): Findi
 
     if (!exfilPair && !remoteExec) continue;
 
-    const trace: TraceStep[] = candidate.hits.map((hit) => ({
+    // The finding is about one thing, an exfiltration pair or remote code
+    // execution, so its location, quoted match and trace must be that thing.
+    // Taking the first credential hit regardless reported a remote-exec finding
+    // at an unrelated `# ~/.kube/config` comment: "downloads and executes
+    // remote code (~/.kube/config)", on the wrong line.
+    const relevantKinds: CapabilityKind[] = exfilPair
+      ? ["credential-access", "network-egress"]
+      : ["remote-code-exec"];
+    const relevantHits = candidate.hits.filter((h) => relevantKinds.includes(h.kind));
+
+    const trace: TraceStep[] = relevantHits.map((hit) => ({
       kind: hit.kind === "credential-access" ? ("source" as const) : ("sink" as const),
       file: candidate.file,
       line: hit.line,
       note: `${CAPABILITY_LABEL[hit.kind]}: ${hit.match}`,
     }));
 
-    const primaryHit =
-      candidate.hits.find((h) => h.kind === "credential-access") ?? candidate.hits[0];
-    const transforms = candidate.hits.find((h) => h.transforms.length > 0)?.transforms ?? [];
+    const primaryHit = relevantHits.find((h) => h.kind === relevantKinds[0]) ?? relevantHits[0];
+    const transforms = relevantHits.find((h) => h.transforms.length > 0)?.transforms ?? [];
 
     const undeclared = exfilPair
       ? !declaresCapability(parsed, "credential-access") || !declaresCapability(parsed, "network-egress")
@@ -682,16 +692,32 @@ const FENCED_EXEC_RE = /```!\r?\n([\s\S]*?)```/g;
 // nothing to do with skill arguments.
 const ARGUMENT_SPLICE_RE = /\$ARGUMENTS(?:\[\d+\])?|\$[0-9](?!\w)/;
 
-function extractDynamicExecBlocks(raw: string): Array<{ text: string; index: number }> {
-  const blocks: Array<{ text: string; index: number }> = [];
+// Ordinary fenced code blocks (```markdown, ```bash …). A ```! fence is the
+// executing form and is handled separately; any other fence is a quoted
+// example. Found on plugin-dev's command-development skill, which teaches
+// the syntax with `Run tests: !`npm test $1`` inside a ```markdown block.
+const PLAIN_FENCE_RE = /```(?!!)[^\r\n]*\r?\n[\s\S]*?```/g;
+
+function plainFenceRanges(raw: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  let m: RegExpExecArray | null;
+  PLAIN_FENCE_RE.lastIndex = 0;
+  while ((m = PLAIN_FENCE_RE.exec(raw))) ranges.push([m.index, m.index + m[0].length]);
+  return ranges;
+}
+
+function extractDynamicExecBlocks(raw: string): Array<{ text: string; index: number; quoted: boolean }> {
+  const blocks: Array<{ text: string; index: number; quoted: boolean }> = [];
+  const fences = plainFenceRanges(raw);
   let m: RegExpExecArray | null;
   INLINE_EXEC_RE.lastIndex = 0;
   while ((m = INLINE_EXEC_RE.exec(raw))) {
-    blocks.push({ text: m[2], index: m.index + m[1].length + 2 });
+    const index = m.index + m[1].length + 2;
+    blocks.push({ text: m[2], index, quoted: fences.some(([a, b]) => index >= a && index < b) });
   }
   FENCED_EXEC_RE.lastIndex = 0;
   while ((m = FENCED_EXEC_RE.exec(raw))) {
-    blocks.push({ text: m[1], index: m.index + 4 });
+    blocks.push({ text: m[1], index: m.index + 4, quoted: false });
   }
   return blocks;
 }
@@ -744,7 +770,9 @@ function scanDynamicContextExecution(bundle: SkillBundle, parsed: ParsedSkill): 
           `Skill "${label}" interpolates its own invocation arguments directly into a dynamic-context-injection command ("${block.text.trim().slice(0, 100)}").`,
           "Claude Code substitutes `$ARGUMENTS`/`$0`..`$9` as raw text into the command before any shell parsing happens, and the command then runs immediately as preprocessing. Whatever the caller supplies as an argument — a user, or Claude acting on untrusted context it read — becomes part of the shell command line verbatim: classic argument/command injection, except it fires at skill-load time instead of through a reviewable tool call.",
           "Quote and validate arguments before using them in a dynamic-context command, or avoid interpolating raw arguments into `` !`cmd` `` blocks entirely.",
-          "likely",
+          // Inside a plain code fence it is a documentation example, not
+          // necessarily live preprocessing: demote to --paranoid only.
+          block.quoted ? "heuristic" : "likely",
         ),
       );
     }

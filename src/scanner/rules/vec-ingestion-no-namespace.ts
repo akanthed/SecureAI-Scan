@@ -1,5 +1,6 @@
-import { Node, SyntaxKind } from "ts-morph";
-import type { Finding, Rule, RuleContext } from "../types.js";
+import { Node } from "ts-morph";
+import type { Evidence, Finding, Rule, RuleContext } from "../types.js";
+import { fileImportsVectorSdk } from "./llm-rule-utils.js";
 import { getFileCalls, getNodeLine, getRelativeFilePath } from "../../utils/ast.js";
 import { evidenceConfidence, demoteEvidence, isTestFilePath } from "../confidence.js";
 
@@ -19,6 +20,11 @@ const INGESTION_METHODS = [
   "fromdocuments",
   "from_documents",
 ];
+
+// `upsert`/`insert`/`ingest` are ordinary database and queue verbs; the rest
+// are vector-store (LangChain/LlamaIndex-style) methods. A hit on a generic one
+// is `likely` only when the file imports a vector-store SDK.
+const GENERIC_INGESTION_METHODS = new Set(["upsert", "insert", "ingest"]);
 
 const VECTOR_STORE_CLIENTS = [
   "chroma",
@@ -91,6 +97,11 @@ export const ruleVecIngestionNoNamespace: Rule = {
         if (!isVectorIngestionCall(call)) continue;
         if (hasNamespaceArg(call)) continue;
 
+        const exprText = call.getExpression().getText().toLowerCase();
+        const generic = [...GENERIC_INGESTION_METHODS].some((method) => exprText.endsWith(method));
+        const base: Evidence = !generic || fileImportsVectorSdk(sourceFile) ? "likely" : "heuristic";
+        const evidence = isTest ? demoteEvidence(base) : base;
+
         findings.push({
           rule_id: "VEC004",
           title: "Vector store ingestion without tenant/namespace tagging",
@@ -103,8 +114,8 @@ export const ruleVecIngestionNoNamespace: Rule = {
             "VEC001 flags similarity searches that lack an access-control filter, but that filter is only meaningful if every document was stamped with the correct owner at ingestion time. A codebase can pass VEC001 and still suffer cross-tenant data leakage when the partition key was never established at write time. This is the write-side dual of VEC001: if addDocuments does not attach a namespace or tenant tag, the read-side filter has nothing to key on.",
           recommendation:
             "Always include a per-tenant or per-user namespace/metadata field when ingesting documents. For example: store.addDocuments(docs, { namespace: userId }) or include { metadata: { tenantId } } in each document. Ensure the same key is used in your VEC001 read filter.",
-          confidence: evidenceConfidence(isTest ? demoteEvidence("likely") : "likely"),
-          evidence: isTest ? demoteEvidence("likely") : "likely",
+          confidence: evidenceConfidence(evidence),
+          evidence,
         });
       }
     }

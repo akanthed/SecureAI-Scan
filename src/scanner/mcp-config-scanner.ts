@@ -3,6 +3,8 @@ import path from "node:path";
 import type { Finding } from "./types.js";
 import { evidenceConfidence } from "./confidence.js";
 import { stripBom } from "../utils/text.js";
+import { describeLauncher, redactUrl } from "../utils/redact.js";
+import { launchedPackage } from "../utils/launch.js";
 
 /**
  * Scans MCP client configuration files for supply-chain and secret-handling
@@ -125,6 +127,10 @@ function lineOf(lines: string[], needle: string): number {
 }
 
 const SECRET_NAME_HINT = /(key|token|secret|password|passwd|credential)/i;
+// A variable that names a location rather than holding the value:
+// GSC_OAUTH_CLIENT_SECRETS_FILE, GOOGLE_APPLICATION_CREDENTIALS_PATH. The
+// file is the secret, not the config line pointing at it.
+const SECRET_LOCATION_NAME = /_(?:FILE|FILEPATH|PATH|DIR|DIRECTORY|FOLDER)S?$/i;
 const ENV_REFERENCE = /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$|^\$\{env:[^}]+\}$|^\${input:[^}]+\}$/;
 
 const SHELL_INTERPRETER_BASENAMES = new Set([
@@ -174,7 +180,7 @@ export function scanMcpConfigs(rootPath: string, skipPaths?: string[]): Finding[
       // MCP004 — unpinned package execution
       if (server.command && ["npx", "uvx", "pnpx", "bunx"].includes(server.command)) {
         const args = server.args ?? [];
-        const pkg = args.find((a) => !a.startsWith("-"));
+        const pkg = launchedPackage(args);
         if (pkg && !isPinnedPackage(pkg)) {
           findings.push({
             rule_id: "MCP004",
@@ -182,7 +188,7 @@ export function scanMcpConfigs(rootPath: string, skipPaths?: string[]): Finding[
             severity: "high",
             file: relFile,
             line: lineOf(lines, pkg),
-            summary: `Server "${server.name}" runs \`${server.command} ${args.join(" ")}\` — the package version is not pinned.`,
+            summary: `Server "${server.name}" runs \`${describeLauncher(server.command, args)}\` — the package version is not pinned.`,
             description:
               `Every launch fetches whatever version of "${pkg}" the registry currently serves. If the package is compromised (typosquat, hijacked maintainer, malicious update), the new code runs immediately with this machine's permissions and the MCP server's context access. This is the same class of risk as curl|bash.`,
             recommendation:
@@ -214,6 +220,7 @@ export function scanMcpConfigs(rootPath: string, skipPaths?: string[]): Finding[
       // MCP005 — inline secrets in env
       for (const [key, value] of Object.entries(server.env ?? {})) {
         if (!SECRET_NAME_HINT.test(key)) continue;
+        if (SECRET_LOCATION_NAME.test(key)) continue;
         if (value.length < 8) continue;
         if (ENV_REFERENCE.test(value.trim())) continue;
         findings.push({
@@ -243,7 +250,7 @@ export function scanMcpConfigs(rootPath: string, skipPaths?: string[]): Finding[
             severity: "high",
             file: relFile,
             line: lineOf(lines, server.url),
-            summary: `Server "${server.name}" connects to ${server.url} without TLS.`,
+            summary: `Server "${server.name}" connects to ${redactUrl(server.url)} without TLS.`,
             description:
               "Tool definitions, tool results, and any credentials in headers travel unencrypted. An on-path attacker can read the traffic or swap in malicious tool definitions (an MCP man-in-the-middle is a full agent hijack).",
             recommendation: "Use https:// for all non-localhost MCP servers.",

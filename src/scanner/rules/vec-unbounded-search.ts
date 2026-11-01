@@ -27,8 +27,11 @@ const VECTOR_STORE_CLIENTS = [
   "pgvector",
 ];
 
-// Request/user-controlled taint sources
-const TAINT_SOURCES = ["req.", "request.", "ctx.", "body.", "query.", "params.", "process.env"];
+// Request/user-controlled taint sources, matched as whole identifiers so that
+// `searchquery.`/`myreq.` don't count. `process.env` is deliberately absent: an
+// environment variable is operator configuration, not attacker input, and bare
+// `ctx.` is any context object, not necessarily a request.
+const TAINT_SOURCE_RE = /(?<![\w$])(?:req|request|body|query|params)\./;
 
 const MAX_SAFE_K = 50;
 
@@ -49,8 +52,7 @@ function getKArgument(call: Node): Node | undefined {
 }
 
 function isUserControlledK(kNode: Node): boolean {
-  const text = kNode.getText();
-  return TAINT_SOURCES.some((src) => text.includes(src));
+  return TAINT_SOURCE_RE.test(kNode.getText());
 }
 
 function isLargeNumericK(kNode: Node): boolean {

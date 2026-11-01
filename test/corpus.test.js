@@ -116,6 +116,12 @@ const EXPECTED_VULNERABLE = [
   ["VEC002", "vulnerable/vec_unbounded_search.ts"],
   ["VEC003", "vulnerable/vec_user_ingestion.ts"],
   ["VEC004", "vulnerable/vec_ingest_no_namespace.ts"],
+  ["VEC001", "vulnerable/vec_search_no_filter.ts"],
+  ["VEC001", "vulnerable/vec_search_no_filter.py"],
+  ["VEC001", "vulnerable/vec_generic_query_with_sdk.ts"],
+  ["VEC004", "vulnerable/vec_generic_query_with_sdk.ts"],
+  ["AI006", "vulnerable/excessive_agency.ts"],
+  ["AI008", "vulnerable/system_prompt_credential.ts"],
   // Phase C — AI001 interprocedural (cross-function/cross-file) taint trace.
   ["AI001", "vulnerable/multihop/two_file/lib/llmclient.ts"],
   ["AI001", "vulnerable/multihop/three_file/lib/llmclient.ts"],

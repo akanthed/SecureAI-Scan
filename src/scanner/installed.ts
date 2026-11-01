@@ -9,6 +9,7 @@ import { findSkillFiles, scanSkillFiles } from "./skill-scanner.js";
 import { scanRepositoryDetailed } from "./scan.js";
 import { resolveTarget } from "./fetch-target.js";
 import { stripBom } from "../utils/text.js";
+import { launchedPackage } from "../utils/launch.js";
 
 /**
  * `secureai-scan installed`: audit the MCP servers and Agent Skills already
@@ -157,7 +158,7 @@ function originalLine(stagedLines: string[], stagedLine: number, originalLines: 
 function packageSpec(server: InstalledServer): string | undefined {
   const runner = path.basename(server.command ?? "").toLowerCase();
   if (!["npx", "pnpx", "bunx", "npx.cmd"].includes(runner)) return undefined;
-  return server.args.find((arg) => !arg.startsWith("-"));
+  return launchedPackage(server.args);
 }
 
 /** A server launched from a local script (`node /abs/server.js`): the package root that script lives in. */
