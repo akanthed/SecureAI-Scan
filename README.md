@@ -18,7 +18,7 @@
 A default scan reports only what it can prove. No account, no upload, nothing leaves your machine. TypeScript, JavaScript, Python, MCP configs, and Agent Skill bundles are detected automatically.
 
 ```bash
-npx --yes secureai-scan@0.12.1 scan .
+npx --yes secureai-scan@0.13.0 scan .
 ```
 
 ## What a finding looks like

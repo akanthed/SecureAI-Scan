@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 — 2026-11-01
 
 ### Added
 - **DEP003 advisories for the 2026 AI-toolchain supply-chain worms.** The Mini Shai-Hulud (TeamPCP, May 2026) releases of `guardrails-ai`, `mistralai` (PyPI), `@mistralai/*`, `@uipath` agent packages, `cmux-agent-mcp`, `nextmove-mcp`, `@squawk/mcp`, `@dirigible-ai/sdk` and `agentwork-cli`, plus `easy-day-js`, the attacker-owned dependency injected into the Mastra npm compromise (June 2026). Every entry cites a public incident report and has a flag/clear test in `test/dependency-guard.test.js`.
