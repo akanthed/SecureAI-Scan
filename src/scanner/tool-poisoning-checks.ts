@@ -85,8 +85,11 @@ const STRONG_PATTERNS: Array<{ re: RegExp; label: string }> = [
     // descriptive lead-in ("does not automatically load `.env.local`" — Vercel's
     // ai-gateway skill) is not an instruction, and `.env.<suffix>`
     // (.env.local, .env.custom.bak) is the ordinary project dev file, so only
-    // a bare `.env` counts.
-    re: /(?<!\b(?:not|never|n't|automatically|doesn't|won't|cannot)\s+(?:\w+\s+)?)\b(?:read|cat|open|access|fetch|load)\b[^.]{0,60}(?:~\/\.ssh|id_rsa|id_ed25519|\.env\b(?!\.\w)|\.aws\/credentials|\.netrc|private[_ ]key(?:\.[a-z0-9]+|\s+file)|api[_ ]?keys?\.(?:json|txt|ya?ml|env|ini|cfg)|(?:the\s+)?api[_ ]?keys?\s+file)/i,
+    // Bare `.env` is not in this list at all: "Load HF_TOKEN from a .env file"
+    // is ordinary developer guidance (K-Dense hugging-science), so it is a weak
+    // signal below. The gap may not contain a negation either ("no API key, no
+    // .env file"). Both found scanning K-Dense-AI/claude-scientific-skills.
+    re: /(?<!\b(?:not|never|n't|automatically|doesn't|won't|cannot)\s+(?:\w+\s+)?)\b(?:read|cat|open|access|fetch|load)\b(?:(?!\b(?:no|not|never|without)\b)[^.]){0,60}(?:~\/\.ssh|id_rsa|id_ed25519|\.aws\/credentials|\.netrc|private[_ ]key(?:\.[a-z0-9]+|\s+file)|api[_ ]?keys?\.(?:json|txt|ya?ml|env|ini|cfg)|(?:the\s+)?api[_ ]?keys?\s+file)/i,
     label: "instruction to read credential files",
   },
   {
@@ -104,6 +107,10 @@ const STRONG_PATTERNS: Array<{ re: RegExp; label: string }> = [
 ];
 
 const WEAK_PATTERNS: Array<{ re: RegExp; label: string }> = [
+  {
+    re: /(?<!\b(?:not|never|n't|automatically|doesn't|won't|cannot)\s+(?:\w+\s+)?)\b(?:read|cat|open|access|fetch|load)\b(?:(?!\b(?:no|not|never|without)\b)[^.]){0,60}\.env\b(?!\.\w)/i,
+    label: "instruction to read a .env file",
+  },
   { re: /\bbefore\s+(?:using|calling|invoking)\s+this\s+tool\b/i, label: "\"before using this tool\" precondition" },
   { re: /\binstead\s+of\s+(?:calling|using|invoking)\b/i, label: "tool substitution directive" },
   { re: /\bdo\s+not\s+mention\b/i, label: "\"do not mention\" directive" },
@@ -145,7 +152,31 @@ export function neutralizeQuotedMentions(text: string): string {
   });
 }
 
-export function matchInjectionPhrases(text: string): InjectionPhraseResult {
+/**
+ * Blank out list items under a prohibition heading ("Never:", "Do not:"). They
+ * describe what the skill forbids, so "Read broad environment state, `.env`
+ * files, API keys" under "Never:" (K-Dense peer-review) is the opposite of an
+ * instruction. Offsets are preserved.
+ */
+export function neutralizeProhibitionLists(text: string): string {
+  const lines = text.split("\n");
+  let inProhibition = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*(?:[-*]\s+)?(?:\*\*)?(?:never|do\s+not|don'?t|must\s+not|avoid|prohibited|forbidden)\b[^\n]*:\s*(?:\*\*)?\s*$/i.test(line)) {
+      inProhibition = true;
+      continue;
+    }
+    if (inProhibition) {
+      if (/^\s*(?:[-*]|\d+[.)])\s+/.test(line)) lines[i] = line.replace(/[^\r]/g, " ");
+      else if (line.trim() !== "") inProhibition = false;
+    }
+  }
+  return lines.join("\n");
+}
+
+export function matchInjectionPhrases(rawText: string): InjectionPhraseResult {
+  const text = neutralizeProhibitionLists(rawText);
   const strong = STRONG_PATTERNS.filter((p) => p.re.test(text)).map((p) => p.label);
   const weak = WEAK_PATTERNS.filter((p) => p.re.test(text)).map((p) => p.label);
   return { strong, weak };

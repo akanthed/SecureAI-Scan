@@ -26,3 +26,13 @@ allowed-tools: Bash(npm:*)
 
 Run tests: !`npm test $1`
 ```
+
+<!-- From K-Dense hugging-science / onekgpd / peer-review. -->
+Load `HF_TOKEN` from a `.env` file when available. Use python-dotenv at the top of the script.
+
+Access constraints: There is no API key, no `.env` file, and no rate-limit token to configure.
+
+Never:
+
+- Send unpublished text to an external service without permission
+- Read broad environment state, `.env` files, API keys, or credentials
